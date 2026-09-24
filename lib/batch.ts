@@ -68,5 +68,6 @@ function candidateIndexesBySecondarySignals(support: AnalyzedDocument, invoices:
 }
 
 function packetId(invoice: AnalyzedDocument, index: number): string {
-  return normalizeIdentifier(invoice.fields.invoiceNumber) || `packet-${index + 1}`;
+  const invoiceNumber = normalizeIdentifier(invoice.fields.invoiceNumber) || 'invoice';
+  return `${invoiceNumber}-${index + 1}`;
 }
