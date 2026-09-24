@@ -87,6 +87,16 @@ export interface AnalyzeResponse {
   warnings: string[];
 }
 
+export interface BatchPacketAnalysis extends AnalyzeResponse {
+  packetId: string;
+}
+
+export interface BatchAnalyzeResponse {
+  packets: BatchPacketAnalysis[];
+  unassignedDocuments: AnalyzedDocument[];
+  warnings: string[];
+}
+
 export interface CreateStep {
   step: string;
   ok: boolean;
