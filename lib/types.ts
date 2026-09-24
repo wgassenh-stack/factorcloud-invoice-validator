@@ -28,7 +28,7 @@ export interface ExtractionUsage {
   outputTokens: number;
   thinkingTokens: number;
   totalTokens: number;
-  estimatedCostUsd: number;
+  estimatedCostUsd: number | null;
 }
 
 export interface AnalyzedDocument {
