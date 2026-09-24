@@ -151,7 +151,8 @@ export default function Home() {
           <p>Read freight paperwork, compare it against FactorCloud, and create the invoice without retyping it.</p>
         </div>
         <div className="badges">
-          <span className="prototype">Pilot</span>
+          <span className="prototype activeMode">Single packet</span>
+          <a className="modeLink" href="/batch">Batch intake</a>
           <span className="prototype">{status?.ai.model ?? 'checking AI...'}</span>
         </div>
       </section>
