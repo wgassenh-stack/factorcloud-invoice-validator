@@ -82,6 +82,7 @@ export interface AnalyzeResponse {
   debtor: CompanyRecord | null;
   debtorMatch: { method: string; score: number } | null;
   client: CompanyRecord | null;
+  factorCloudLookupFailed: boolean;
   validation: ValidationReport;
   warnings: string[];
 }
