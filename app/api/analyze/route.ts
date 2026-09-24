@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { extractDocument, isSupportedFile } from '@/lib/extract';
 import { FactorCloudError, findDebtor, getCompany } from '@/lib/factorcloud';
 import { validate } from '@/lib/rules';
+import { applyFactorCloudAvailability } from '@/lib/validation-availability';
 import type { AnalyzeResponse, AnalyzedDocument, CompanyRecord } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -48,6 +49,7 @@ export async function POST(req: Request) {
   let debtor: CompanyRecord | null = null;
   let debtorMatch: AnalyzeResponse['debtorMatch'] = null;
   let client: CompanyRecord | null = null;
+  let factorCloudLookupFailed = false;
   try {
     const ordered = [documents[primaryIndex], ...documents.filter((_, i) => i !== primaryIndex)];
     for (const d of ordered) {
@@ -62,15 +64,28 @@ export async function POST(req: Request) {
     if (clientId) client = await getCompany(clientId);
     else warnings.push('FACTORCLOUD_CLIENT_ID is not configured.');
   } catch (err) {
+    factorCloudLookupFailed = true;
     warnings.push(
       err instanceof FactorCloudError && err.status === 401
         ? 'Not signed in to FactorCloud. Sign in, then analyze again to compare against FactorCloud data.'
-        : `FactorCloud lookup failed: ${errorMessage(err)}`,
+        : 'FactorCloud is temporarily unavailable. The document-to-document checks below are still valid, but retry analysis before creating the invoice.',
     );
   }
 
-  const validation = validate({ documents, primaryIndex, debtor, client });
-  const body: AnalyzeResponse = { documents, primaryIndex, debtor, debtorMatch, client, validation, warnings };
+  const validation = applyFactorCloudAvailability(
+    validate({ documents, primaryIndex, debtor, client }),
+    factorCloudLookupFailed,
+  );
+  const body: AnalyzeResponse = {
+    documents,
+    primaryIndex,
+    debtor,
+    debtorMatch,
+    client,
+    factorCloudLookupFailed,
+    validation,
+    warnings,
+  };
   return NextResponse.json(body);
 }
 
