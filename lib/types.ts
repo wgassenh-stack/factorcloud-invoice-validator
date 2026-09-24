@@ -22,9 +22,19 @@ export interface ExtractedFields {
   notes: string | null;
 }
 
+export interface ExtractionUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  thinkingTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+}
+
 export interface AnalyzedDocument {
   fileName: string;
   fields: ExtractedFields;
+  usage?: ExtractionUsage;
 }
 
 export interface CompanyRecord {
