@@ -104,7 +104,6 @@ export async function extractDocument(file: File): Promise<ExtractedFields> {
       thinkingConfig: { thinkingLevel: THINKING as 'minimal' | 'low' | 'medium' | 'high' },
       responseMimeType: 'application/json',
       responseSchema: responseSchema as never,
-      temperature: 0,
     },
   });
 
