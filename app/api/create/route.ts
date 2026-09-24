@@ -49,6 +49,8 @@ export async function POST(req: Request) {
   if (!Number.isInteger(payload.primaryIndex) || payload.primaryIndex < 0 || payload.primaryIndex >= (payload.documents?.length ?? 0)) problems.push('primary invoice selection is invalid');
   if (!files.length) problems.push('at least one source document is required');
   if (files.length !== payload.documentTypes?.length) problems.push('document type list does not match uploaded files');
+  if (files.length !== payload.documents?.length) problems.push('uploaded files do not match the analyzed document set');
+  if (Array.isArray(payload.documents) && files.some((file, i) => payload.documents[i]?.fileName !== file.name)) problems.push('uploaded file order/names do not match the analyzed document set');
   if (problems.length) return NextResponse.json({ error: `Cannot create invoice: ${problems.join('; ')}.` }, { status: 400 });
 
   let debtor;
