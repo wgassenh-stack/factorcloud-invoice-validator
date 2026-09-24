@@ -2,7 +2,7 @@ import 'server-only';
 
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { z } from 'zod';
-import type { ExtractedFields } from './types';
+import type { ExtractedFields, ExtractionUsage } from './types';
 import { normalizeDate, normalizeMoney } from './normalize';
 
 const MODEL = process.env.EXTRACTION_MODEL || 'gemini-3.1-flash-lite';
@@ -100,7 +100,7 @@ function gemini(): GoogleGenAI {
   return client;
 }
 
-export async function extractDocument(file: File): Promise<ExtractedFields> {
+export async function extractDocument(file: File): Promise<{ fields: ExtractedFields; usage: ExtractionUsage }> {
   const data = Buffer.from(await file.arrayBuffer()).toString('base64');
   const response = await gemini().models.generateContent({
     model: MODEL,
@@ -118,11 +118,26 @@ export async function extractDocument(file: File): Promise<ExtractedFields> {
 
   if (!response.text) throw new Error(`Gemini returned no extraction for ${file.name}.`);
   const parsed = ExtractionSchema.parse(JSON.parse(response.text));
-  return {
+  const fields: ExtractedFields = {
     ...parsed,
     invoiceAmount: normalizeMoney(parsed.invoiceAmount),
     documentDate: normalizeDate(parsed.documentDate) || parsed.documentDate,
     invoiceDate: normalizeDate(parsed.invoiceDate) || parsed.invoiceDate,
     dueDate: normalizeDate(parsed.dueDate) || parsed.dueDate,
+  };
+
+  const meta = response.usageMetadata;
+  const inputTokens = meta?.promptTokenCount ?? 0;
+  const outputTokens = meta?.candidatesTokenCount ?? 0;
+  const thinkingTokens = meta?.thoughtsTokenCount ?? 0;
+  const totalTokens = meta?.totalTokenCount ?? inputTokens + outputTokens + thinkingTokens;
+  const pricing = MODEL === 'gemini-3.1-flash-lite' ? { input: 0.25, output: 1.5 } : null;
+  const estimatedCostUsd = pricing
+    ? (inputTokens / 1_000_000) * pricing.input + ((outputTokens + thinkingTokens) / 1_000_000) * pricing.output
+    : null;
+
+  return {
+    fields,
+    usage: { model: MODEL, inputTokens, outputTokens, thinkingTokens, totalTokens, estimatedCostUsd },
   };
 }
