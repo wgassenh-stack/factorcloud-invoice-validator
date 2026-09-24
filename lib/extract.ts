@@ -1,12 +1,21 @@
 import 'server-only';
 
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { z } from 'zod';
 import type { ExtractedFields } from './types';
 import { normalizeDate, normalizeMoney } from './normalize';
 
 const MODEL = process.env.EXTRACTION_MODEL || 'gemini-3.1-flash-lite';
 const THINKING = process.env.EXTRACTION_THINKING || 'minimal';
+
+function configuredThinkingLevel(): ThinkingLevel {
+  switch (THINKING.toLowerCase()) {
+    case 'low': return ThinkingLevel.LOW;
+    case 'medium': return ThinkingLevel.MEDIUM;
+    case 'high': return ThinkingLevel.HIGH;
+    default: return ThinkingLevel.MINIMAL;
+  }
+}
 
 const ExtractionSchema = z.object({
   documentType: z.enum(['invoice', 'bol', 'pod', 'rate_confirmation', 'other']),
@@ -101,7 +110,7 @@ export async function extractDocument(file: File): Promise<ExtractedFields> {
     ],
     config: {
       systemInstruction: SYSTEM,
-      thinkingConfig: { thinkingLevel: THINKING as 'minimal' | 'low' | 'medium' | 'high' },
+      thinkingConfig: { thinkingLevel: configuredThinkingLevel() },
       responseMimeType: 'application/json',
       responseSchema: responseSchema as never,
     },
