@@ -24,14 +24,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Unsupported file type: ${unsupported.map((f) => f.name).join(', ')}. Use PDF, PNG, JPEG, GIF or WebP.` }, { status: 400 });
   }
 
-  const warnings: string[] = [];
   const settled = await Promise.allSettled(files.map((f) => extractDocument(f)));
-  const documents: AnalyzedDocument[] = [];
-  settled.forEach((r, i) => {
-    if (r.status === 'fulfilled') documents.push({ fileName: files[i].name, fields: r.value });
-    else warnings.push(`Could not read ${files[i].name}: ${errorMessage(r.reason)}`);
-  });
-  if (!documents.length) return NextResponse.json({ error: warnings.join(' ') }, { status: 502 });
+  const extractionErrors = settled.flatMap((r, i) =>
+    r.status === 'rejected' ? [`Could not read ${files[i].name}: ${errorMessage(r.reason)}`] : [],
+  );
+  if (extractionErrors.length) {
+    return NextResponse.json(
+      { error: `Every uploaded file must be read before this packet can continue. ${extractionErrors.join(' ')}` },
+      { status: 502 },
+    );
+  }
+
+  const documents: AnalyzedDocument[] = settled.map((r, i) => ({
+    fileName: files[i].name,
+    fields: (r as PromiseFulfilledResult<Awaited<ReturnType<typeof extractDocument>>>).value,
+  }));
+  const warnings: string[] = [];
 
   const invoiceIndex = documents.findIndex((d) => d.fields.documentType === 'invoice');
   const primaryIndex = invoiceIndex >= 0 ? invoiceIndex : 0;
