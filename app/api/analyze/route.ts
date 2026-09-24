@@ -35,10 +35,10 @@ export async function POST(req: Request) {
     );
   }
 
-  const documents: AnalyzedDocument[] = settled.map((r, i) => ({
-    fileName: files[i].name,
-    fields: (r as PromiseFulfilledResult<Awaited<ReturnType<typeof extractDocument>>>).value,
-  }));
+  const documents: AnalyzedDocument[] = settled.map((r, i) => {
+    const result = (r as PromiseFulfilledResult<Awaited<ReturnType<typeof extractDocument>>>).value;
+    return { fileName: files[i].name, fields: result.fields, usage: result.usage };
+  });
   const warnings: string[] = [];
 
   const invoiceIndex = documents.findIndex((d) => d.fields.documentType === 'invoice');
