@@ -684,3 +684,16 @@ We successfully demonstrated:
 - understanding the normal FactorCloud funding/payment/reserve lifecycle
 
 The remaining work is product engineering rather than basic feasibility: document extraction, matching, rule logic, UI, auth hardening, and deployment.
+
+## Implementation status (updated 2026-09-24)
+
+The prototype is now wired end to end. See `README.md` for setup and the full list of open questions.
+
+- `lib/extract.ts`: Claude (`claude-opus-5`, structured JSON output) reads PDFs and images and classifies them as invoice / BOL / POD / rate confirmation / other.
+- `lib/normalize.ts` and `lib/rules.ts`: deterministic normalization plus a configurable PASS / REVIEW / FAIL rules engine, covering FactorCloud comparisons, cross-document comparisons, invoice age, signed POD and extraction confidence.
+- `lib/factorcloud.ts`: server-only API client covering the OTP sign-in, company lookup, debtor matching, and the create → upload → attach sequence.
+- `app/page.tsx`: upload, editable extracted fields, live validation, and create, with a step-by-step result log.
+- `middleware.ts`: shared-password gate (`APP_ACCESS_PASSWORD`).
+- `demo/`: a clean packet (PASS) and a deliberately wrong packet (REVIEW).
+
+Verified locally against a mock FactorCloud that enforces the proven request shapes, and with canned extraction output. **Not yet run against the live sandbox or the real Claude API.** The first live run should confirm the login header format, the response envelopes (where the invoice and document IDs sit), and which document type names FactorCloud accepts.
