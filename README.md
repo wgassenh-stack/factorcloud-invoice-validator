@@ -18,7 +18,7 @@ The default is `gemini-3.1-flash-lite` with `minimal` thinking. It is intentiona
 
 The AI is only responsible for reading/classifying documents. Matching, comparisons, duplicate protection, and create gating are deterministic code.
 
-Current standard API pricing for Gemini 3.1 Flash-Lite is $0.25 per 1M text/image/video input tokens and $1.50 per 1M output tokens, including thinking tokens. Using the earlier rough packet assumption of 20k input and 4.5k output would be about $0.012 per packet. Actual usage must be measured with real freight paperwork.
+Current standard API pricing for Gemini 3.1 Flash-Lite is $0.25 per 1M text/image/video input tokens and $1.50 per 1M output tokens, including thinking tokens. Using the earlier rough packet assumption of 20k input and 4.5k output would be about $0.012 per packet. Actual usage must be measured with real freight paperwork. The app captures Gemini input, output, thinking, and total token counts for each analyzed document so we can measure this instead of guessing.
 
 For real client documents, use a paid Gemini API project rather than relying on the free tier. Google's pricing documentation currently indicates paid-tier submitted data is not used to improve Google's products, while the free tier is marked differently.
 
