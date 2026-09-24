@@ -5,8 +5,17 @@ import { z } from 'zod';
 import type { ExtractedFields, ExtractionUsage } from './types';
 import { normalizeDate, normalizeMoney } from './normalize';
 
-const MODEL = process.env.EXTRACTION_MODEL || 'gemini-3.1-flash-lite';
+const PRIMARY_MODEL = process.env.EXTRACTION_MODEL || 'gemini-3.5-flash-lite';
 const THINKING = process.env.EXTRACTION_THINKING || 'minimal';
+const DEFAULT_FALLBACKS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash'];
+
+function modelChain(): string[] {
+  const configured = (process.env.EXTRACTION_FALLBACK_MODELS ?? '')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
+  return [...new Set([PRIMARY_MODEL, ...(configured.length ? configured : DEFAULT_FALLBACKS)])];
+}
 
 function configuredThinkingLevel(): ThinkingLevel {
   switch (THINKING.toLowerCase()) {
@@ -100,44 +109,69 @@ function gemini(): GoogleGenAI {
   return client;
 }
 
+function transientGeminiError(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : String(err);
+  return /\b(429|500|502|503|504)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|temporar/i.test(text);
+}
+
+function pricingFor(model: string): { input: number; output: number } | null {
+  if (model === 'gemini-3.1-flash-lite') return { input: 0.25, output: 1.5 };
+  if (model === 'gemini-3.5-flash-lite') return { input: 0.3, output: 2.5 };
+  if (model === 'gemini-3.6-flash') return { input: 1.5, output: 7.5 };
+  return null;
+}
+
 export async function extractDocument(file: File): Promise<{ fields: ExtractedFields; usage: ExtractionUsage }> {
   const data = Buffer.from(await file.arrayBuffer()).toString('base64');
-  const response = await gemini().models.generateContent({
-    model: MODEL,
-    contents: [
-      { inlineData: { mimeType: file.type, data } },
-      { text: `File name: ${file.name}\nExtract the document fields.` },
-    ],
-    config: {
-      systemInstruction: SYSTEM,
-      thinkingConfig: { thinkingLevel: configuredThinkingLevel() },
-      responseMimeType: 'application/json',
-      responseSchema: responseSchema as never,
-    },
-  });
+  const models = modelChain();
+  let lastError: unknown = null;
 
-  if (!response.text) throw new Error(`Gemini returned no extraction for ${file.name}.`);
-  const parsed = ExtractionSchema.parse(JSON.parse(response.text));
-  const fields: ExtractedFields = {
-    ...parsed,
-    invoiceAmount: normalizeMoney(parsed.invoiceAmount),
-    documentDate: normalizeDate(parsed.documentDate) || parsed.documentDate,
-    invoiceDate: normalizeDate(parsed.invoiceDate) || parsed.invoiceDate,
-    dueDate: normalizeDate(parsed.dueDate) || parsed.dueDate,
-  };
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    try {
+      const response = await gemini().models.generateContent({
+        model,
+        contents: [
+          { inlineData: { mimeType: file.type, data } },
+          { text: `File name: ${file.name}\nExtract the document fields.` },
+        ],
+        config: {
+          systemInstruction: SYSTEM,
+          thinkingConfig: { thinkingLevel: configuredThinkingLevel() },
+          responseMimeType: 'application/json',
+          responseSchema: responseSchema as never,
+        },
+      });
 
-  const meta = response.usageMetadata;
-  const inputTokens = meta?.promptTokenCount ?? 0;
-  const outputTokens = meta?.candidatesTokenCount ?? 0;
-  const thinkingTokens = meta?.thoughtsTokenCount ?? 0;
-  const totalTokens = meta?.totalTokenCount ?? inputTokens + outputTokens + thinkingTokens;
-  const pricing = MODEL === 'gemini-3.1-flash-lite' ? { input: 0.25, output: 1.5 } : null;
-  const estimatedCostUsd = pricing
-    ? (inputTokens / 1_000_000) * pricing.input + ((outputTokens + thinkingTokens) / 1_000_000) * pricing.output
-    : null;
+      if (!response.text) throw new Error(`Gemini returned no extraction for ${file.name}.`);
+      const parsed = ExtractionSchema.parse(JSON.parse(response.text));
+      const fields: ExtractedFields = {
+        ...parsed,
+        invoiceAmount: normalizeMoney(parsed.invoiceAmount),
+        documentDate: normalizeDate(parsed.documentDate) || parsed.documentDate,
+        invoiceDate: normalizeDate(parsed.invoiceDate) || parsed.invoiceDate,
+        dueDate: normalizeDate(parsed.dueDate) || parsed.dueDate,
+      };
 
-  return {
-    fields,
-    usage: { model: MODEL, inputTokens, outputTokens, thinkingTokens, totalTokens, estimatedCostUsd },
-  };
+      const meta = response.usageMetadata;
+      const inputTokens = meta?.promptTokenCount ?? 0;
+      const outputTokens = meta?.candidatesTokenCount ?? 0;
+      const thinkingTokens = meta?.thoughtsTokenCount ?? 0;
+      const totalTokens = meta?.totalTokenCount ?? inputTokens + outputTokens + thinkingTokens;
+      const pricing = pricingFor(model);
+      const estimatedCostUsd = pricing
+        ? (inputTokens / 1_000_000) * pricing.input + ((outputTokens + thinkingTokens) / 1_000_000) * pricing.output
+        : null;
+
+      return {
+        fields,
+        usage: { model, inputTokens, outputTokens, thinkingTokens, totalTokens, estimatedCostUsd },
+      };
+    } catch (err) {
+      lastError = err;
+      if (!transientGeminiError(err) || i === models.length - 1) throw err;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`Gemini could not read ${file.name}.`);
 }
