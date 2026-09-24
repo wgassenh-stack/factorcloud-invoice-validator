@@ -66,14 +66,14 @@ describe('validation rules', () => {
     expect(result.status).toBe('FAIL');
   });
 
-  it('reviews fuzzy debtor names unless corroborated', () => {
-    const result = validate({ documents: [doc({ debtorName: 'Acme Manufacturing Services', debtorEin: null, debtorPhone: null })], primaryIndex: 0, debtor, client, today: '2026-09-24' });
+  it('reviews a close debtor name unless a second identifier corroborates it', () => {
+    const result = validate({ documents: [doc({ debtorName: 'Acme Manufactring', debtorEin: null, debtorPhone: null })], primaryIndex: 0, debtor, client, today: '2026-09-24' });
     expect(result.status).toBe('REVIEW');
     expect(result.checks.find((c) => c.id === 'company-name')?.status).toBe('REVIEW');
   });
 
-  it('allows a fuzzy debtor name when EIN corroborates it', () => {
-    const result = validate({ documents: [doc({ debtorName: 'Acme Manufacturing Services', debtorEin: '98-7654321' })], primaryIndex: 0, debtor, client, today: '2026-09-24' });
+  it('allows a close debtor name when EIN corroborates it', () => {
+    const result = validate({ documents: [doc({ debtorName: 'Acme Manufactring', debtorEin: '98-7654321', debtorPhone: null })], primaryIndex: 0, debtor, client, today: '2026-09-24' });
     expect(result.checks.find((c) => c.id === 'company-name')?.status).toBe('PASS');
   });
 
