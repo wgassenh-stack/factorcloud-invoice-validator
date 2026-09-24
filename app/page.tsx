@@ -2,14 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { validate } from '@/lib/rules';
-import type { AnalyzeResponse, CheckResult, CreateResponse, ExtractedFields } from '@/lib/types';
+import { applyFactorCloudAvailability } from '@/lib/validation-availability';
+import type { AnalyzeResponse, CreateResponse, ExtractedFields } from '@/lib/types';
 
 type StatusResponse = {
   factorCloud: { signedIn: boolean; canSignIn: boolean };
   ai: { configured: boolean; model: string; thinking: string };
 };
-
-const CHECK_ORDER: Record<CheckResult['status'], number> = { FAIL: 0, REVIEW: 1, PASS: 2, SKIP: 3 };
 
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
@@ -31,18 +30,11 @@ export default function Home() {
 
   const liveValidation = useMemo(() => {
     if (!analysis) return null;
-    return validate({ documents: analysis.documents, primaryIndex: analysis.primaryIndex, debtor: analysis.debtor, client: analysis.client });
+    return applyFactorCloudAvailability(
+      validate({ documents: analysis.documents, primaryIndex: analysis.primaryIndex, debtor: analysis.debtor, client: analysis.client }),
+      analysis.factorCloudLookupFailed,
+    );
   }, [analysis]);
-
-  const sortedChecks = useMemo(() => {
-    if (!liveValidation) return [];
-    return [...liveValidation.checks].sort((a, b) => CHECK_ORDER[a.status] - CHECK_ORDER[b.status]);
-  }, [liveValidation]);
-
-  const attentionChecks = useMemo(
-    () => sortedChecks.filter((c) => c.status === 'FAIL' || c.status === 'REVIEW'),
-    [sortedChecks],
-  );
 
   const primary = analysis?.documents[analysis.primaryIndex];
 
@@ -139,7 +131,16 @@ export default function Home() {
   }
 
   const validationClass = liveValidation?.status?.toLowerCase() ?? 'neutral';
-  const canCreate = Boolean(analysis && analysis.debtor && primary?.fields.invoiceNumber && primary?.fields.invoiceAmount && primary?.fields.invoiceDate && liveValidation?.status !== 'FAIL');
+  const attentionChecks = liveValidation?.checks.filter((c) => c.status === 'FAIL' || c.status === 'REVIEW') ?? [];
+  const canCreate = Boolean(
+    analysis &&
+    !analysis.factorCloudLookupFailed &&
+    analysis.debtor &&
+    primary?.fields.invoiceNumber &&
+    primary?.fields.invoiceAmount &&
+    primary?.fields.invoiceDate &&
+    liveValidation?.status !== 'FAIL',
+  );
 
   return (
     <main className="shell">
@@ -201,35 +202,49 @@ export default function Home() {
             <span className={`status ${validationClass}`}>{liveValidation?.status ?? 'Not run'}</span>
           </div>
           {analysis?.warnings.map((w) => <div className="warning" key={w}>{w}</div>)}
-          {liveValidation && attentionChecks.length > 0 && <div className={`attentionSummary ${liveValidation.status.toLowerCase()}`}>
-            <strong>{liveValidation.status}: {attentionChecks.length} item{attentionChecks.length === 1 ? '' : 's'} need attention</strong>
-            <div>{attentionChecks.map((c) => <span key={c.id}>{c.label}: {c.message}</span>)}</div>
+          {liveValidation && <div className={`attentionSummary ${validationClass}`}>
+            <strong>{liveValidation.status === 'PASS' ? 'PASS: no validation issues found' : `${liveValidation.status}: ${attentionChecks.length} item${attentionChecks.length === 1 ? '' : 's'} need attention`}</strong>
+            {attentionChecks.map((c) => <span key={c.id}>{c.label}: {c.message}</span>)}
           </div>}
-          {liveValidation?.status === 'PASS' && <div className="attentionSummary pass"><strong>PASS: no validation issues found</strong><span>This packet is clear to proceed to the create step.</span></div>}
           <div className="checks">
-            {sortedChecks.length ? sortedChecks.map((c) => <div className="check" key={c.id}>
+            {liveValidation?.checks.slice().sort((a, b) => statusRank(a.status) - statusRank(b.status)).map((c) => <div className="check" key={c.id}>
               <div><strong>{c.label}</strong><span>{c.message}</span>{c.comparisons?.map((x, i) => <small key={i}>{x.label}: {x.document}{x.other ? ` | FactorCloud: ${x.other}` : ''}</small>)}</div>
               <span className={`pill ${c.status.toLowerCase()}`}>{c.status}</span>
-            </div>) : <p>Validation appears after analysis.</p>}
+            </div>) ?? <p>Validation appears after analysis.</p>}
           </div>
         </div>
 
         {analysis && <div className="card documentsCard">
           <h2>All extracted documents</h2>
-          <div className="docList">{analysis.documents.map((d, i) => <div className="doc" key={`${d.fileName}-${i}`}><strong>{d.fileName}</strong><span>{d.fields.documentType.replace('_', ' ')}</span><span>Reference: {d.fields.referenceNumber || '-'}</span><span>Amount: {d.fields.invoiceAmount == null ? '-' : `$${d.fields.invoiceAmount.toLocaleString()}`}</span>{d.usage && <span className="usage">AI: {d.usage.model} | {d.usage.totalTokens.toLocaleString()} tokens{typeof d.usage.estimatedCostUsd === 'number' ? ` | ~$${d.usage.estimatedCostUsd.toFixed(4)}` : ''}</span>}{d.fields.uncertainFields.length > 0 && <em>Review: {d.fields.uncertainFields.join(', ')}</em>}</div>)}</div>
+          <div className="docList">{analysis.documents.map((d, i) => <div className="doc" key={`${d.fileName}-${i}`}>
+            <strong>{d.fileName}</strong>
+            <span>{d.fields.documentType.replace('_', ' ')}</span>
+            <span>Reference: {d.fields.referenceNumber || '-'}</span>
+            <span>Amount: {d.fields.invoiceAmount == null ? '-' : `$${d.fields.invoiceAmount.toLocaleString()}`}</span>
+            {d.usage && <span className="usage">AI: {d.usage.model} · {d.usage.totalTokens.toLocaleString()} tokens{d.usage.estimatedCostUsd != null ? ` · ~$${d.usage.estimatedCostUsd.toFixed(4)}` : ''}</span>}
+            {d.fields.uncertainFields.length > 0 && <em>Review: {d.fields.uncertainFields.join(', ')}</em>}
+          </div>)}</div>
         </div>}
 
         <div className="card actionCard">
           <div className="step">4</div>
           <h2>Create in FactorCloud</h2>
           <p>The server re-runs validation and performs a duplicate check before creating anything.</p>
-          {liveValidation?.status === 'REVIEW' && <div className="overrideBox"><label><input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} /> I reviewed the warnings and want to continue.</label>{override && <textarea value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder="Why is this safe to create?" />}</div>}
-          <button className="secondary" onClick={createInvoice} disabled={!canCreate || Boolean(busy) || (liveValidation?.status === 'REVIEW' && (!override || !overrideReason.trim()))}>{busy === 'Creating invoice' ? 'Creating...' : 'Create invoice'}</button>
+          {analysis?.factorCloudLookupFailed && <div className="warning">FactorCloud could not be reached during analysis. Re-run Analyze before creating this invoice.</div>}
+          {liveValidation?.status === 'REVIEW' && !analysis?.factorCloudLookupFailed && <div className="overrideBox"><label><input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} /> I reviewed the warnings and want to continue.</label>{override && <textarea value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder="Why is this safe to create?" />}</div>}
+          <button className="secondary" onClick={createInvoice} disabled={!canCreate || Boolean(busy) || (liveValidation?.status === 'REVIEW' && !analysis?.factorCloudLookupFailed && (!override || !overrideReason.trim()))}>{busy === 'Creating invoice' ? 'Creating...' : 'Create invoice'}</button>
           {createResult?.steps?.length ? <div className="steps">{createResult.steps.map((s, i) => <div key={i}><span>{s.ok ? 'OK' : 'ERROR'}</span>{s.step}: {s.detail}</div>)}</div> : null}
         </div>
       </section>
     </main>
   );
+}
+
+function statusRank(status: string): number {
+  if (status === 'FAIL') return 0;
+  if (status === 'REVIEW') return 1;
+  if (status === 'PASS') return 2;
+  return 3;
 }
 
 function Field({ label, value, onChange, type = 'text', readOnly = false }: { label: string; value: string | null; onChange: (v: string) => void; type?: string; readOnly?: boolean }) {
