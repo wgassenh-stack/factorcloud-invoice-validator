@@ -174,10 +174,11 @@ export default function Home() {
             <Field label="Debtor" value={primary.fields.debtorName} onChange={(v) => updateField(analysis!.primaryIndex, 'debtorName', v)} />
             <Field label="Amount" type="number" value={primary.fields.invoiceAmount?.toString() ?? ''} onChange={(v) => updateField(analysis!.primaryIndex, 'invoiceAmount', v)} />
             <Field label="Invoice date" value={primary.fields.invoiceDate} onChange={(v) => updateField(analysis!.primaryIndex, 'invoiceDate', v)} />
-            <Field label="Due date" value={primary.fields.dueDate} onChange={(v) => updateField(analysis!.primaryIndex, 'dueDate', v)} />
+            <Field label="Due date (source only)" value={primary.fields.dueDate} readOnly onChange={() => {}} />
             <Field label="Address" value={primary.fields.debtorAddress} onChange={(v) => updateField(analysis!.primaryIndex, 'debtorAddress', v)} />
             <Field label="Phone" value={primary.fields.debtorPhone} onChange={(v) => updateField(analysis!.primaryIndex, 'debtorPhone', v)} />
           </div>}
+          {primary && <p className="match">FactorCloud calculates the final due date from the client's configured terms when the invoice is created.</p>}
           {analysis?.debtor && <p className="match">Matched FactorCloud debtor: <strong>{analysis.debtor.companyName}</strong>{analysis.debtorMatch ? ` via ${analysis.debtorMatch.method}` : ''}</p>}
         </div>
 
@@ -214,6 +215,6 @@ export default function Home() {
   );
 }
 
-function Field({ label, value, onChange, type = 'text' }: { label: string; value: string | null; onChange: (v: string) => void; type?: string }) {
-  return <label className="field"><span>{label}</span><input type={type} value={value ?? ''} onChange={(e) => onChange(e.target.value)} /></label>;
+function Field({ label, value, onChange, type = 'text', readOnly = false }: { label: string; value: string | null; onChange: (v: string) => void; type?: string; readOnly?: boolean }) {
+  return <label className="field"><span>{label}</span><input type={type} value={value ?? ''} readOnly={readOnly} onChange={(e) => onChange(e.target.value)} /></label>;
 }
