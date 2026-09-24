@@ -32,6 +32,7 @@ button.small { width:auto; margin:0; padding:8px 12px; border-radius:9px; }
 .field { display:flex; flex-direction:column; gap:5px; }
 .field span { font-size:12px; color:#6d7688; font-weight:700; }
 .field input, textarea { border:1px solid #d7ddea; border-radius:9px; padding:9px 10px; background:#fff; color:#1e2940; }
+.field input:read-only { background:#f6f7fa; color:#697386; }
 .match { margin-top:16px!important; font-size:13px; }
 .validationCard,.actionCard,.documentsCard { grid-column:1/-1; }
 .validationHeader { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
@@ -41,6 +42,13 @@ button.small { width:auto; margin:0; padding:8px 12px; border-radius:9px; }
 .status.review,.pill.review { background:#fff4da; color:#8a6412; }
 .status.fail,.pill.fail { background:#fdebec; color:#a7383d; }
 .warning { background:#fff8e8; border:1px solid #f0dfb1; border-radius:10px; padding:10px 12px; margin:8px 0; font-size:13px; color:#775b1d; }
+.attentionSummary { margin-top:14px; padding:14px 16px; border-radius:13px; display:grid; gap:8px; }
+.attentionSummary strong { font-size:14px; }
+.attentionSummary div { display:grid; gap:4px; }
+.attentionSummary span { font-size:13px; line-height:1.45; }
+.attentionSummary.review { background:#fff8e8; border:1px solid #f0dfb1; color:#775b1d; }
+.attentionSummary.fail { background:#fff0f1; border:1px solid #f1c7ca; color:#95373d; }
+.attentionSummary.pass { background:#edf9f1; border:1px solid #cbe9d5; color:#226a43; }
 .checks { border-top:1px solid #edf0f5; margin-top:12px; }
 .check { display:flex; justify-content:space-between; gap:16px; padding:14px 0; border-bottom:1px solid #edf0f5; }
 .check div { display:flex; flex-direction:column; gap:4px; }
@@ -49,6 +57,7 @@ button.small { width:auto; margin:0; padding:8px 12px; border-radius:9px; }
 .docList { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
 .doc { border:1px solid #e5e9f1; border-radius:12px; padding:13px; display:flex; flex-direction:column; gap:4px; font-size:13px; }
 .doc span { color:#667085; }
+.doc .usage { margin-top:5px; padding-top:7px; border-top:1px solid #eef1f5; font-size:12px; color:#536079; }
 .doc em { color:#8a6412; font-style:normal; }
 .overrideBox { border:1px solid #ead8a4; background:#fffaf0; padding:13px; border-radius:12px; display:grid; gap:10px; }
 .overrideBox label { display:flex; gap:8px; align-items:flex-start; font-size:14px; }
