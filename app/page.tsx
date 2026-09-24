@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { validate } from '@/lib/rules';
-import type { AnalyzeResponse, CreateResponse, ExtractedFields } from '@/lib/types';
+import type { AnalyzeResponse, CheckResult, CreateResponse, ExtractedFields } from '@/lib/types';
 
 type StatusResponse = {
   factorCloud: { signedIn: boolean; canSignIn: boolean };
   ai: { configured: boolean; model: string; thinking: string };
 };
+
+const CHECK_ORDER: Record<CheckResult['status'], number> = { FAIL: 0, REVIEW: 1, PASS: 2, SKIP: 3 };
 
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
@@ -31,6 +33,16 @@ export default function Home() {
     if (!analysis) return null;
     return validate({ documents: analysis.documents, primaryIndex: analysis.primaryIndex, debtor: analysis.debtor, client: analysis.client });
   }, [analysis]);
+
+  const sortedChecks = useMemo(() => {
+    if (!liveValidation) return [];
+    return [...liveValidation.checks].sort((a, b) => CHECK_ORDER[a.status] - CHECK_ORDER[b.status]);
+  }, [liveValidation]);
+
+  const attentionChecks = useMemo(
+    () => sortedChecks.filter((c) => c.status === 'FAIL' || c.status === 'REVIEW'),
+    [sortedChecks],
+  );
 
   const primary = analysis?.documents[analysis.primaryIndex];
 
@@ -189,17 +201,22 @@ export default function Home() {
             <span className={`status ${validationClass}`}>{liveValidation?.status ?? 'Not run'}</span>
           </div>
           {analysis?.warnings.map((w) => <div className="warning" key={w}>{w}</div>)}
+          {liveValidation && attentionChecks.length > 0 && <div className={`attentionSummary ${liveValidation.status.toLowerCase()}`}>
+            <strong>{liveValidation.status}: {attentionChecks.length} item{attentionChecks.length === 1 ? '' : 's'} need attention</strong>
+            <div>{attentionChecks.map((c) => <span key={c.id}>{c.label}: {c.message}</span>)}</div>
+          </div>}
+          {liveValidation?.status === 'PASS' && <div className="attentionSummary pass"><strong>PASS: no validation issues found</strong><span>This packet is clear to proceed to the create step.</span></div>}
           <div className="checks">
-            {liveValidation?.checks.map((c) => <div className="check" key={c.id}>
+            {sortedChecks.length ? sortedChecks.map((c) => <div className="check" key={c.id}>
               <div><strong>{c.label}</strong><span>{c.message}</span>{c.comparisons?.map((x, i) => <small key={i}>{x.label}: {x.document}{x.other ? ` | FactorCloud: ${x.other}` : ''}</small>)}</div>
               <span className={`pill ${c.status.toLowerCase()}`}>{c.status}</span>
-            </div>) ?? <p>Validation appears after analysis.</p>}
+            </div>) : <p>Validation appears after analysis.</p>}
           </div>
         </div>
 
         {analysis && <div className="card documentsCard">
           <h2>All extracted documents</h2>
-          <div className="docList">{analysis.documents.map((d, i) => <div className="doc" key={`${d.fileName}-${i}`}><strong>{d.fileName}</strong><span>{d.fields.documentType.replace('_', ' ')}</span><span>Reference: {d.fields.referenceNumber || '-'}</span><span>Amount: {d.fields.invoiceAmount == null ? '-' : `$${d.fields.invoiceAmount.toLocaleString()}`}</span>{d.fields.uncertainFields.length > 0 && <em>Review: {d.fields.uncertainFields.join(', ')}</em>}</div>)}</div>
+          <div className="docList">{analysis.documents.map((d, i) => <div className="doc" key={`${d.fileName}-${i}`}><strong>{d.fileName}</strong><span>{d.fields.documentType.replace('_', ' ')}</span><span>Reference: {d.fields.referenceNumber || '-'}</span><span>Amount: {d.fields.invoiceAmount == null ? '-' : `$${d.fields.invoiceAmount.toLocaleString()}`}</span>{d.usage && <span className="usage">AI: {d.usage.model} | {d.usage.totalTokens.toLocaleString()} tokens{typeof d.usage.estimatedCostUsd === 'number' ? ` | ~$${d.usage.estimatedCostUsd.toFixed(4)}` : ''}</span>}{d.fields.uncertainFields.length > 0 && <em>Review: {d.fields.uncertainFields.join(', ')}</em>}</div>)}</div>
         </div>}
 
         <div className="card actionCard">
