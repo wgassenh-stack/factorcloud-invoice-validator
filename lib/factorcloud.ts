@@ -40,10 +40,14 @@ interface RequestOptions {
   auth?: boolean;
 }
 
+const TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
+const RETRY_DELAYS_MS = [350, 900];
+
 export async function fcRequest<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
   const { base, factorId } = config();
   const url = new URL(base + path);
   for (const [k, v] of Object.entries(opts.query ?? {})) url.searchParams.set(k, v);
+  const method = opts.method ?? 'GET';
   const headers: Record<string, string> = { factorId, Accept: 'application/json' };
   if (opts.auth !== false) {
     const token = opts.token !== undefined ? opts.token : await currentToken();
@@ -56,12 +60,26 @@ export async function fcRequest<T = unknown>(path: string, opts: RequestOptions 
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify(opts.json);
   }
-  const res = await fetch(url, { method: opts.method ?? 'GET', headers, body, cache: 'no-store' });
-  const text = await res.text();
-  let parsed: unknown = text;
-  try { parsed = text ? JSON.parse(text) : null; } catch { /* keep text */ }
-  if (!res.ok) throw new FactorCloudError(`FactorCloud ${opts.method ?? 'GET'} ${path} failed (${res.status}): ${describe(parsed)}`, res.status, parsed);
-  return parsed as T;
+
+  const attempts = method === 'GET' ? 1 + RETRY_DELAYS_MS.length : 1;
+  let lastError: FactorCloudError | null = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const res = await fetch(url, { method, headers, body, cache: 'no-store' });
+    const text = await res.text();
+    let parsed: unknown = text;
+    try { parsed = text ? JSON.parse(text) : null; } catch { /* keep text */ }
+    if (res.ok) return parsed as T;
+
+    lastError = new FactorCloudError(`FactorCloud ${method} ${path} failed (${res.status}): ${describe(parsed)}`, res.status, parsed);
+    const shouldRetry = method === 'GET' && TRANSIENT_STATUSES.has(res.status) && attempt < attempts - 1;
+    if (!shouldRetry) throw lastError;
+    await sleep(RETRY_DELAYS_MS[attempt]);
+  }
+  throw lastError ?? new FactorCloudError(`FactorCloud ${method} ${path} failed.`, 502, null);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function describe(body: unknown): string {
