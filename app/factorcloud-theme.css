@@ -1,0 +1,104 @@
+:root {
+  --fc-ink: #111827;
+  --fc-navy: #0b1220;
+  --fc-blue: #1779ba;
+  --fc-blue-bright: #2aa4df;
+  --fc-blue-soft: #eaf5fb;
+  --fc-line: #e2e7ed;
+  --fc-canvas: #f6f8fa;
+}
+
+body { background: var(--fc-canvas); color: var(--fc-ink); }
+.eyebrow { color: var(--fc-blue); letter-spacing: .11em; }
+button, .primaryLink { background: var(--fc-navy); }
+button:not(:disabled):hover, .primaryLink:hover { background: #151f31; }
+
+.portalShell, .portalToolShell { max-width: 1320px; }
+.portalToolShell { padding-top: 0; }
+.portalNav {
+  min-height: 78px;
+  height: auto;
+  margin-bottom: 34px;
+  border-bottom: 1px solid var(--fc-line);
+  background: rgba(255,255,255,.96);
+  position: relative;
+}
+.portalNav::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--fc-blue), var(--fc-blue-bright));
+}
+.portalBrand { gap: 12px; min-width: 230px; }
+.portalBrand img { display:block; width: 142px; max-height: 30px; object-fit: contain; object-position: left center; }
+.portalBrandDivider { width:1px; height:25px; background:#d8dee7; }
+.portalBrand strong { font-size: 13px; letter-spacing: .015em; color:#5f6b7a; }
+.portalNavLinks { gap: 2px; }
+.portalNavLinks a { border-radius: 7px; padding: 11px 12px; color:#5a6574; }
+.portalNavLinks a.active { background: var(--fc-blue-soft); color:#126a9f; box-shadow: inset 0 -2px 0 var(--fc-blue); }
+.portalNavLinks a:hover { background:#f2f6f9; color:#142033; }
+.portalAccount { display:flex; flex-direction:column; align-items:flex-end; gap:3px; min-width:160px; }
+.portalAccount strong { font-size:12px; color:#344054; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.portalAccount span { padding:3px 7px; border:0; background:var(--fc-blue-soft); color:#176e9f; font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+
+.portalWelcome h1, .portalSubHero h1 { color:#121a28; }
+.portalWelcomeActions .secondaryLink { background:#fff; }
+.portalMetric, .portalPanel, .card, .topbar { border-color: var(--fc-line); box-shadow: 0 8px 24px rgba(19,31,49,.045); }
+.portalPanelHeader>a, .modeLink { color: var(--fc-blue); }
+.invoiceMark, .quickIcon { background:var(--fc-blue-soft); color:#176e9f!important; }
+.concentrationTrack span { background:linear-gradient(90deg,var(--fc-blue),var(--fc-blue-bright)); }
+.step { background:var(--fc-blue-soft); color:#176e9f; }
+.dropzone:hover { border-color:#86bdd8; background:#f8fcfe; }
+.message { background:#edf7fc; color:#205a78; border-color:#cfe7f3; }
+.clientConnectionBar { border-left:3px solid var(--fc-blue); }
+
+.portalInvoiceLink { text-decoration:none; color:inherit; }
+.portalInvoiceLink:hover { background:#f9fbfc; }
+.portalPageIntro { margin-bottom: 18px; }
+.invoiceToolbar {
+  display:grid;
+  grid-template-columns:minmax(260px,1.5fr) minmax(180px,.6fr) auto;
+  gap:12px;
+  align-items:end;
+  margin: 0 0 16px;
+  padding:15px;
+  border:1px solid var(--fc-line);
+  border-radius:14px;
+  background:#fff;
+}
+.invoiceSearch, .invoiceFilter { display:grid; gap:5px; }
+.invoiceSearch>span, .invoiceFilter>span { font-size:11px; font-weight:800; color:#687385; text-transform:uppercase; letter-spacing:.05em; }
+.invoiceSearch input, .invoiceFilter select { width:100%; border:1px solid #d5dce5; border-radius:8px; background:#fff; padding:10px 11px; color:#182230; }
+.invoiceToolbarSummary { display:grid; grid-template-columns:auto auto; column-gap:6px; row-gap:2px; align-items:baseline; justify-content:end; min-width:160px; }
+.invoiceToolbarSummary strong { font-size:16px; text-align:right; }
+.invoiceToolbarSummary span { font-size:11px; color:#7a8494; }
+.invoiceTablePanel { overflow:hidden; }
+.invoiceRefresh { margin:0!important; width:auto!important; }
+.invoiceTableIdentity { display:grid; gap:2px; }
+.invoiceTableIdentity span { font-size:10px; color:#9aa3b0; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.portalInvoiceTable th { background:#f7f9fb; }
+.portalInvoiceTable td { vertical-align:middle; }
+.batchClientStats { grid-template-columns:repeat(5,minmax(0,1fr)); }
+
+@media (max-width: 980px) {
+  .portalNav { align-items:flex-start; padding:18px 0 13px; }
+  .portalBrand { min-width:0; }
+  .portalAccount { min-width:0; margin-left:auto; }
+  .portalNavLinks { order:3; width:100%; overflow:auto; padding-bottom:2px; }
+  .invoiceToolbar { grid-template-columns:1fr 1fr; }
+  .invoiceToolbarSummary { grid-column:1/-1; display:flex; gap:6px; justify-content:flex-start; }
+  .invoiceToolbarSummary span { margin-right:12px; }
+  .batchClientStats { grid-template-columns:repeat(3,minmax(0,1fr)); }
+}
+
+@media (max-width: 620px) {
+  .portalBrand img { width:125px; }
+  .portalBrandDivider, .portalBrand strong { display:none; }
+  .portalAccount strong { max-width:120px; }
+  .invoiceToolbar { grid-template-columns:1fr; }
+  .invoiceToolbarSummary { grid-column:auto; }
+  .batchClientStats { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
