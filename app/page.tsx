@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { PortalNav } from '@/app/components/PortalNav';
+import { portalConfig } from '@/lib/portal-config';
 
 type RiskRecord = {
   id: string;
@@ -91,12 +93,12 @@ export default function ClientPortalHome() {
       <section className="portalWelcome">
         <div>
           <span className="eyebrow">FactorCloud Client Portal</span>
-          <h1>{loading && !data ? 'Loading your account...' : `Good morning${data?.source.clientName ? `, ${shortName(data.source.clientName)}` : ''}`}</h1>
-          <p>Submit invoices, follow activity, and see the items that need your attention in one place.</p>
+          <h1>{loading && !data ? 'Loading your account...' : `Welcome, ${data?.source.clientName ? shortName(data.source.clientName) : portalConfig.clientShortName}`}</h1>
+          <p>Your invoices, funding activity, alerts, and submissions in one place.</p>
         </div>
         <div className="portalWelcomeActions">
           <a className="primaryLink" href="/submit">+ Submit invoice</a>
-          <a className="secondaryLink" href="/batch">Batch upload</a>
+          <a className="secondaryLink" href="/invoices">View invoices</a>
         </div>
       </section>
 
@@ -104,17 +106,17 @@ export default function ClientPortalHome() {
 
       {data && <>
         <section className="portalMetricGrid">
-          <Metric label="Invoice activity" value={money(data.totalAmount)} detail={`${data.invoiceCount} invoice${data.invoiceCount === 1 ? '' : 's'} in retrieved data`} />
+          <Metric label="Invoice activity" value={money(data.totalAmount)} detail={`${data.invoiceCount} invoice${data.invoiceCount === 1 ? '' : 's'} in current data`} />
           <Metric label="Last 7 days" value={money(data.last7Amount)} detail={data.volumeRatio == null ? 'Building a baseline' : `${data.volumeRatio.toFixed(1)}x prior weekly pace`} tone={data.volumeRatio != null && data.volumeRatio >= 1.5 ? 'review' : ''} />
           <Metric label="Top debtor share" value={topConcentration ? `${Math.round(topConcentration.share * 100)}%` : '-'} detail={topConcentration?.debtorName || 'No concentration data yet'} tone={topConcentration?.level === 'HIGH' ? 'fail' : topConcentration?.level === 'REVIEW' ? 'review' : ''} />
-          <Metric label="Needs attention" value={data.alerts.length} detail={data.alerts.length ? 'Account alerts to review' : 'No current pilot alerts'} tone={data.alerts.length ? 'review' : 'pass'} />
+          <Metric label="Needs attention" value={data.alerts.length} detail={data.alerts.length ? 'Account alerts to review' : 'No current alerts'} tone={data.alerts.length ? 'review' : 'pass'} />
         </section>
 
         <section className="portalDashboardGrid">
           <div className="portalPanel portalActivityPanel">
             <div className="portalPanelHeader">
-              <div><span className="panelKicker">Funding activity</span><h2>Recent invoices</h2></div>
-              <a href="/submit">New submission</a>
+              <div><span className="panelKicker">Invoice activity</span><h2>Recent invoices</h2></div>
+              <a href="/invoices">View all invoices</a>
             </div>
 
             {statusCounts.length > 0 && <div className="statusStrip">
@@ -122,7 +124,7 @@ export default function ClientPortalHome() {
             </div>}
 
             <div className="portalInvoiceList">
-              {recent.map((record) => <div className="portalInvoiceRow" key={record.id}>
+              {recent.map((record) => <a className="portalInvoiceRow portalInvoiceLink" href={`/invoices?invoice=${encodeURIComponent(record.invoiceNumber || record.id)}`} key={record.id}>
                 <div className="invoiceMark"><span>{statusInitial(record.status)}</span></div>
                 <div className="invoiceIdentity">
                   <strong>Invoice {record.invoiceNumber || record.id.slice(0, 8)}</strong>
@@ -130,7 +132,7 @@ export default function ClientPortalHome() {
                 </div>
                 <span className={`portalStatus ${statusTone(record.status)}`}>{titleCase((record.status || 'Unknown').replaceAll('_', ' '))}</span>
                 <strong className="invoiceAmount">{record.invoiceAmount == null ? '-' : money(record.invoiceAmount)}</strong>
-              </div>)}
+              </a>)}
               {!recent.length && <div className="portalEmpty"><strong>No invoice activity yet</strong><span>Submit your first invoice to get started.</span></div>}
             </div>
           </div>
@@ -147,14 +149,15 @@ export default function ClientPortalHome() {
             <div className="portalPanel quickActionsPanel">
               <div className="portalPanelHeader"><div><span className="panelKicker">Quick actions</span><h2>What do you need?</h2></div></div>
               <a className="quickAction" href="/submit"><span className="quickIcon">↑</span><div><strong>Submit an invoice</strong><span>Upload and verify one funding packet</span></div><b>›</b></a>
-              <a className="quickAction" href="/batch"><span className="quickIcon">≡</span><div><strong>Batch upload</strong><span>Submit multiple invoices at once</span></div><b>›</b></a>
-              <a className="quickAction" href="/risk"><span className="quickIcon">!</span><div><strong>Review alerts</strong><span>See concentration and volume signals</span></div><b>›</b></a>
+              <a className="quickAction" href="/invoices"><span className="quickIcon">#</span><div><strong>Find an invoice</strong><span>Search status and recent activity</span></div><b>›</b></a>
+              {portalConfig.features.batch && <a className="quickAction" href="/batch"><span className="quickIcon">≡</span><div><strong>Batch upload</strong><span>Submit multiple invoices at once</span></div><b>›</b></a>}
+              {portalConfig.features.alerts && <a className="quickAction" href="/risk"><span className="quickIcon">!</span><div><strong>Review alerts</strong><span>See concentration and volume signals</span></div><b>›</b></a>}
             </div>
           </div>
         </section>
 
         <section className="portalPanel concentrationPanel">
-          <div className="portalPanelHeader"><div><span className="panelKicker">Portfolio view</span><h2>Debtor concentration</h2><p>Share of invoice amount in the currently retrieved FactorCloud dataset.</p></div><a href="/risk">Open risk monitor</a></div>
+          <div className="portalPanelHeader"><div><span className="panelKicker">Portfolio view</span><h2>Debtor concentration</h2><p>Share of invoice amount in the currently retrieved FactorCloud dataset.</p></div><a href="/risk">Open alerts</a></div>
           <div className="concentrationBars">
             {data.concentrations.slice(0, 5).map((row) => <div className="concentrationRow" key={row.debtorId}>
               <div className="concentrationLabel"><strong>{row.debtorName}</strong><span>{row.invoiceCount} invoice{row.invoiceCount === 1 ? '' : 's'} · {money(row.amount)}</span></div>
@@ -165,14 +168,10 @@ export default function ClientPortalHome() {
           </div>
         </section>
 
-        <p className="portalDataNote">Pilot note: this dashboard currently uses the invoice records returned by the FactorCloud integration environment. We still need Wallace's final definitions for outstanding A/R, concentration, and volume-spike rules before treating these as production risk metrics.</p>
+        <p className="portalDataNote">This first-client portal uses live records available from the FactorCloud integration environment. Concentration and volume alerts are v1 operational signals and can be configured per client as the product rolls out.</p>
       </>}
     </main>
   );
-}
-
-function PortalNav({ active }: { active: string }) {
-  return <nav className="portalNav"><a className="portalBrand" href="/"><span>FC</span><strong>Client Portal</strong></a><div className="portalNavLinks"><a className={active === 'home' ? 'active' : ''} href="/">Dashboard</a><a className={active === 'submit' ? 'active' : ''} href="/submit">Submit invoice</a><a className={active === 'batch' ? 'active' : ''} href="/batch">Batch upload</a><a className={active === 'risk' ? 'active' : ''} href="/risk">Alerts</a></div><div className="portalAccount"><span>Sandbox</span></div></nav>;
 }
 
 function Metric({ label, value, detail, tone = '' }: { label: string; value: string | number; detail: string; tone?: string }) {
