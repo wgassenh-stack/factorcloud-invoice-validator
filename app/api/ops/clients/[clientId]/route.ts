@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { fcRequest, getCompany } from '@/lib/factorcloud';
+import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
 import { apiErrorResponse } from '@/lib/api-errors';
@@ -13,8 +13,8 @@ export async function GET(_req: Request, context: { params: Promise<{ clientId: 
 
   try {
     await requireFactorSession();
-    const [raw, client] = await Promise.all([fcRequest('/invoices'), getCompany(clientId)]);
-    const allRecords = collectRiskInvoiceRecords(raw);
+    const [list, client] = await Promise.all([listInvoices({ client: clientId }), getCompany(clientId)]);
+    const allRecords = collectRiskInvoiceRecords(list.raw);
     const records = allRecords.filter((record) => record.companyClientId === clientId);
     const debtorIds = [...new Set(records.map((record) => record.companyDebtorId).filter((id): id is string => Boolean(id)))].slice(0, 50);
     const debtorEntries = await Promise.all(debtorIds.map(async (id) => {
@@ -45,7 +45,9 @@ export async function GET(_req: Request, context: { params: Promise<{ clientId: 
       source: {
         returnedInvoiceCount: allRecords.length,
         clientInvoiceCount: records.length,
-        note: 'This internal V1 view only includes invoice records that positively match this FactorCloud client ID. Pagination and open-A/R semantics still need to be confirmed.',
+        complete: list.complete,
+        incompleteReason: list.incompleteReason ?? null,
+        note: `${completenessNote(list)} Only invoices that positively match this FactorCloud client ID are included. Open-A/R semantics still need to be confirmed.`,
       },
     });
   } catch (err) {
@@ -62,4 +64,10 @@ function percentEnv(name: string, fallback: number): number {
 function numberEnv(name: string, fallback: number): number {
   const raw = Number(process.env[name]);
   return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
+
+function completenessNote(list: { complete: boolean; incompleteReason?: string; pages: number }): string {
+  return list.complete
+    ? `Includes every matching FactorCloud invoice (${list.pages} page${list.pages === 1 ? '' : 's'} read).`
+    : `These figures may be incomplete: ${list.incompleteReason ?? 'FactorCloud\'s invoice list could not be read to the end.'}`;
 }

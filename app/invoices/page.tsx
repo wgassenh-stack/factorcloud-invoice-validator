@@ -27,7 +27,7 @@ type InvoiceData = {
   records: RiskRecord[];
   concentrations: Concentration[];
   portalWorkflows?: Record<string, PortalWorkflowSummary>;
-  source: { clientName: string; clientInvoiceCount: number };
+  source: { clientName: string; clientInvoiceCount: number; complete?: boolean };
 };
 
 export default function InvoicesPage() {
@@ -93,6 +93,7 @@ export default function InvoicesPage() {
       </div>
     </section>
 
+    {data?.source.complete === false && <div className="attentionSummary review"><strong>Some invoices may be missing</strong><span>Not every invoice could be loaded from FactorCloud, so totals below may be incomplete. Try again shortly.</span></div>}
     {error && <div className="attentionSummary fail"><strong>Could not load invoices</strong><span>{error}</span></div>}
 
     <section className="invoiceToolbar">

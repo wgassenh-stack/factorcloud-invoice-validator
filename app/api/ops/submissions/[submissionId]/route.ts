@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { fcRequest, getCompany } from '@/lib/factorcloud';
+import { getCompany, getInvoice } from '@/lib/factorcloud';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
 import { apiErrorResponse } from '@/lib/api-errors';
@@ -18,8 +18,8 @@ export async function GET(_req: Request, context: { params: Promise<{ submission
     let invoice = null;
     if (submission.factorCloudInvoiceId) {
       try {
-        const raw = await fcRequest('/invoices');
-        invoice = collectRiskInvoiceRecords(raw).find((record) =>
+        const raw = await getInvoice(submission.factorCloudInvoiceId);
+        invoice = raw && collectRiskInvoiceRecords(raw).find((record) =>
           record.id === submission.factorCloudInvoiceId && record.companyClientId === submission.factorCloudClientId,
         ) || null;
       } catch {

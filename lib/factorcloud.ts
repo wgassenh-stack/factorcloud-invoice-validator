@@ -35,6 +35,7 @@ interface RequestOptions {
   form?: FormData;
   token?: string | null;
   auth?: boolean;
+  headers?: Record<string, string>;
 }
 
 const TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
@@ -45,7 +46,7 @@ export async function fcRequest<T = unknown>(path: string, opts: RequestOptions 
   const url = new URL(base + path);
   for (const [k, v] of Object.entries(opts.query ?? {})) url.searchParams.set(k, v);
   const method = opts.method ?? 'GET';
-  const headers: Record<string, string> = { factorId, Accept: 'application/json' };
+  const headers: Record<string, string> = { ...opts.headers, factorId, Accept: 'application/json' };
   if (opts.auth !== false) {
     const token = opts.token !== undefined ? opts.token : await currentToken();
     if (!token) throw new FactorCloudError('Not signed in to FactorCloud.', 401, null);
@@ -154,14 +155,122 @@ export interface NewInvoice {
   notes: string | null;
 }
 
-export async function findExistingInvoice(clientId: string, _debtorId: string, invoiceNumber: string): Promise<{ id: string; status?: string | null } | null> {
-  const body = await fcRequest('/invoices');
+export interface InvoiceListQuery {
+  /** FactorCloud company client ID: only that client's invoices. */
+  client?: string;
+  /** FactorCloud search: matches invoice number, reference number, client/debtor name or amount. */
+  q?: string;
+}
+
+export interface InvoiceListResult {
+  /** Raw FactorCloud response bodies, one per page. The record collectors walk arrays, so pass as-is. */
+  raw: unknown[];
+  /** True only when the last page was reached, so every matching invoice is included. */
+  complete: boolean;
+  /** Why the list may be incomplete, when it is. */
+  incompleteReason?: string;
+  pages: number;
+}
+
+// FactorCloud paginates GET /invoices with request headers (0-based page number and page size,
+// default size 20) and returns no total count, so the end is found by reading until a page comes
+// back short or empty. Ordering is stable (sorted by id by default).
+export const INVOICE_PAGE_SIZE = Math.min(Math.max(Number(process.env.FACTORCLOUD_PAGE_SIZE) || 100, 1), 500);
+const FACTORCLOUD_DEFAULT_PAGE_SIZE = 20;
+export const MAX_INVOICE_PAGES = 200;
+
+/**
+ * The one place that reads FactorCloud's invoice list, fetching every page. Callers use `complete`
+ * to decide whether the result can be trusted as the whole set.
+ */
+export async function listInvoices(filter: InvoiceListQuery = {}): Promise<InvoiceListResult> {
+  const query: Record<string, string> = {};
+  if (filter.client) query.client = filter.client;
+  if (filter.q) query.q = filter.q;
+
+  const raw: unknown[] = [];
+  const seen = new Set<string>();
+  let limit = INVOICE_PAGE_SIZE;
+  // A short page only proves the end once FactorCloud has shown it honors our page size (it could
+  // cap it silently). Until then, keep reading until an empty page.
+  let limitHonored = false;
+
+  for (let page = 0; page < MAX_INVOICE_PAGES; page++) {
+    let body: unknown;
+    try {
+      body = await fcRequest('/invoices', {
+        query,
+        headers: { 'X-PAGINATION-NUM': String(page), 'X-PAGINATION-LIMIT': String(limit) },
+      });
+    } catch (err) {
+      // A page size above FactorCloud's maximum may be refused; fall back to its documented default.
+      if (page === 0 && limit !== FACTORCLOUD_DEFAULT_PAGE_SIZE && err instanceof FactorCloudError && err.status === 400) {
+        limit = FACTORCLOUD_DEFAULT_PAGE_SIZE;
+        page = -1;
+        continue;
+      }
+      throw err;
+    }
+
+    const items = invoicePageItems(body);
+    if (!items.length) return { raw, complete: true, pages: page + 1 };
+    const fresh = items.filter((item) => !seen.has(item.id));
+    if (!fresh.length) {
+      return { raw, complete: false, pages: page + 1, incompleteReason: 'FactorCloud returned the same invoices again, so its pagination was not applied.' };
+    }
+    for (const item of fresh) seen.add(item.id);
+    raw.push(body);
+
+    if (items.length === limit) limitHonored = true;
+    if (items.length < limit && limitHonored) return { raw, complete: true, pages: page + 1 };
+  }
+  return { raw, complete: false, pages: MAX_INVOICE_PAGES, incompleteReason: `Stopped after ${MAX_INVOICE_PAGES} pages.` };
+}
+
+/** The invoices array of one list page (`{ invoices: [...] }`), falling back to any invoice-shaped records. */
+function invoicePageItems(body: unknown): { id: string }[] {
+  const invoices = (body as { invoices?: unknown } | null)?.invoices;
+  if (Array.isArray(invoices)) {
+    return invoices.filter((x): x is { id: string } => Boolean(x) && typeof (x as { id?: unknown }).id === 'string');
+  }
+  return collectInvoiceRecords(body);
+}
+
+/** GET /invoices/{id}. Returns the raw response body, or null when FactorCloud has no such invoice. */
+export async function getInvoice(invoiceId: string): Promise<unknown | null> {
+  try {
+    return await fcRequest(`/invoices/${encodeURIComponent(invoiceId)}`);
+  } catch (err) {
+    if (err instanceof FactorCloudError && (err.status === 404 || err.status === 400)) return null;
+    throw err;
+  }
+}
+
+/** Search terms that together find an invoice number despite punctuation differences ("INV-001" vs "INV001"). */
+export function duplicateSearchTerms(invoiceNumber: string): string[] {
+  const raw = invoiceNumber.trim();
+  const normalized = normalizeIdentifier(raw);
+  const digitRuns = raw.match(/\d{3,}/g) ?? [];
+  const longestDigits = digitRuns.sort((a, b) => b.length - a.length)[0];
+  return [...new Set([raw, normalized, longestDigits].filter((t): t is string => Boolean(t)))];
+}
+
+/**
+ * Looks for an invoice with the same number (ignoring case and punctuation) for this client, across
+ * every page. `complete` is false when any search could not be read to the end.
+ */
+export async function findExistingInvoice(clientId: string, invoiceNumber: string): Promise<{ existing: { id: string; status?: string | null } | null; complete: boolean }> {
   const target = normalizeIdentifier(invoiceNumber);
-  const match = collectInvoiceRecords(body).find((x) =>
-    normalizeIdentifier(x.invoiceNumber) === target &&
-    x.companyClientId === clientId,
-  );
-  return match ? { id: match.id, status: match.status } : null;
+  let complete = true;
+  for (const q of duplicateSearchTerms(invoiceNumber)) {
+    const result = await listInvoices({ client: clientId, q });
+    complete &&= result.complete;
+    const match = collectInvoiceRecords(result.raw).find((x) =>
+      normalizeIdentifier(x.invoiceNumber) === target && x.companyClientId === clientId,
+    );
+    if (match) return { existing: { id: match.id, status: match.status }, complete: true };
+  }
+  return { existing: null, complete };
 }
 
 export async function createInvoice(invoice: NewInvoice): Promise<{ id: string; raw: unknown }> {

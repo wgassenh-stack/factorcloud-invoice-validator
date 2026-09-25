@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { query } from '@/lib/db';
-import { fcRequest, getCompany } from '@/lib/factorcloud';
+import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { resolveConfiguredClientId } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
 import { databaseAuthEnabled } from '@/lib/session';
@@ -19,11 +19,11 @@ type WorkflowRow = {
 export async function GET() {
   try {
     const clientId = await resolveConfiguredClientId();
-    const [raw, client] = await Promise.all([
-      fcRequest('/invoices'),
+    const [list, client] = await Promise.all([
+      listInvoices({ client: clientId }),
       getCompany(clientId),
     ]);
-    const allRecords = collectRiskInvoiceRecords(raw);
+    const allRecords = collectRiskInvoiceRecords(list.raw);
     const records = allRecords.filter((record) => record.companyClientId === clientId);
 
     const debtorIds = [...new Set(records.map((record) => record.companyDebtorId).filter((id): id is string => Boolean(id)))].slice(0, 50);
@@ -80,7 +80,9 @@ export async function GET() {
         returnedInvoiceCount: allRecords.length,
         clientInvoiceCount: records.length,
         excludedWithoutPositiveClientMatch: allRecords.length - records.length,
-        note: 'Client-facing data requires an explicit FactorCloud client ID match. Records without a matching client ID are excluded. API pagination and open-A/R status semantics still need to be confirmed before treating these as production exposure metrics.',
+        complete: list.complete,
+        incompleteReason: list.incompleteReason ?? null,
+        note: `${completenessNote(list)} Only invoices whose FactorCloud client ID matches this client are shown. Open-A/R status semantics still need to be confirmed before treating these as exposure metrics.`,
       },
     });
   } catch (err) {
@@ -97,4 +99,10 @@ function percentEnv(name: string, fallback: number): number {
 function numberEnv(name: string, fallback: number): number {
   const raw = Number(process.env[name]);
   return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
+
+function completenessNote(list: { complete: boolean; incompleteReason?: string; pages: number }): string {
+  return list.complete
+    ? `Includes every matching FactorCloud invoice (${list.pages} page${list.pages === 1 ? '' : 's'} read).`
+    : `These figures may be incomplete: ${list.incompleteReason ?? 'FactorCloud\'s invoice list could not be read to the end.'}`;
 }

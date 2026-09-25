@@ -43,6 +43,7 @@ type PortalData = {
     clientName: string;
     returnedInvoiceCount: number;
     clientInvoiceCount: number;
+    complete?: boolean;
     note: string;
   };
 };
@@ -102,6 +103,7 @@ export default function ClientPortalHome() {
         </div>
       </section>
 
+      {data?.source.complete === false && <div className="attentionSummary review"><strong>Some invoices may be missing</strong><span>Not every invoice could be loaded from FactorCloud, so totals below may be incomplete. Try again shortly.</span></div>}
       {error && <div className="attentionSummary fail"><strong>Could not load FactorCloud data</strong><span>{error}</span><button className="small retryButton" onClick={() => void load()}>Try again</button></div>}
 
       {data && <>
