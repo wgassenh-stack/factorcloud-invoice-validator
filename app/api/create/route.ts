@@ -10,7 +10,7 @@ import {
 import { isBlank, normalizeDate, normalizeMoney } from '@/lib/normalize';
 import { currentPortalSession, PortalAccessError, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
-import { persistSubmissionStart, markSubmissionFactorCloudResult, type StoredSubmission } from '@/lib/submission-store';
+import { persistSubmissionStart, markSubmissionFactorCloudResult, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
 import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
 import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '@/lib/types';
 
@@ -147,7 +147,9 @@ export async function POST(req: Request) {
       const note = doc.type !== wanted ? ` (type ${wanted} rejected, uploaded as ${doc.type})` : ` as ${doc.type}`;
       steps.push({ step: `Upload ${file.name}`, ok: true, detail: `Document ${doc.id}${note}` });
     } catch (err) {
-      steps.push({ step: `Upload ${file.name}`, ok: false, detail: message(err) });
+      const detail = message(err);
+      steps.push({ step: `Upload ${file.name}`, ok: false, detail });
+      try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: 'DOCUMENT_UPLOAD_FAILED', eventData: { invoiceId, fileName: file.name, error: detail } }); } catch { /* original error remains primary */ }
       return respond(false, `Invoice ${invoiceId} was created, but uploading ${file.name} failed. Do not recreate it. Attach the missing file in FactorCloud and retry only after checking the existing invoice.`);
     }
   }
@@ -156,8 +158,11 @@ export async function POST(req: Request) {
     try {
       await attachDocuments(invoiceId!, documentIds);
       steps.push({ step: 'Attach documents', ok: true, detail: `${documentIds.length} document(s) attached` });
+      try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: 'DOCUMENTS_ATTACHED', eventData: { invoiceId, documentIds } }); } catch { /* invoice workflow should still succeed */ }
     } catch (err) {
-      steps.push({ step: 'Attach documents', ok: false, detail: message(err) });
+      const detail = message(err);
+      steps.push({ step: 'Attach documents', ok: false, detail });
+      try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: 'DOCUMENT_ATTACH_FAILED', eventData: { invoiceId, documentIds, error: detail } }); } catch { /* original error remains primary */ }
       return respond(false, `Invoice ${invoiceId} was created and documents uploaded, but attaching them failed. Do not recreate it. Attach the uploaded documents in FactorCloud.`);
     }
   }
