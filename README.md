@@ -1,36 +1,62 @@
 # FactorCloud Client Portal
 
-Single-client portal template for FactorCloud clients. The first deployment is intentionally scoped to one FactorCloud client, with configuration and feature switches designed so the same codebase can be deployed for additional clients one at a time.
+A FactorCloud add-on platform with two views:
+
+- Client portal: one factor client sees only its own dashboard, invoices, submissions, and alerts.
+- Factor operations: factor staff can work across clients, review exceptions, and drill into client accounts.
+
+FactorCloud remains the system of record for factoring/accounting records. The portal database stores identity, workflow state, file integrity metadata, review decisions, idempotency, and audit history.
 
 ## Current portal modules
 
 - Dashboard: invoice activity, recent statuses, concentration summary, alerts, and quick actions.
-- Invoices: searchable invoice history using the FactorCloud invoice records currently available through the API.
-- Submit invoice: AI extraction plus deterministic document validation before creating the invoice in FactorCloud.
-- Batch upload: groups mixed invoice/support-document stacks into invoice packets and submits clean packets.
-- Alerts: v1 debtor-concentration and invoice-volume signals.
+- Invoices: searchable invoice history from FactorCloud.
+- Submit invoice: AI extraction plus deterministic validation before creating the invoice in FactorCloud.
+- Batch upload: cautious grouping of mixed invoice/support-document stacks.
+- Alerts: V1 debtor-concentration and invoice-volume signals.
+- Factor operations: factor-wide client overview, client drill-down, and review queue.
 
-## One client per deployment
+## Security model
 
-For the first rollout phase, each deployment maps to exactly one FactorCloud client through `FACTORCLOUD_CLIENT_ID`. Display branding and module availability are configured separately with `NEXT_PUBLIC_PORTAL_*` and `NEXT_PUBLIC_FEATURE_*` variables.
+Client paperwork is treated as untrusted input.
 
-This keeps client data isolated and makes it easy to sell/enable modules client by client without maintaining separate forks. If multi-tenant operation becomes useful later, the same module/config model can be moved behind authenticated tenant selection.
+- Uploaded files are SHA-256 fingerprinted when analyzed.
+- The server signs the original AI extraction and file metadata.
+- Submit requires the exact files that were analyzed.
+- Client edits do not replace the original evidence and force REVIEW.
+- Client-facing FactorCloud data requires an exact client ID match.
+- Database authentication supports `CLIENT_USER`, `FACTOR_REVIEWER`, and `FACTOR_ADMIN` roles.
+- REVIEW decisions and submission events can be stored in the portal database audit trail.
 
-## Invoice verification flow
+## Development database
 
-1. Upload an invoice and supporting PDF/image documents.
-2. Gemini extracts structured fields only. It does not decide whether the packet passes.
-3. FactorCloud debtor/client records are loaded server-side.
-4. Deterministic TypeScript rules return PASS, REVIEW, or FAIL.
-5. PASS can be submitted normally. REVIEW can be submitted into FactorCloud for manual review. FAIL remains blocked.
-6. Before creation the server re-runs validation and checks FactorCloud for a duplicate invoice number.
-7. The app creates the invoice, uploads the source files, and attaches them using the API sequence proven in the sandbox.
+The app uses ordinary PostgreSQL. A free hosted Postgres database such as Neon is convenient during development. Production can point the same `DATABASE_URL` at FactorCloud's PostgreSQL/RDS instance without changing the schema.
 
-## Extraction model
+After creating a development Postgres database:
 
-The default is `gemini-3.1-flash-lite` with `minimal` thinking. The extractor is isolated in `lib/extract.ts`, so the model can be changed with `EXTRACTION_MODEL` if real paperwork shows quality problems.
+```bash
+npm install
+DATABASE_URL='postgresql://...' DATABASE_SSL=true npm run db:migrate
+DATABASE_URL='postgresql://...' DATABASE_SSL=true FACTORCLOUD_FACTOR_ID='...' FACTORCLOUD_CLIENT_ID='...' npm run db:bootstrap
+```
 
-AI is responsible for reading/classifying documents. Matching, comparisons, duplicate protection, and create gating are deterministic code.
+`db:bootstrap` creates or updates:
+
+- the sandbox factor record
+- the configured client portal record
+- one factor admin user
+- one client user mapped to that client
+
+If `DEV_FACTOR_ADMIN_PASSWORD` and `DEV_CLIENT_USER_PASSWORD` are omitted, strong random passwords are generated and printed once.
+
+Then set these application environment variables:
+
+```text
+PORTAL_AUTH_MODE=database
+DATABASE_URL=postgresql://...
+DATABASE_SSL=true
+AUTH_SESSION_SECRET=<long random value>
+```
 
 ## Local setup
 
@@ -49,38 +75,36 @@ Required for live FactorCloud comparisons/create:
 - `FACTORCLOUD_FACTOR_ID`
 - `FACTORCLOUD_CLIENT_ID`
 - `FACTORCLOUD_DEBTOR_IDS`
-- either `FACTORCLOUD_BEARER_TOKEN`, or username/password for the OTP flow
+- `FACTORCLOUD_BEARER_TOKEN` for the server-side integration
 
-Portal display configuration:
+Interactive FactorCloud staff OTP login should remain disabled for client deployments.
 
-- `NEXT_PUBLIC_PORTAL_CLIENT_NAME`
-- `NEXT_PUBLIC_PORTAL_CLIENT_SHORT_NAME`
-- `NEXT_PUBLIC_PORTAL_ENV_LABEL`
+## Extraction model
 
-Per-client module switches:
+The current default is `gemini-3.5-flash-lite` with minimal thinking. The extractor is isolated in `lib/extract.ts`, so the model can be changed with `EXTRACTION_MODEL` if real paperwork shows quality problems.
 
-- `NEXT_PUBLIC_FEATURE_INVOICES`
-- `NEXT_PUBLIC_FEATURE_SUBMIT`
-- `NEXT_PUBLIC_FEATURE_BATCH`
-- `NEXT_PUBLIC_FEATURE_ALERTS`
+AI reads and classifies documents. Matching, comparisons, duplicate protection, and create gating are deterministic code.
 
-V1 alert thresholds:
+## Deployment portability
 
-- `RISK_CONCENTRATION_REVIEW_PCT`
-- `RISK_CONCENTRATION_HIGH_PCT`
-- `RISK_VOLUME_SPIKE_RATIO`
+The repository includes a `Dockerfile`, so the app can be run outside Vercel:
 
-For any deployed pilot, also set `APP_ACCESS_PASSWORD`.
+```bash
+docker build -t factorcloud-portal .
+docker run -p 3000:3000 --env-file .env factorcloud-portal
+```
 
-## Important v1 limitations
+A likely production target is AWS ECS/Fargate with PostgreSQL on RDS, secrets in AWS Secrets Manager, and object storage in S3 if the portal later needs retained file storage.
 
-- Debtor search is not yet proven, so candidate debtor IDs are configured in `FACTORCLOUD_DEBTOR_IDS`.
+## Important V1 limitations
+
+- FactorCloud invoice pagination/filter semantics still need to be confirmed before dashboard totals are treated as complete account figures.
+- True open A/R, NFE, reserve, funding, aging, and payment metrics should only be labeled as such after the corresponding FactorCloud fields/endpoints are mapped.
+- Debtor search is not yet proven, so candidate debtor IDs can still be configured with `FACTORCLOUD_DEBTOR_IDS`.
 - Only the FactorCloud `INVOICE` document type has been manually proven. Other classified types currently fall back to `INVOICE` if FactorCloud rejects them with a 400.
-- Duplicate checking currently scans the invoice list returned by `GET /invoices`. Before production, confirm pagination/filter semantics or add durable idempotency storage.
-- The FactorCloud email OTP flow should be replaced with machine-to-machine integration credentials if FactorCloud provides them.
-- Portal authentication is still pilot-grade. Production client users need proper per-user authentication and audit logging.
-- Dashboard/alert calculations currently use the invoice records returned by the FactorCloud integration. True open A/R, NFE, reserve, funding, aging, and payment metrics should only be labeled as such after the corresponding FactorCloud fields/endpoints are mapped.
+- A proper FactorCloud machine-to-machine or service credential is still preferred before a real client pilot.
+- Feature switches are packaging/UI controls, not authorization controls.
 
 ## Why amount/date rules are conservative
 
-A rate confirmation and invoice can legitimately differ because of accessorials. Differences therefore produce REVIEW rather than FAIL. BOL/POD document dates are not compared to invoice dates because they represent different events.
+A rate confirmation and invoice can legitimately differ because of accessorials. Differences therefore produce REVIEW rather than FAIL. BOL/POD document dates are not compared with invoice dates because they represent different events.
