@@ -1,0 +1,71 @@
+import { NextResponse } from 'next/server';
+import { fcRequest, getCompany } from '@/lib/factorcloud';
+import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
+
+export const runtime = 'nodejs';
+export const maxDuration = 120;
+
+export async function GET(_req: Request, context: { params: Promise<{ clientId: string }> }) {
+  const { clientId } = await context.params;
+  if (!clientId) return NextResponse.json({ error: 'Client id is required.' }, { status: 400 });
+
+  try {
+    const [raw, client] = await Promise.all([
+      fcRequest('/invoices'),
+      getCompany(clientId),
+    ]);
+
+    const allRecords = collectRiskInvoiceRecords(raw);
+    const records = allRecords.filter((record) => record.companyClientId === clientId);
+    const debtorIds = [...new Set(records.map((record) => record.companyDebtorId).filter((id): id is string => Boolean(id)))].slice(0, 50);
+    const debtorEntries = await Promise.all(debtorIds.map(async (id) => {
+      try {
+        const debtor = await getCompany(id);
+        return [id, debtor.companyName || debtor.compCode || id] as const;
+      } catch {
+        return [id, id] as const;
+      }
+    }));
+    const debtorNames = Object.fromEntries(debtorEntries);
+
+    const thresholds: RiskThresholds = {
+      concentrationReview: percentEnv('RISK_CONCENTRATION_REVIEW_PCT', 30),
+      concentrationHigh: percentEnv('RISK_CONCENTRATION_HIGH_PCT', 50),
+      volumeSpikeRatio: numberEnv('RISK_VOLUME_SPIKE_RATIO', 1.5),
+    };
+
+    const summary = summarizeRisk(records, debtorNames, new Date().toISOString().slice(0, 10), thresholds);
+
+    return NextResponse.json({
+      client: {
+        id: clientId,
+        name: client.companyName || client.compCode || clientId,
+        code: client.compCode || null,
+        phone: client.phone || null,
+        city: client.city || null,
+        state: client.stateCode || null,
+      },
+      records,
+      debtorNames,
+      summary,
+      source: {
+        returnedInvoiceCount: allRecords.length,
+        clientInvoiceCount: records.length,
+        note: 'This internal V1 view only includes invoice records that positively match this FactorCloud client ID. Pagination and open-A/R semantics still need to be confirmed.',
+      },
+    });
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
+  }
+}
+
+function percentEnv(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  const pct = Number.isFinite(raw) && raw > 0 ? raw : fallback;
+  return pct / 100;
+}
+
+function numberEnv(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
