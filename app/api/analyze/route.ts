@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { extractDocument, isSupportedFile } from '@/lib/extract';
 import { FactorCloudError, findDebtor, getCompany } from '@/lib/factorcloud';
 import { validate } from '@/lib/rules';
+import { addFileIntegrity, signAnalysisReceipt } from '@/lib/submission-integrity';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
 import type { AnalyzeResponse, AnalyzedDocument, CompanyRecord } from '@/lib/types';
 
@@ -36,10 +37,11 @@ export async function POST(req: Request) {
     );
   }
 
-  const documents: AnalyzedDocument[] = settled.map((r, i) => {
+  const extracted: AnalyzedDocument[] = settled.map((r, i) => {
     const result = (r as PromiseFulfilledResult<Awaited<ReturnType<typeof extractDocument>>>).value;
     return { fileName: files[i].name, fields: result.fields, usage: result.usage };
   });
+  const documents = await addFileIntegrity(files, extracted);
   const warnings: string[] = [];
 
   const invoiceIndex = documents.findIndex((d) => d.fields.documentType === 'invoice');
@@ -50,6 +52,7 @@ export async function POST(req: Request) {
   let debtorMatch: AnalyzeResponse['debtorMatch'] = null;
   let client: CompanyRecord | null = null;
   let factorCloudLookupFailed = false;
+  const clientId = process.env.FACTORCLOUD_CLIENT_ID;
   try {
     const ordered = [documents[primaryIndex], ...documents.filter((_, i) => i !== primaryIndex)];
     for (const d of ordered) {
@@ -60,14 +63,13 @@ export async function POST(req: Request) {
         break;
       }
     }
-    const clientId = process.env.FACTORCLOUD_CLIENT_ID;
     if (clientId) client = await getCompany(clientId);
     else warnings.push('FACTORCLOUD_CLIENT_ID is not configured.');
   } catch (err) {
     factorCloudLookupFailed = true;
     warnings.push(
       err instanceof FactorCloudError && err.status === 401
-        ? 'Not signed in to FactorCloud. Sign in, then analyze again to compare against FactorCloud data.'
+        ? 'FactorCloud connection is unavailable. Contact your factor and retry verification.'
         : 'FactorCloud is temporarily unavailable. The document-to-document checks below are still valid, but retry analysis before creating the invoice.',
     );
   }
@@ -76,6 +78,22 @@ export async function POST(req: Request) {
     validate({ documents, primaryIndex, debtor, client }),
     factorCloudLookupFailed,
   );
+
+  let analysisReceipt: string | undefined;
+  if (clientId) {
+    try {
+      analysisReceipt = signAnalysisReceipt({
+        version: 1,
+        clientId,
+        debtorId: debtor?.id ?? null,
+        primaryIndex,
+        documents,
+      });
+    } catch (err) {
+      return NextResponse.json({ error: `Verification security setup is incomplete: ${errorMessage(err)}` }, { status: 500 });
+    }
+  }
+
   const body: AnalyzeResponse = {
     documents,
     primaryIndex,
@@ -85,6 +103,7 @@ export async function POST(req: Request) {
     factorCloudLookupFailed,
     validation,
     warnings,
+    analysisReceipt,
   };
   return NextResponse.json(body);
 }
