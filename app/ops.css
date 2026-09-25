@@ -41,6 +41,12 @@
 .opsStatuses span { background:#f1f4f7; color:#667085; border-radius:999px; padding:5px 8px; font-size:10px; }
 .opsStatuses strong { color:#344054; }
 .opsTable td { vertical-align:middle; }
+.opsReviewReason { display:grid; gap:4px; min-width:220px; }
+.opsReviewReason span { color:#7a8495; font-size:11px; line-height:1.4; }
+.opsReviewActions { display:flex; gap:6px; min-width:145px; }
+.opsReviewActions .tinyButton { white-space:nowrap; }
+.opsReviewActions .dangerButton { background:#fff; border:1px solid #efc6c2; color:#b42318; }
+.opsReviewActions .dangerButton:hover { background:#fff4f3; }
 .opsClientGrid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; margin-bottom:18px; }
 .opsAlertList,.opsConcentrationList { padding:8px 20px 18px; }
 .opsAlert { display:grid; gap:4px; padding:13px 0; border-bottom:1px solid #eef1f5; }
