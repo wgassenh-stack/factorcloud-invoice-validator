@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { OpsSignOut } from '../../components/OpsSignOut';
 
 type ReviewRecord = {
   id: string;
@@ -92,7 +93,7 @@ export default function ReviewQueuePage() {
         <span>Alerts</span>
         <span>Configuration</span>
       </nav>
-      <div className="opsSidebarFooter"><strong>Internal view</strong><span>Factor-wide access</span></div>
+      <div className="opsSidebarFooter"><strong>Internal view</strong><span>Factor-wide access</span><OpsSignOut /></div>
     </aside>
 
     <section className="opsContent">
