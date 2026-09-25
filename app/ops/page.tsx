@@ -81,7 +81,7 @@ export default function FactorOperationsPage() {
 
         <section className="opsPanel">
           <div className="opsPanelHeader">
-            <div><h2>Clients</h2><p>One row per client represented in the FactorCloud invoice data currently returned to the integration.</p></div>
+            <div><h2>Clients</h2><p>One row per client represented in the FactorCloud invoice data currently returned to the integration. Open a client to inspect its invoices, alerts, and concentration.</p></div>
             <label className="opsSearch"><span>Search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Client name or ID" /></label>
           </div>
 
@@ -90,7 +90,7 @@ export default function FactorOperationsPage() {
               <thead><tr><th>Client</th><th>Invoices</th><th>Invoice amount</th><th>Latest activity</th><th>Status mix</th></tr></thead>
               <tbody>
                 {filtered.map((client) => <tr key={client.clientId}>
-                  <td><div className="opsClientName"><strong>{client.clientName}</strong><span>{client.clientId}</span></div></td>
+                  <td><a className="opsClientLink" href={`/ops/clients/${encodeURIComponent(client.clientId)}`}><div className="opsClientName"><strong>{client.clientName}</strong><span>{client.clientId}</span></div></a></td>
                   <td>{client.invoiceCount}</td>
                   <td>{money(client.invoiceAmount)}</td>
                   <td>{client.latestInvoiceDate || '-'}</td>
