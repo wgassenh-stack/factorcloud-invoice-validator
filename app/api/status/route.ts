@@ -20,7 +20,7 @@ export async function GET() {
     },
     ai: {
       configured: Boolean(process.env.GEMINI_API_KEY || process.env.AI_API_KEY),
-      model: process.env.EXTRACTION_MODEL || 'gemini-3.1-flash-lite',
+      model: process.env.EXTRACTION_MODEL || 'gemini-3.5-flash-lite',
       thinking: process.env.EXTRACTION_THINKING || 'minimal',
     },
   });
