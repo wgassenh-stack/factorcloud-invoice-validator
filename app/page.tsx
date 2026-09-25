@@ -1,12 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { ActivityTrendChart, RankBars, StatusDonut, money } from '@/app/components/DashboardCharts';
+import { DashboardViewSwitcher, type DashboardPreset, type DashboardWidgetOption } from '@/app/components/DashboardViews';
 import { PortalNav } from '@/app/components/PortalNav';
+import { averageInvoiceAmount, buildStatusMix, buildWeeklyActivity, periodAmount, trendPercent } from '@/lib/dashboard';
 import { portalConfig } from '@/lib/portal-config';
 
 type RiskRecord = {
   id: string;
   invoiceNumber: string | null;
+  companyClientId: string | null;
   companyDebtorId: string | null;
   invoiceAmount: number | null;
   invoiceDate: string | null;
@@ -29,6 +33,12 @@ type Alert = {
   detail: string;
 };
 
+type PortalWorkflowSummary = {
+  workflowStatus: string;
+  validationStatus: string;
+  updatedAt: string;
+};
+
 type PortalData = {
   totalAmount: number;
   invoiceCount: number;
@@ -38,6 +48,7 @@ type PortalData = {
   concentrations: Concentration[];
   alerts: Alert[];
   records: RiskRecord[];
+  portalWorkflows?: Record<string, PortalWorkflowSummary>;
   source: {
     clientId: string;
     clientName: string;
@@ -48,10 +59,28 @@ type PortalData = {
   };
 };
 
+const CLIENT_PRESETS: DashboardPreset[] = [
+  { id: 'overview', label: 'Overview', description: 'The full client picture', widgets: ['metrics', 'trend', 'status', 'recent', 'alerts', 'concentration', 'quick-actions'] },
+  { id: 'activity', label: 'Activity', description: 'Invoice pace and statuses', widgets: ['metrics', 'trend', 'status', 'recent'] },
+  { id: 'debtors', label: 'Debtors', description: 'Concentration and exceptions', widgets: ['metrics', 'concentration', 'alerts', 'status'] },
+  { id: 'reviews', label: 'Reviews', description: 'Portal review workload', widgets: ['metrics', 'recent', 'alerts', 'quick-actions'] },
+];
+
+const CLIENT_WIDGETS: DashboardWidgetOption[] = [
+  { id: 'metrics', label: 'Key metrics', description: '30-day activity, average size, reviews and concentration' },
+  { id: 'trend', label: 'Activity trend', description: 'Eight weeks of invoice amount and volume' },
+  { id: 'status', label: 'Status mix', description: 'How invoices are distributed across FactorCloud statuses' },
+  { id: 'recent', label: 'Recent invoices', description: 'Latest invoice activity with review context' },
+  { id: 'alerts', label: 'Alerts', description: 'Concentration and volume signals that need attention' },
+  { id: 'concentration', label: 'Debtor concentration', description: 'Top debtors by share of invoice activity' },
+  { id: 'quick-actions', label: 'Quick actions', description: 'Shortcuts to submit, search and review' },
+];
+
 export default function ClientPortalHome() {
   const [data, setData] = useState<PortalData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [visibleWidgets, setVisibleWidgets] = useState<string[]>(CLIENT_PRESETS[0].widgets);
 
   async function load() {
     setLoading(true);
@@ -73,29 +102,37 @@ export default function ClientPortalHome() {
   const recent = useMemo(() => (data?.records ?? [])
     .slice()
     .sort((a, b) => String(b.invoiceDate ?? '').localeCompare(String(a.invoiceDate ?? '')))
-    .slice(0, 8), [data]);
+    .slice(0, 7), [data]);
 
-  const statusCounts = useMemo(() => {
+  const trend = useMemo(() => buildWeeklyActivity(data?.records ?? [], 8), [data]);
+  const statusMix = useMemo(() => buildStatusMix(data?.records ?? []), [data]);
+  const averageInvoice = useMemo(() => averageInvoiceAmount(data?.records ?? []), [data]);
+  const last30Amount = useMemo(() => periodAmount(data?.records ?? [], 30), [data]);
+  const prior30Amount = useMemo(() => periodAmount(data?.records ?? [], 30, new Date(), 30), [data]);
+  const thirtyDayTrend = trendPercent(last30Amount, prior30Amount);
+
+  const workflowCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const record of data?.records ?? []) {
-      const status = (record.status || 'Unknown').replaceAll('_', ' ');
-      counts.set(status, (counts.get(status) ?? 0) + 1);
+    for (const workflow of Object.values(data?.portalWorkflows ?? {})) {
+      counts.set(workflow.workflowStatus, (counts.get(workflow.workflowStatus) ?? 0) + 1);
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    return counts;
   }, [data]);
 
   const debtorNames = useMemo(() => Object.fromEntries((data?.concentrations ?? []).map((row) => [row.debtorId, row.debtorName])), [data]);
   const topConcentration = data?.concentrations[0];
+  const openReviews = workflowCounts.get('REVIEW_REQUIRED') ?? 0;
+  const show = (widget: string) => visibleWidgets.includes(widget);
 
   return (
-    <main className="portalShell">
+    <main className="portalShell dashboardPage">
       <PortalNav active="home" />
 
-      <section className="portalWelcome">
+      <section className="portalWelcome dashboardHero">
         <div>
-          <span className="eyebrow">FactorCloud Client Portal</span>
-          <h1>{loading && !data ? 'Loading your account...' : `Welcome, ${data?.source.clientName ? shortName(data.source.clientName) : portalConfig.clientShortName}`}</h1>
-          <p>Your invoices, funding activity, alerts, and submissions in one place.</p>
+          <div className="dashboardHeroMeta"><span className="eyebrow">FactorCloud Client Portal</span><span className="dashLiveBadge"><i />Live account data</span></div>
+          <h1>{loading && !data ? 'Loading your account...' : `Good to see you, ${data?.source.clientName ? shortName(data.source.clientName) : portalConfig.clientShortName}`}</h1>
+          <p>Track invoice activity, review exceptions, and debtor concentration without digging through separate screens.</p>
         </div>
         <div className="portalWelcomeActions">
           <a className="primaryLink" href="/submit">+ Submit invoice</a>
@@ -103,93 +140,125 @@ export default function ClientPortalHome() {
         </div>
       </section>
 
+      <DashboardViewSwitcher
+        storageKey="factorcloud-client-dashboard-views-v1"
+        presets={CLIENT_PRESETS}
+        widgets={CLIENT_WIDGETS}
+        onWidgetsChange={setVisibleWidgets}
+      />
+
       {data?.source.complete === false && <div className="attentionSummary review"><strong>Some invoices may be missing</strong><span>Not every invoice could be loaded from FactorCloud, so totals below may be incomplete. Try again shortly.</span></div>}
       {error && <div className="attentionSummary fail"><strong>Could not load FactorCloud data</strong><span>{error}</span><button className="small retryButton" onClick={() => void load()}>Try again</button></div>}
 
       {data && <>
-        <section className="portalMetricGrid">
-          <Metric label="Invoice activity" value={money(data.totalAmount)} detail={`${data.invoiceCount} invoice${data.invoiceCount === 1 ? '' : 's'} in current data`} />
-          <Metric label="Last 7 days" value={money(data.last7Amount)} detail={data.volumeRatio == null ? 'Building a baseline' : `${data.volumeRatio.toFixed(1)}x prior weekly pace`} tone={data.volumeRatio != null && data.volumeRatio >= 1.5 ? 'review' : ''} />
-          <Metric label="Top debtor share" value={topConcentration ? `${Math.round(topConcentration.share * 100)}%` : '-'} detail={topConcentration?.debtorName || 'No concentration data yet'} tone={topConcentration?.level === 'HIGH' ? 'fail' : topConcentration?.level === 'REVIEW' ? 'review' : ''} />
-          <Metric label="Needs attention" value={data.alerts.length} detail={data.alerts.length ? 'Account alerts to review' : 'No current alerts'} tone={data.alerts.length ? 'review' : 'pass'} />
+        {show('metrics') && <section className="dashMetricGrid">
+          <DashMetric icon="$" label="30-day activity" value={money(last30Amount)} detail={trendCopy(thirtyDayTrend, 'vs. prior 30 days')} trend={thirtyDayTrend} />
+          <DashMetric icon="7" label="Last 7 days" value={money(data.last7Amount)} detail={data.volumeRatio == null ? 'Building a weekly baseline' : `${data.volumeRatio.toFixed(1)}x prior weekly pace`} trend={data.volumeRatio == null ? null : (data.volumeRatio - 1) * 100} />
+          <DashMetric icon="Ø" label="Average invoice" value={money(averageInvoice)} detail={`${data.invoiceCount} invoice${data.invoiceCount === 1 ? '' : 's'} in loaded history`} />
+          <DashMetric icon="!" label="Portal reviews" value={openReviews} detail={openReviews ? 'Waiting on factor review' : 'Nothing waiting for review'} tone={openReviews ? 'review' : 'good'} />
+          <DashMetric icon="%" label="Top debtor share" value={topConcentration ? `${Math.round(topConcentration.share * 100)}%` : '-'} detail={topConcentration?.debtorName || 'No concentration data yet'} tone={topConcentration?.level === 'HIGH' ? 'bad' : topConcentration?.level === 'REVIEW' ? 'review' : 'good'} />
+        </section>}
+
+        <section className="dashBoard">
+          {show('trend') && <DashboardCard className="dashSpan8" kicker="Invoice activity" title="Eight-week volume trend" action={<a href="/invoices">Explore invoices</a>}>
+            <div className="dashCardStatline"><strong>{money(trend.reduce((sum, point) => sum + point.amount, 0))}</strong><span>{trend.reduce((sum, point) => sum + point.count, 0)} invoices across the last eight calendar weeks</span></div>
+            <ActivityTrendChart points={trend} />
+          </DashboardCard>}
+
+          {show('status') && <DashboardCard className="dashSpan4" kicker="FactorCloud status" title="Where invoices stand">
+            <StatusDonut items={statusMix} centerValue={data.invoiceCount} centerLabel="Invoices" />
+          </DashboardCard>}
+
+          {show('recent') && <DashboardCard className="dashSpan8" kicker="Recent activity" title="Latest invoices" action={<a href="/invoices">View all</a>}>
+            <div className="dashInvoiceRows">
+              {recent.map((record) => {
+                const workflow = data.portalWorkflows?.[record.id];
+                return <a className="dashInvoiceRow" href={`/invoices/${encodeURIComponent(record.id)}`} key={record.id}>
+                  <div className="dashInvoiceGlyph">{statusInitial(record.status)}</div>
+                  <div className="dashInvoiceIdentity">
+                    <strong>Invoice {record.invoiceNumber || record.id.slice(0, 8)}</strong>
+                    <span>{record.companyDebtorId ? debtorNames[record.companyDebtorId] || 'FactorCloud debtor' : 'Debtor unavailable'} · {record.invoiceDate || 'No date'}</span>
+                  </div>
+                  <div className="dashInvoiceStatuses">
+                    <span className={`portalStatus ${statusTone(record.status)}`}>{pretty(record.status || 'Unknown')}</span>
+                    {workflow && <span className={`dashReviewPill ${workflowTone(workflow.workflowStatus)}`}>{pretty(workflow.workflowStatus)}</span>}
+                  </div>
+                  <strong>{record.invoiceAmount == null ? '-' : money(record.invoiceAmount)}</strong>
+                </a>;
+              })}
+              {!recent.length && <div className="portalEmpty"><strong>No invoice activity yet</strong><span>Submit your first invoice to start building this dashboard.</span></div>}
+            </div>
+          </DashboardCard>}
+
+          {show('alerts') && <DashboardCard className="dashSpan4" kicker="Attention" title="Signals to review" action={<a href="/risk">Open alerts</a>}>
+            <div className="dashAlertStack">
+              {data.alerts.slice(0, 5).map((alert) => <div className={`dashAlertItem ${alert.level.toLowerCase()}`} key={alert.id}>
+                <span className="dashAlertIcon">!</span>
+                <div><strong>{alert.title}</strong><span>{alert.detail}</span></div>
+              </div>)}
+              {!data.alerts.length && <div className="dashAllClear"><span>✓</span><div><strong>Nothing needs attention</strong><small>No concentration or volume signal is currently triggered.</small></div></div>}
+            </div>
+          </DashboardCard>}
+
+          {show('concentration') && <DashboardCard className="dashSpan8" kicker="Debtor mix" title="Concentration by invoice activity" action={<a href="/risk">See thresholds</a>}>
+            <RankBars
+              items={data.concentrations.slice(0, 6).map((row) => ({
+                id: row.debtorId,
+                label: row.debtorName,
+                value: row.amount,
+                detail: `${row.invoiceCount} invoice${row.invoiceCount === 1 ? '' : 's'} · ${Math.round(row.share * 100)}% share`,
+              }))}
+            />
+          </DashboardCard>}
+
+          {show('quick-actions') && <DashboardCard className="dashSpan4" kicker="Shortcuts" title="Get something done">
+            <div className="dashQuickGrid">
+              <QuickAction href="/submit" icon="↑" title="Submit invoice" detail="Upload, verify, and send a funding packet" />
+              <QuickAction href="/invoices" icon="#" title="Find an invoice" detail="Search FactorCloud and portal review status" />
+              {portalConfig.features.batch && <QuickAction href="/batch" icon="≡" title="Batch upload" detail="Process multiple invoice packets" />}
+              {portalConfig.features.alerts && <QuickAction href="/risk" icon="!" title="Review alerts" detail="Inspect concentration and volume signals" />}
+            </div>
+          </DashboardCard>}
         </section>
 
-        <section className="portalDashboardGrid">
-          <div className="portalPanel portalActivityPanel">
-            <div className="portalPanelHeader">
-              <div><span className="panelKicker">Invoice activity</span><h2>Recent invoices</h2></div>
-              <a href="/invoices">View all invoices</a>
-            </div>
-
-            {statusCounts.length > 0 && <div className="statusStrip">
-              {statusCounts.slice(0, 4).map(([status, count]) => <div key={status}><strong>{count}</strong><span>{titleCase(status)}</span></div>)}
-            </div>}
-
-            <div className="portalInvoiceList">
-              {recent.map((record) => <a className="portalInvoiceRow portalInvoiceLink" href={`/invoices?invoice=${encodeURIComponent(record.invoiceNumber || record.id)}`} key={record.id}>
-                <div className="invoiceMark"><span>{statusInitial(record.status)}</span></div>
-                <div className="invoiceIdentity">
-                  <strong>Invoice {record.invoiceNumber || record.id.slice(0, 8)}</strong>
-                  <span>{record.companyDebtorId ? debtorNames[record.companyDebtorId] || 'FactorCloud debtor' : 'Debtor unavailable'} · {record.invoiceDate || 'No date'}</span>
-                </div>
-                <span className={`portalStatus ${statusTone(record.status)}`}>{titleCase((record.status || 'Unknown').replaceAll('_', ' '))}</span>
-                <strong className="invoiceAmount">{record.invoiceAmount == null ? '-' : money(record.invoiceAmount)}</strong>
-              </a>)}
-              {!recent.length && <div className="portalEmpty"><strong>No invoice activity yet</strong><span>Submit your first invoice to get started.</span></div>}
-            </div>
-          </div>
-
-          <div className="portalSideColumn">
-            <div className="portalPanel">
-              <div className="portalPanelHeader"><div><span className="panelKicker">Attention</span><h2>Alerts</h2></div><a href="/risk">View all</a></div>
-              <div className="portalAlertList">
-                {data.alerts.slice(0, 4).map((alert) => <div className={`portalAlert ${alert.level.toLowerCase()}`} key={alert.id}><span className="alertDot"/><div><strong>{alert.title}</strong><span>{alert.detail}</span></div></div>)}
-                {!data.alerts.length && <div className="portalEmpty compact"><strong>All clear</strong><span>No concentration or volume alert is currently triggered.</span></div>}
-              </div>
-            </div>
-
-            <div className="portalPanel quickActionsPanel">
-              <div className="portalPanelHeader"><div><span className="panelKicker">Quick actions</span><h2>What do you need?</h2></div></div>
-              <a className="quickAction" href="/submit"><span className="quickIcon">↑</span><div><strong>Submit an invoice</strong><span>Upload and verify one funding packet</span></div><b>›</b></a>
-              <a className="quickAction" href="/invoices"><span className="quickIcon">#</span><div><strong>Find an invoice</strong><span>Search status and recent activity</span></div><b>›</b></a>
-              {portalConfig.features.batch && <a className="quickAction" href="/batch"><span className="quickIcon">≡</span><div><strong>Batch upload</strong><span>Submit multiple invoices at once</span></div><b>›</b></a>}
-              {portalConfig.features.alerts && <a className="quickAction" href="/risk"><span className="quickIcon">!</span><div><strong>Review alerts</strong><span>See concentration and volume signals</span></div><b>›</b></a>}
-            </div>
-          </div>
-        </section>
-
-        <section className="portalPanel concentrationPanel">
-          <div className="portalPanelHeader"><div><span className="panelKicker">Portfolio view</span><h2>Debtor concentration</h2><p>Share of invoice amount in the currently retrieved FactorCloud dataset.</p></div><a href="/risk">Open alerts</a></div>
-          <div className="concentrationBars">
-            {data.concentrations.slice(0, 5).map((row) => <div className="concentrationRow" key={row.debtorId}>
-              <div className="concentrationLabel"><strong>{row.debtorName}</strong><span>{row.invoiceCount} invoice{row.invoiceCount === 1 ? '' : 's'} · {money(row.amount)}</span></div>
-              <div className="concentrationTrack"><span style={{ width: `${Math.max(2, Math.min(100, row.share * 100))}%` }} /></div>
-              <strong className="concentrationPct">{Math.round(row.share * 100)}%</strong>
-            </div>)}
-            {!data.concentrations.length && <div className="portalEmpty"><strong>No concentration data yet</strong><span>It will appear as invoice activity builds.</span></div>}
-          </div>
-        </section>
-
-        <p className="portalDataNote">This first-client portal uses live records available from the FactorCloud integration environment. Concentration and volume alerts are v1 operational signals and can be configured per client as the product rolls out.</p>
+        <p className="portalDataNote">{data.source.note} Dashboard views use invoice activity and portal workflow data only; they do not relabel these figures as open A/R, cash, or exposure.</p>
       </>}
     </main>
   );
 }
 
-function Metric({ label, value, detail, tone = '' }: { label: string; value: string | number; detail: string; tone?: string }) {
-  return <div className={`portalMetric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>;
+function DashboardCard({ kicker, title, action, className = '', children }: { kicker: string; title: string; action?: React.ReactNode; className?: string; children: React.ReactNode }) {
+  return <section className={`dashCard ${className}`}>
+    <div className="dashCardHeader"><div><span>{kicker}</span><h2>{title}</h2></div>{action && <div className="dashCardAction">{action}</div>}</div>
+    <div className="dashCardBody">{children}</div>
+  </section>;
 }
 
-function money(value: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+function DashMetric({ icon, label, value, detail, trend, tone = '' }: { icon: string; label: string; value: string | number; detail: string; trend?: number | null; tone?: string }) {
+  return <div className={`dashMetric ${tone}`}>
+    <div className="dashMetricTop"><span className="dashMetricIcon">{icon}</span>{trend != null && Number.isFinite(trend) && <span className={`dashMetricTrend ${trend >= 0 ? 'up' : 'down'}`}>{trend >= 0 ? '↗' : '↘'} {Math.abs(trend).toFixed(0)}%</span>}</div>
+    <span className="dashMetricLabel">{label}</span>
+    <strong>{value}</strong>
+    <small>{detail}</small>
+  </div>;
+}
+
+function QuickAction({ href, icon, title, detail }: { href: string; icon: string; title: string; detail: string }) {
+  return <a className="dashQuickAction" href={href}><span>{icon}</span><div><strong>{title}</strong><small>{detail}</small></div><b>›</b></a>;
+}
+
+function trendCopy(value: number | null, suffix: string): string {
+  if (value == null) return `No prior baseline ${suffix}`;
+  if (Math.abs(value) < 0.5) return `Flat ${suffix}`;
+  return `${value > 0 ? '+' : ''}${value.toFixed(0)}% ${suffix}`;
 }
 
 function shortName(name: string): string {
   return name.replace(/\b(LLC|INC|CORP|CORPORATION|LTD)\.?$/i, '').trim();
 }
 
-function titleCase(value: string): string {
-  return value.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+function pretty(value: string): string {
+  return value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function statusInitial(status: string | null): string {
@@ -198,7 +267,14 @@ function statusInitial(status: string | null): string {
 
 function statusTone(status: string | null): string {
   const value = (status || '').toUpperCase();
-  if (value.includes('PAID') || value.includes('FUNDED') || value.includes('PURCHASE')) return 'pass';
-  if (value.includes('REJECT') || value.includes('FAIL')) return 'fail';
+  if (value.includes('PAID') || value.includes('FUNDED') || value.includes('PURCHASE') || value.includes('APPROV')) return 'pass';
+  if (value.includes('REJECT') || value.includes('FAIL') || value.includes('ERROR')) return 'fail';
+  return 'review';
+}
+
+function workflowTone(status: string): string {
+  const value = status.toUpperCase();
+  if (value.includes('APPROV') || value.includes('CREATED')) return 'pass';
+  if (value.includes('REJECT') || value.includes('ERROR')) return 'fail';
   return 'review';
 }
