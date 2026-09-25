@@ -53,8 +53,8 @@ export default function FactorOperationsPage() {
       <div className="opsRole">Factor Operations</div>
       <nav className="opsNav">
         <a className="active" href="/ops">Overview</a>
-        <span>Clients</span>
-        <span>Review queue</span>
+        <a href="/ops">Clients</a>
+        <a href="/ops/reviews">Review queue</a>
         <span>Alerts</span>
         <span>Configuration</span>
       </nav>
@@ -74,7 +74,7 @@ export default function FactorOperationsPage() {
           <Metric label="Clients in retrieved data" value={data.totals.clientCount} />
           <Metric label="Invoices" value={data.totals.invoiceCount} />
           <Metric label="Invoice amount" value={money(data.totals.invoiceAmount)} />
-          <Metric label="Review queue" value="Next" detail="Will surface client REVIEW submissions here" />
+          <Metric label="Review queue" value="Open" detail="Portal REVIEW submissions are now surfaced separately" />
         </section>
 
         <div className="warning opsDataNote">{data.source.note}</div>
