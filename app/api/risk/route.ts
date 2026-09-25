@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
 import { fcRequest, getCompany } from '@/lib/factorcloud';
+import { PortalAccessError, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 export async function GET() {
-  const clientId = process.env.FACTORCLOUD_CLIENT_ID;
-  if (!clientId) return NextResponse.json({ error: 'FACTORCLOUD_CLIENT_ID is not configured.' }, { status: 500 });
-
   try {
+    const clientId = await resolveConfiguredClientId();
     const [raw, client] = await Promise.all([
       fcRequest('/invoices'),
       getCompany(clientId),
@@ -45,11 +44,12 @@ export async function GET() {
         returnedInvoiceCount: allRecords.length,
         clientInvoiceCount: records.length,
         excludedWithoutPositiveClientMatch: allRecords.length - records.length,
-        note: 'Client-facing data now requires an explicit FactorCloud client ID match. Records without a matching client ID are excluded. API pagination and open-A/R status semantics still need to be confirmed before treating these as production exposure metrics.',
+        note: 'Client-facing data requires an explicit FactorCloud client ID match. Records without a matching client ID are excluded. API pagination and open-A/R status semantics still need to be confirmed before treating these as production exposure metrics.',
       },
     });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
+    const status = err instanceof PortalAccessError ? err.status : 502;
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status });
   }
 }
 
