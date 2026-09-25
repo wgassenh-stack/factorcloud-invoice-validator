@@ -8,7 +8,9 @@ import {
   uploadDocument,
 } from '@/lib/factorcloud';
 import { isBlank, normalizeDate, normalizeMoney } from '@/lib/normalize';
+import { currentPortalSession, PortalAccessError, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
+import { persistSubmissionStart, markSubmissionFactorCloudResult, type StoredSubmission } from '@/lib/submission-store';
 import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
 import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '@/lib/types';
 
@@ -25,18 +27,23 @@ interface CreatePayload {
 }
 
 export async function POST(req: Request) {
+  let clientId: string;
+  try { clientId = await resolveConfiguredClientId(); }
+  catch (err) {
+    const status = err instanceof PortalAccessError ? err.status : 500;
+    return NextResponse.json({ error: message(err) }, { status });
+  }
+
   const form = await req.formData();
   let payload: CreatePayload;
   try { payload = JSON.parse(String(form.get('payload'))); }
   catch { return NextResponse.json({ error: 'Missing payload.' }, { status: 400 }); }
 
   const files = form.getAll('files').filter((f): f is File => f instanceof File && f.size > 0);
-  const clientId = process.env.FACTORCLOUD_CLIENT_ID;
   const allowedDebtors = (process.env.FACTORCLOUD_DEBTOR_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const amount = normalizeMoney(payload.invoiceAmount);
   const invoiceDate = normalizeDate(payload.invoiceDate);
   const problems: string[] = [];
-  if (!clientId) problems.push('FACTORCLOUD_CLIENT_ID is not configured');
   if (!payload.debtorId || !allowedDebtors.includes(payload.debtorId)) problems.push('debtor is not an allowed FactorCloud debtor');
   if (isBlank(payload.invoiceNumber)) problems.push('invoice # is required');
   if (amount === null || amount <= 0) problems.push('invoice amount must be positive');
@@ -46,11 +53,8 @@ export async function POST(req: Request) {
   if (problems.length) return NextResponse.json({ error: `Cannot create invoice: ${problems.join('; ')}.` }, { status: 400 });
 
   let receipt;
-  try {
-    receipt = verifyAnalysisReceipt(payload.analysisReceipt);
-  } catch (err) {
-    return NextResponse.json({ error: `Cannot create invoice: ${message(err)}` }, { status: 400 });
-  }
+  try { receipt = verifyAnalysisReceipt(payload.analysisReceipt); }
+  catch (err) { return NextResponse.json({ error: `Cannot create invoice: ${message(err)}` }, { status: 400 }); }
 
   if (receipt.clientId !== clientId) problems.push('verification receipt belongs to a different client');
   if (receipt.debtorId !== payload.debtorId) problems.push('debtor does not match the verified packet');
@@ -60,43 +64,49 @@ export async function POST(req: Request) {
   if (!problems.length) {
     const actualHashes = await Promise.all(files.map((file) => hashFile(file)));
     for (let i = 0; i < receipt.documents.length; i++) {
-      const expected = receipt.documents[i];
-      if (expected.fileHash !== actualHashes[i]) {
-        problems.push(`uploaded file ${i + 1} is not the same file that was verified`);
-      }
+      if (receipt.documents[i].fileHash !== actualHashes[i]) problems.push(`uploaded file ${i + 1} is not the same file that was verified`);
     }
   }
   if (problems.length) return NextResponse.json({ error: `Cannot create invoice: ${problems.join('; ')}.` }, { status: 400 });
 
   let debtor;
   let client;
-  try {
-    [debtor, client] = await Promise.all([getCompany(payload.debtorId), getCompany(clientId!)]);
-  } catch (err) {
-    return NextResponse.json({ error: `Cannot re-check FactorCloud records: ${message(err)}` }, { status: 502 });
-  }
+  try { [debtor, client] = await Promise.all([getCompany(payload.debtorId), getCompany(clientId)]); }
+  catch (err) { return NextResponse.json({ error: `Cannot re-check FactorCloud records: ${message(err)}` }, { status: 502 }); }
 
   const originalPrimary = receipt.documents[receipt.primaryIndex].fields;
   const corrections = collectClientCorrections(originalPrimary, payload);
   const rawValidation = validate({ documents: receipt.documents, primaryIndex: receipt.primaryIndex, debtor, client });
   const validation = addCorrectionReview(rawValidation, corrections);
-  if (validation.status === 'FAIL') {
-    return NextResponse.json({ error: 'Validation failed. Fix the failed checks before submitting the invoice.', validation }, { status: 409 });
-  }
+  if (validation.status === 'FAIL') return NextResponse.json({ error: 'Validation failed. Fix the failed checks before submitting the invoice.', validation }, { status: 409 });
 
   try {
-    const duplicateNumbers = [...new Set([
-      originalPrimary.invoiceNumber?.trim(),
-      payload.invoiceNumber.trim(),
-    ].filter((value): value is string => Boolean(value)))];
+    const duplicateNumbers = [...new Set([originalPrimary.invoiceNumber?.trim(), payload.invoiceNumber.trim()].filter((value): value is string => Boolean(value)))];
     for (const invoiceNumber of duplicateNumbers) {
-      const existing = await findExistingInvoice(clientId!, payload.debtorId, invoiceNumber);
-      if (existing) {
-        return NextResponse.json({ error: `Invoice ${invoiceNumber} already exists in FactorCloud as ${existing.id}${existing.status ? ` (${existing.status})` : ''}.`, validation }, { status: 409 });
-      }
+      const existing = await findExistingInvoice(clientId, payload.debtorId, invoiceNumber);
+      if (existing) return NextResponse.json({ error: `Invoice ${invoiceNumber} already exists in FactorCloud as ${existing.id}${existing.status ? ` (${existing.status})` : ''}.`, validation }, { status: 409 });
     }
   } catch (err) {
     return NextResponse.json({ error: `Duplicate check failed, so submission was blocked: ${message(err)}`, validation }, { status: 502 });
+  }
+
+  const session = await currentPortalSession();
+  let storedSubmission: StoredSubmission | null = null;
+  try {
+    storedSubmission = await persistSubmissionStart({
+      session,
+      factorCloudClientId: clientId,
+      receipt,
+      validation,
+      invoiceNumber: payload.invoiceNumber.trim(),
+      referenceNumber: payload.referenceNumber?.trim() || null,
+      invoiceAmount: amount!,
+      invoiceDate: invoiceDate!,
+      analysisReceipt: payload.analysisReceipt,
+      files,
+    });
+  } catch (err) {
+    return NextResponse.json({ error: `Portal workflow blocked submission: ${message(err)}`, validation }, { status: 409 });
   }
 
   const steps: CreateStep[] = [];
@@ -113,7 +123,7 @@ export async function POST(req: Request) {
     const created = await createInvoice({
       invoiceNumber: payload.invoiceNumber.trim(),
       referenceNumber: payload.referenceNumber?.trim() || null,
-      companyClientId: clientId!,
+      companyClientId: clientId,
       companyDebtorId: payload.debtorId,
       invoiceAmount: amount!,
       invoiceDate: invoiceDate!,
@@ -121,15 +131,18 @@ export async function POST(req: Request) {
     });
     invoiceId = created.id;
     steps.push({ step: 'Create invoice', ok: true, detail: `Invoice ${invoiceId}` });
+    await markSubmissionFactorCloudResult({ submission: storedSubmission, session, invoiceId, validationStatus: validation.status });
   } catch (err) {
-    steps.push({ step: 'Create invoice', ok: false, detail: message(err) });
-    return respond(false, message(err));
+    const detail = message(err);
+    steps.push({ step: 'Create invoice', ok: false, detail });
+    try { await markSubmissionFactorCloudResult({ submission: storedSubmission, session, validationStatus: validation.status, error: detail }); } catch { /* original error remains primary */ }
+    return respond(false, detail);
   }
 
   for (const [i, file] of files.entries()) {
     const wanted = FC_DOCUMENT_TYPES[receipt.documents[i].fields.documentType] ?? 'INVOICE';
     try {
-      const doc = await uploadDocument(clientId!, file, wanted);
+      const doc = await uploadDocument(clientId, file, wanted);
       documentIds.push(doc.id);
       const note = doc.type !== wanted ? ` (type ${wanted} rejected, uploaded as ${doc.type})` : ` as ${doc.type}`;
       steps.push({ step: `Upload ${file.name}`, ok: true, detail: `Document ${doc.id}${note}` });
@@ -169,12 +182,7 @@ function addCorrectionReview(validation: ValidationReport, corrections: string[]
     status: 'REVIEW',
     message: `The client changed verified field${corrections.length === 1 ? '' : 's'} after document analysis: ${corrections.join(', ')}.`,
   };
-  return {
-    status: validation.status === 'FAIL' ? 'FAIL' : 'REVIEW',
-    checks: [correctionCheck, ...validation.checks],
-  };
+  return { status: validation.status === 'FAIL' ? 'FAIL' : 'REVIEW', checks: [correctionCheck, ...validation.checks] };
 }
 
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+function message(err: unknown): string { return err instanceof Error ? err.message : String(err); }
