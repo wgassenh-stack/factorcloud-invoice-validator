@@ -100,7 +100,7 @@ export default function InvoicesPage() {
           <thead><tr><th>Invoice</th><th>Debtor</th><th>Invoice date</th><th>Amount</th><th>Status</th></tr></thead>
           <tbody>
             {filtered.map((record) => <tr key={record.id}>
-              <td><div className="invoiceTableIdentity"><strong>{record.invoiceNumber || record.id.slice(0, 8)}</strong><span>{record.id.slice(0, 8)}</span></div></td>
+              <td><a className="invoiceDetailLink" href={`/invoices/${encodeURIComponent(record.id)}`}><div className="invoiceTableIdentity"><strong>{record.invoiceNumber || record.id.slice(0, 8)}</strong><span>{record.id.slice(0, 8)}</span></div></a></td>
               <td>{record.companyDebtorId ? debtorNames[record.companyDebtorId] || 'FactorCloud debtor' : '-'}</td>
               <td>{record.invoiceDate || '-'}</td>
               <td><strong>{record.invoiceAmount == null ? '-' : money(record.invoiceAmount)}</strong></td>
@@ -113,7 +113,7 @@ export default function InvoicesPage() {
       </div>
     </section>
 
-    <p className="portalDataNote">V1 shows the invoice fields currently proven through the FactorCloud integration. A future invoice detail view can add documents, funding events, advances, reserves, and payment history as those endpoints are mapped.</p>
+    <p className="portalDataNote">Open an invoice to see its current FactorCloud status plus portal submission, document, review, and audit history when available.</p>
   </main>;
 }
 
