@@ -1,7 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { ActivityTrendChart, RankBars, StatusDonut, money } from '@/app/components/DashboardCharts';
+import { DashboardViewSwitcher, type DashboardPreset, type DashboardWidgetOption } from '@/app/components/DashboardViews';
 import { OpsSignOut } from '../components/OpsSignOut';
+import type { ActivityPoint, StatusMixItem } from '@/lib/dashboard';
 
 type OpsClientSummary = {
   clientId: string;
@@ -12,18 +15,57 @@ type OpsClientSummary = {
   statuses: Record<string, number>;
 };
 
+type RecentInvoice = {
+  id: string;
+  invoiceNumber: string | null;
+  companyClientId: string | null;
+  clientName: string;
+  invoiceAmount: number | null;
+  invoiceDate: string | null;
+  status: string | null;
+};
+
 type OpsResponse = {
   clients: OpsClientSummary[];
   totals: { clientCount: number; invoiceCount: number; invoiceAmount: number };
-  source: { returnedInvoiceCount: number; note: string };
+  portfolio: {
+    weeklyActivity: ActivityPoint[];
+    statuses: StatusMixItem[];
+    averageInvoiceAmount: number;
+    last30Amount: number;
+    prior30Amount: number;
+    last30TrendPct: number | null;
+    topClientShare: number;
+    recentInvoices: RecentInvoice[];
+    reviewSummary: { openCount: number; openAmount: number; oldestCreatedAt: string | null };
+  };
+  source: { returnedInvoiceCount: number; complete?: boolean; note: string };
   error?: string;
 };
+
+const FACTOR_PRESETS: DashboardPreset[] = [
+  { id: 'executive', label: 'Executive', description: 'Portfolio health at a glance', widgets: ['metrics', 'volume', 'top-clients', 'status', 'reviews', 'clients'] },
+  { id: 'portfolio', label: 'Portfolio', description: 'Client mix and activity concentration', widgets: ['metrics', 'volume', 'top-clients', 'clients'] },
+  { id: 'operations', label: 'Operations', description: 'Reviews, status mix and recent work', widgets: ['metrics', 'reviews', 'status', 'recent', 'clients'] },
+  { id: 'activity', label: 'Activity', description: 'Volume trend and latest invoices', widgets: ['metrics', 'volume', 'status', 'recent'] },
+];
+
+const FACTOR_WIDGETS: DashboardWidgetOption[] = [
+  { id: 'metrics', label: 'Key metrics', description: '30-day activity, clients, reviews and average invoice size' },
+  { id: 'volume', label: 'Volume trend', description: 'Twelve weeks of factor-wide invoice activity' },
+  { id: 'top-clients', label: 'Top clients', description: 'Clients ranked by invoice activity amount' },
+  { id: 'status', label: 'Status mix', description: 'FactorCloud status distribution across invoices' },
+  { id: 'reviews', label: 'Review workload', description: 'Open portal reviews and queue context' },
+  { id: 'recent', label: 'Recent invoices', description: 'Latest invoice activity across clients' },
+  { id: 'clients', label: 'Client table', description: 'Searchable operating view across clients' },
+];
 
 export default function FactorOperationsPage() {
   const [data, setData] = useState<OpsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
+  const [visibleWidgets, setVisibleWidgets] = useState<string[]>(FACTOR_PRESETS[0].widgets);
 
   async function load() {
     setLoading(true);
@@ -48,13 +90,16 @@ export default function FactorOperationsPage() {
     return (data?.clients ?? []).filter((client) => client.clientName.toLowerCase().includes(term) || client.clientId.toLowerCase().includes(term));
   }, [data, query]);
 
-  return <main className="opsShell">
+  const topClients = useMemo(() => [...(data?.clients ?? [])].sort((a, b) => b.invoiceAmount - a.invoiceAmount).slice(0, 7), [data]);
+  const show = (widget: string) => visibleWidgets.includes(widget);
+
+  return <main className="opsShell dashboardPage">
     <aside className="opsSidebar">
       <a className="opsBrand" href="/ops"><img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" /></a>
       <div className="opsRole">Factor Operations</div>
       <nav className="opsNav">
         <a className="active" href="/ops">Overview</a>
-        <a href="/ops">Clients</a>
+        <a href="#clients">Clients</a>
         <a href="/ops/reviews">Review queue</a>
         <span>Alerts</span>
         <span>Configuration</span>
@@ -63,58 +108,147 @@ export default function FactorOperationsPage() {
     </aside>
 
     <section className="opsContent">
-      <header className="opsHeader">
-        <div><span className="eyebrow">Factor operations</span><h1>Client Overview</h1><p>Internal view across the factor's clients. Client portals remain isolated to a single client.</p></div>
+      <header className="opsHeader dashboardHero opsDashboardHero">
+        <div>
+          <div className="dashboardHeroMeta"><span className="eyebrow">Factor operations</span><span className="dashLiveBadge"><i />Live FactorCloud data</span></div>
+          <h1>Portfolio command center</h1>
+          <p>See client activity, review workload, and portfolio mix before drilling into the details.</p>
+        </div>
         <button className="small opsRefresh" onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
       </header>
 
+      <DashboardViewSwitcher
+        storageKey="factorcloud-factor-dashboard-views-v1"
+        presets={FACTOR_PRESETS}
+        widgets={FACTOR_WIDGETS}
+        onWidgetsChange={setVisibleWidgets}
+      />
+
       {error && <div className="attentionSummary fail"><strong>Could not load operations data</strong><span>{error}</span></div>}
+      {data?.source.complete === false && <div className="attentionSummary review"><strong>Portfolio totals may be incomplete</strong><span>{data.source.note}</span></div>}
 
       {data && <>
-        <section className="opsMetrics">
-          <Metric label="Clients in retrieved data" value={data.totals.clientCount} />
-          <Metric label="Invoices" value={data.totals.invoiceCount} />
-          <Metric label="Invoice amount" value={money(data.totals.invoiceAmount)} />
-          <Metric label="Review queue" value="Open" detail="Portal REVIEW submissions are now surfaced separately" />
+        {show('metrics') && <section className="dashMetricGrid factorMetricGrid">
+          <DashMetric icon="$" label="30-day activity" value={money(data.portfolio.last30Amount)} detail={trendCopy(data.portfolio.last30TrendPct, 'vs. prior 30 days')} trend={data.portfolio.last30TrendPct} />
+          <DashMetric icon="C" label="Clients with activity" value={data.totals.clientCount} detail={`${data.totals.invoiceCount} invoices in loaded history`} />
+          <DashMetric icon="!" label="Open reviews" value={data.portfolio.reviewSummary.openCount} detail={data.portfolio.reviewSummary.openCount ? `${money(data.portfolio.reviewSummary.openAmount)} submitted amount` : 'Review queue is clear'} tone={data.portfolio.reviewSummary.openCount ? 'review' : 'good'} />
+          <DashMetric icon="Ø" label="Average invoice" value={money(data.portfolio.averageInvoiceAmount)} detail={`${money(data.totals.invoiceAmount)} total invoice activity`} />
+          <DashMetric icon="%" label="Top client share" value={`${Math.round(data.portfolio.topClientShare * 100)}%`} detail={topClients[0]?.clientName || 'No client activity yet'} tone={data.portfolio.topClientShare >= .5 ? 'review' : 'good'} />
+        </section>}
+
+        <section className="dashBoard factorDashBoard">
+          {show('volume') && <DashboardCard className="dashSpan8" kicker="Portfolio activity" title="Twelve-week invoice trend">
+            <div className="dashCardStatline"><strong>{money(data.portfolio.weeklyActivity.reduce((sum, point) => sum + point.amount, 0))}</strong><span>{data.portfolio.weeklyActivity.reduce((sum, point) => sum + point.count, 0)} invoices across the last twelve calendar weeks</span></div>
+            <ActivityTrendChart points={data.portfolio.weeklyActivity} />
+          </DashboardCard>}
+
+          {show('top-clients') && <DashboardCard className="dashSpan4" kicker="Portfolio mix" title="Top clients by activity">
+            <RankBars items={topClients.map((client) => ({ id: client.clientId, label: client.clientName, value: client.invoiceAmount, detail: `${client.invoiceCount} invoices` }))} />
+          </DashboardCard>}
+
+          {show('status') && <DashboardCard className="dashSpan4" kicker="FactorCloud status" title="Invoice status mix">
+            <StatusDonut items={data.portfolio.statuses} centerValue={data.totals.invoiceCount} centerLabel="Invoices" />
+          </DashboardCard>}
+
+          {show('reviews') && <DashboardCard className="dashSpan4" kicker="Portal workflow" title="Review workload" action={<a href="/ops/reviews">Open queue</a>}>
+            <div className="reviewWorkload">
+              <div className={`reviewWorkloadHero ${data.portfolio.reviewSummary.openCount ? 'hasWork' : ''}`}>
+                <span>{data.portfolio.reviewSummary.openCount ? 'Needs attention' : 'All clear'}</span>
+                <strong>{data.portfolio.reviewSummary.openCount}</strong>
+                <small>open review{data.portfolio.reviewSummary.openCount === 1 ? '' : 's'}</small>
+              </div>
+              <div className="reviewWorkloadDetails">
+                <div><span>Submitted amount</span><strong>{money(data.portfolio.reviewSummary.openAmount)}</strong></div>
+                <div><span>Oldest open item</span><strong>{ageCopy(data.portfolio.reviewSummary.oldestCreatedAt)}</strong></div>
+              </div>
+              <a className="reviewQueueLink" href="/ops/reviews">Work the review queue <span>›</span></a>
+            </div>
+          </DashboardCard>}
+
+          {show('recent') && <DashboardCard className="dashSpan8" kicker="Recent activity" title="Latest invoices across clients">
+            <div className="dashInvoiceRows">
+              {data.portfolio.recentInvoices.map((invoice) => <a className="dashInvoiceRow factorInvoiceRow" href={invoice.companyClientId ? `/ops/clients/${encodeURIComponent(invoice.companyClientId)}` : '/ops'} key={invoice.id}>
+                <div className="dashInvoiceGlyph">{(invoice.clientName || 'C').charAt(0).toUpperCase()}</div>
+                <div className="dashInvoiceIdentity">
+                  <strong>{invoice.clientName}</strong>
+                  <span>Invoice {invoice.invoiceNumber || invoice.id.slice(0, 8)} · {invoice.invoiceDate || 'No date'}</span>
+                </div>
+                <span className={`portalStatus ${statusTone(invoice.status)}`}>{pretty(invoice.status || 'Unknown')}</span>
+                <strong>{invoice.invoiceAmount == null ? '-' : money(invoice.invoiceAmount)}</strong>
+              </a>)}
+              {!data.portfolio.recentInvoices.length && <div className="portalEmpty"><strong>No recent activity</strong><span>Invoices will appear here as FactorCloud activity builds.</span></div>}
+            </div>
+          </DashboardCard>}
+
+          {show('clients') && <section className="dashCard dashSpan12" id="clients">
+            <div className="dashCardHeader clientsCardHeader">
+              <div><span>Operating view</span><h2>Clients</h2><p>Search and drill into any client represented in the FactorCloud invoice data.</p></div>
+              <label className="opsSearch"><span>Search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Client name or ID" /></label>
+            </div>
+            <div className="batchTableWrap">
+              <table className="batchTable opsTable dashboardClientTable">
+                <thead><tr><th>Client</th><th>Invoices</th><th>Invoice activity</th><th>Latest activity</th><th>Status mix</th></tr></thead>
+                <tbody>
+                  {filtered.map((client) => <tr key={client.clientId}>
+                    <td><a className="opsClientLink" href={`/ops/clients/${encodeURIComponent(client.clientId)}`}><div className="opsClientName"><strong>{client.clientName}</strong><span>{client.clientId}</span></div></a></td>
+                    <td><strong>{client.invoiceCount}</strong></td>
+                    <td><strong>{money(client.invoiceAmount)}</strong></td>
+                    <td>{client.latestInvoiceDate || '-'}</td>
+                    <td><div className="opsStatuses">{Object.entries(client.statuses).slice(0, 4).map(([status, count]) => <span key={status}>{pretty(status)} <strong>{count}</strong></span>)}</div></td>
+                  </tr>)}
+                  {!filtered.length && <tr><td colSpan={5}>No matching clients found.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </section>}
         </section>
 
-        <div className="warning opsDataNote">{data.source.note}</div>
-
-        <section className="opsPanel">
-          <div className="opsPanelHeader">
-            <div><h2>Clients</h2><p>One row per client represented in the FactorCloud invoice data currently returned to the integration. Open a client to inspect its invoices, alerts, and concentration.</p></div>
-            <label className="opsSearch"><span>Search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Client name or ID" /></label>
-          </div>
-
-          <div className="batchTableWrap">
-            <table className="batchTable opsTable">
-              <thead><tr><th>Client</th><th>Invoices</th><th>Invoice amount</th><th>Latest activity</th><th>Status mix</th></tr></thead>
-              <tbody>
-                {filtered.map((client) => <tr key={client.clientId}>
-                  <td><a className="opsClientLink" href={`/ops/clients/${encodeURIComponent(client.clientId)}`}><div className="opsClientName"><strong>{client.clientName}</strong><span>{client.clientId}</span></div></a></td>
-                  <td>{client.invoiceCount}</td>
-                  <td>{money(client.invoiceAmount)}</td>
-                  <td>{client.latestInvoiceDate || '-'}</td>
-                  <td><div className="opsStatuses">{Object.entries(client.statuses).slice(0, 4).map(([status, count]) => <span key={status}>{pretty(status)} <strong>{count}</strong></span>)}</div></td>
-                </tr>)}
-                {!filtered.length && <tr><td colSpan={5}>No matching clients found.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <p className="portalDataNote opsPortfolioNote">{data.source.note} Portfolio charts describe invoice activity, not true open A/R, cash position, or credit exposure.</p>
       </>}
     </section>
   </main>;
 }
 
-function Metric({ label, value, detail }: { label: string; value: string | number; detail?: string }) {
-  return <div className="opsMetric"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div>;
+function DashboardCard({ kicker, title, action, className = '', children }: { kicker: string; title: string; action?: React.ReactNode; className?: string; children: React.ReactNode }) {
+  return <section className={`dashCard ${className}`}>
+    <div className="dashCardHeader"><div><span>{kicker}</span><h2>{title}</h2></div>{action && <div className="dashCardAction">{action}</div>}</div>
+    <div className="dashCardBody">{children}</div>
+  </section>;
 }
 
-function money(value: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+function DashMetric({ icon, label, value, detail, trend, tone = '' }: { icon: string; label: string; value: string | number; detail: string; trend?: number | null; tone?: string }) {
+  return <div className={`dashMetric ${tone}`}>
+    <div className="dashMetricTop"><span className="dashMetricIcon">{icon}</span>{trend != null && Number.isFinite(trend) && <span className={`dashMetricTrend ${trend >= 0 ? 'up' : 'down'}`}>{trend >= 0 ? '↗' : '↘'} {Math.abs(trend).toFixed(0)}%</span>}</div>
+    <span className="dashMetricLabel">{label}</span>
+    <strong>{value}</strong>
+    <small>{detail}</small>
+  </div>;
+}
+
+function trendCopy(value: number | null, suffix: string): string {
+  if (value == null) return `No prior baseline ${suffix}`;
+  if (Math.abs(value) < 0.5) return `Flat ${suffix}`;
+  return `${value > 0 ? '+' : ''}${value.toFixed(0)}% ${suffix}`;
+}
+
+function ageCopy(iso: string | null): string {
+  if (!iso) return 'None';
+  const ageMs = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ageMs) || ageMs < 0) return 'Just opened';
+  const hours = Math.floor(ageMs / (60 * 60 * 1000));
+  if (hours < 1) return '< 1 hour';
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
 }
 
 function pretty(value: string): string {
   return value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function statusTone(status: string | null): string {
+  const value = (status || '').toUpperCase();
+  if (value.includes('PAID') || value.includes('FUNDED') || value.includes('PURCHASE') || value.includes('APPROV')) return 'pass';
+  if (value.includes('REJECT') || value.includes('FAIL') || value.includes('ERROR')) return 'fail';
+  return 'review';
 }

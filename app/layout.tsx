@@ -6,6 +6,7 @@ import './factorcloud-theme.css';
 import './ops.css';
 import './detail.css';
 import './auth.css';
+import './dashboard.css';
 
 export const metadata: Metadata = {
   title: 'FactorCloud Client Portal',
