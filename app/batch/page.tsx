@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { PortalNav } from '@/app/components/PortalNav';
 import type { BatchAnalyzeResponse, BatchPacketAnalysis, CreateResponse } from '@/lib/types';
 
 type StatusResponse = {
@@ -33,11 +34,6 @@ export default function BatchPage() {
     };
   }, [analysis]);
 
-  const estimatedCost = useMemo(() =>
-    (analysis?.packets ?? []).reduce((packetSum, packet) => packetSum + packet.documents.reduce((docSum, doc) => docSum + (doc.usage?.estimatedCostUsd ?? 0), 0), 0)
-    + (analysis?.unassignedDocuments ?? []).reduce((sum, doc) => sum + (doc.usage?.estimatedCostUsd ?? 0), 0),
-  [analysis]);
-
   async function analyzeBatch() {
     setBusy('Analyzing batch');
     setMessage('');
@@ -60,7 +56,7 @@ export default function BatchPage() {
   async function createOne(packet: BatchPacketAnalysis): Promise<boolean> {
     const key = packet.packetId;
     if (packet.validation.status !== 'PASS' || !packet.debtor || packet.factorCloudLookupFailed) return false;
-    setResults((current) => ({ ...current, [key]: { state: 'creating', message: 'Creating...' } }));
+    setResults((current) => ({ ...current, [key]: { state: 'creating', message: 'Submitting...' } }));
     try {
       const primary = packet.documents[packet.primaryIndex];
       const f = primary.fields;
@@ -70,7 +66,7 @@ export default function BatchPage() {
         referenceNumber: f.referenceNumber,
         invoiceAmount: f.invoiceAmount,
         invoiceDate: f.invoiceDate,
-        notes: 'Created through external validator batch intake',
+        notes: 'Submitted through client portal batch intake',
         debtorId: packet.debtor.id,
         primaryIndex: packet.primaryIndex,
         documents: packet.documents,
@@ -84,8 +80,8 @@ export default function BatchPage() {
       }
       const res = await fetch('/api/create', { method: 'POST', body: form });
       const body = await res.json() as CreateResponse;
-      if (!res.ok) throw new Error(body.error || 'Create failed.');
-      setResults((current) => ({ ...current, [key]: { state: 'created', message: `Created ${body.invoiceId}`, invoiceId: body.invoiceId ?? undefined } }));
+      if (!res.ok) throw new Error(body.error || 'Submission failed.');
+      setResults((current) => ({ ...current, [key]: { state: 'created', message: 'Submitted', invoiceId: body.invoiceId ?? undefined } }));
       return true;
     } catch (err) {
       setResults((current) => ({ ...current, [key]: { state: 'error', message: err instanceof Error ? err.message : String(err) } }));
@@ -96,70 +92,67 @@ export default function BatchPage() {
   async function createAllPass() {
     if (!analysis) return;
     const packets = analysis.packets.filter((p) => p.validation.status === 'PASS' && p.debtor && !p.factorCloudLookupFailed && results[p.packetId]?.state !== 'created');
-    setBusy('Creating PASS invoices');
+    setBusy('Submitting PASS invoices');
     let created = 0;
     for (const packet of packets) {
       if (await createOne(packet)) created += 1;
     }
     setBusy('');
-    setMessage(`Batch create finished. ${created} of ${packets.length} eligible invoice${packets.length === 1 ? '' : 's'} created.`);
+    setMessage(`Batch submission finished. ${created} of ${packets.length} eligible invoice${packets.length === 1 ? '' : 's'} submitted.`);
   }
 
   const eligiblePass = analysis?.packets.filter((p) => p.validation.status === 'PASS' && p.debtor && !p.factorCloudLookupFailed && results[p.packetId]?.state !== 'created').length ?? 0;
 
   return (
-    <main className="shell batchShell">
-      <section className="hero">
+    <main className="shell batchShell portalToolShell">
+      <PortalNav active="batch" />
+      <section className="hero portalSubHero">
         <div>
-          <span className="eyebrow">FactorCloud Labs</span>
-          <h1>Batch Invoice Intake</h1>
-          <p>Drop a mixed stack of invoices and supporting documents. The app groups them into invoice packets, validates each packet, and can create every clean invoice in one run.</p>
+          <span className="eyebrow">FactorCloud Client Portal</span>
+          <h1>Batch Upload</h1>
+          <p>Upload a mixed stack of invoices and support documents. We will organize them into invoice packets and verify each packet before submission.</p>
         </div>
-        <div className="badges">
-          <a className="modeLink" href="/">Single packet</a>
-          <span className="prototype activeMode">Batch intake</span>
-        </div>
+        <div className="badges"><span className="prototype">Up to 24 files</span><span className="prototype">Automated grouping</span></div>
       </section>
 
-      <section className="topbar">
-        <div><strong>AI</strong><span>{status?.ai.configured ? `${status.ai.model} (${status.ai.thinking})` : 'Not configured'}</span></div>
-        <div><strong>FactorCloud</strong><span>{status?.factorCloud.signedIn ? 'Connected' : 'Not signed in'}</span></div>
-        <div><strong>Pilot limit</strong><span>24 files / 25 MB per batch</span></div>
+      <section className="topbar clientConnectionBar">
+        <div><strong>FactorCloud</strong><span>{status?.factorCloud.signedIn ? 'Connected' : 'Connection required'}</span></div>
+        <div><strong>Verification</strong><span>{status?.ai.configured ? 'Ready' : 'Unavailable'}</span></div>
+        <div><strong>Batch limit</strong><span>24 files / 25 MB</span></div>
       </section>
 
       {message && <div className="message">{message}</div>}
 
       <section className="card batchUpload">
-        <h2>Upload a mixed document batch</h2>
-        <p>You can include multiple invoices plus rate confirmations, BOLs, PODs, and other support files. Exact shared load/reference numbers are the strongest grouping signal.</p>
+        <h2>Upload a document batch</h2>
+        <p>Include multiple invoices plus rate confirmations, BOLs, PODs, and other support files. Matching load/reference numbers are used to organize support documents into the right packet.</p>
         <label className="dropzone batchDropzone">
           <input type="file" multiple accept="application/pdf,image/png,image/jpeg,image/gif,image/webp" onChange={(e) => { setFiles(Array.from(e.target.files ?? [])); setAnalysis(null); setResults({}); }} />
           <strong>{files.length ? `${files.length} files selected` : 'Drop the whole batch here'}</strong>
           <span>{files.length ? files.map((f) => f.name).join(', ') : 'PDF, PNG, JPEG, GIF, or WebP'}</span>
         </label>
-        <button onClick={analyzeBatch} disabled={!files.length || Boolean(busy)}>{busy === 'Analyzing batch' ? 'Analyzing and grouping...' : 'Analyze batch'}</button>
+        <button onClick={analyzeBatch} disabled={!files.length || Boolean(busy)}>{busy === 'Analyzing batch' ? 'Verifying and grouping...' : 'Verify batch'}</button>
       </section>
 
       {analysis && <>
-        <section className="batchStats">
+        <section className="batchStats batchClientStats">
           <Stat label="Invoice packets" value={analysis.packets.length} />
-          <Stat label="PASS" value={counts.pass} tone="pass" />
-          <Stat label="REVIEW" value={counts.review} tone="review" />
-          <Stat label="FAIL" value={counts.fail} tone="fail" />
+          <Stat label="Ready" value={counts.pass} tone="pass" />
+          <Stat label="Needs review" value={counts.review} tone="review" />
+          <Stat label="Blocked" value={counts.fail} tone="fail" />
           <Stat label="Unassigned docs" value={analysis.unassignedDocuments.length} />
-          <Stat label="Est. AI cost" value={`$${estimatedCost.toFixed(4)}`} />
         </section>
 
         {analysis.warnings.map((warning) => <div className="warning" key={warning}>{warning}</div>)}
 
         <section className="card batchTableCard">
           <div className="batchTableHeader">
-            <div><h2>Invoice packets</h2><p>PASS invoices are eligible for batch creation. REVIEW and FAIL stay out of the create queue.</p></div>
-            <button className="small batchCreateButton" onClick={createAllPass} disabled={!eligiblePass || Boolean(busy)}>{busy === 'Creating PASS invoices' ? 'Creating...' : `Create all PASS (${eligiblePass})`}</button>
+            <div><h2>Invoice packets</h2><p>Ready invoices can be submitted together. Anything needing review stays out of the bulk queue.</p></div>
+            <button className="small batchCreateButton" onClick={createAllPass} disabled={!eligiblePass || Boolean(busy)}>{busy === 'Submitting PASS invoices' ? 'Submitting...' : `Submit ready invoices (${eligiblePass})`}</button>
           </div>
           <div className="batchTableWrap">
             <table className="batchTable">
-              <thead><tr><th>Invoice</th><th>Debtor</th><th>Amount</th><th>Reference</th><th>Docs</th><th>Status</th><th>Needs attention</th><th>Create</th></tr></thead>
+              <thead><tr><th>Invoice</th><th>Debtor</th><th>Amount</th><th>Reference</th><th>Docs</th><th>Status</th><th>Needs attention</th><th>Submit</th></tr></thead>
               <tbody>
                 {analysis.packets.map((packet) => {
                   const primary = packet.documents[packet.primaryIndex]?.fields;
@@ -171,12 +164,12 @@ export default function BatchPage() {
                     <td>{primary?.invoiceAmount == null ? '-' : `$${primary.invoiceAmount.toLocaleString()}`}</td>
                     <td>{primary?.referenceNumber || '-'}</td>
                     <td><span title={packet.documents.map((d) => d.fileName).join('\n')}>{packet.documents.length}</span></td>
-                    <td><span className={`pill ${packet.validation.status.toLowerCase()}`}>{packet.validation.status}</span></td>
+                    <td><span className={`pill ${packet.validation.status.toLowerCase()}`}>{packet.validation.status === 'PASS' ? 'READY' : packet.validation.status}</span></td>
                     <td className="attentionCell">{attention.length ? attention.map((c) => <span key={c.id}>{c.label}: {c.message}</span>) : <span className="allClear">All checks clear</span>}</td>
                     <td>
                       {result ? <span className={`rowResult ${result.state}`}>{result.message}</span> : packet.validation.status === 'PASS' && packet.debtor && !packet.factorCloudLookupFailed
-                        ? <button className="tinyButton" disabled={Boolean(busy)} onClick={() => void createOne(packet)}>Create</button>
-                        : <span className="muted">Not eligible</span>}
+                        ? <button className="tinyButton" disabled={Boolean(busy)} onClick={() => void createOne(packet)}>Submit</button>
+                        : <span className="muted">Not ready</span>}
                     </td>
                   </tr>;
                 })}
@@ -187,7 +180,7 @@ export default function BatchPage() {
 
         {analysis.unassignedDocuments.length > 0 && <section className="card unassignedCard">
           <h2>Unassigned supporting documents</h2>
-          <p>These files were not confidently tied to exactly one invoice. They will not be uploaded or created until someone resolves the grouping.</p>
+          <p>These files were not confidently tied to exactly one invoice. They will not be submitted until someone resolves the grouping.</p>
           <div className="docList">{analysis.unassignedDocuments.map((doc) => <div className="doc" key={doc.fileName}><strong>{doc.fileName}</strong><span>{doc.fields.documentType.replace('_', ' ')}</span><span>Reference: {doc.fields.referenceNumber || '-'}</span></div>)}</div>
         </section>}
       </>}
