@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:migrate": "node scripts/run-migrations.mjs",
+    "db:bootstrap": "node scripts/bootstrap-dev.mjs",
     "user:create": "node scripts/create-portal-user.mjs"
   },
   "dependencies": {
