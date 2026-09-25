@@ -122,3 +122,13 @@ describe('login throttle helpers', () => {
     expect(clientIp(new Headers())).toBeNull();
   });
 });
+
+describe('self-provisioned schema', () => {
+  it('matches database/003_security_hardening.sql', async () => {
+    const { readFileSync } = await import('fs');
+    const { SECURITY_SCHEMA_STATEMENTS } = await import('./schema');
+    const squash = (sql: string) => sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+    const migration = squash(readFileSync(new URL('../database/003_security_hardening.sql', import.meta.url), 'utf8'));
+    for (const statement of SECURITY_SCHEMA_STATEMENTS) expect(migration).toContain(`${squash(statement)};`);
+  });
+});

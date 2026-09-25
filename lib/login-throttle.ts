@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { query } from './db';
+import { ensureSecuritySchema } from './schema';
 
 // Database-backed login throttling. Two independent buckets per attempt:
 //  - the email (hashed, so addresses that are not users are never stored), which stops guessing
@@ -37,6 +38,7 @@ export function clientIp(headers: Headers): string | null {
 
 /** When any bucket is locked, the time the lock ends; otherwise null. */
 export async function lockedUntil(buckets: ThrottleBucket[]): Promise<Date | null> {
+  await ensureSecuritySchema();
   const rows = await query<{ locked_until: Date }>(
     'select max(locked_until) as locked_until from auth_throttle where bucket = any($1::text[]) and locked_until > now()',
     [buckets.map((b) => b.bucket)],
@@ -45,6 +47,7 @@ export async function lockedUntil(buckets: ThrottleBucket[]): Promise<Date | nul
 }
 
 export async function recordLoginFailure(buckets: ThrottleBucket[]): Promise<void> {
+  await ensureSecuritySchema();
   for (const { bucket, maxFailures } of buckets) {
     // Atomic per bucket: restart the window if it has expired, count the failure, lock at the limit.
     await query(`
@@ -67,6 +70,7 @@ export async function recordLoginFailure(buckets: ThrottleBucket[]): Promise<voi
 
 /** A successful sign-in clears that account's failures. The IP bucket is left to expire. */
 export async function clearLoginFailures(buckets: ThrottleBucket[]): Promise<void> {
+  await ensureSecuritySchema();
   const emailBuckets = buckets.filter((b) => b.bucket.startsWith('email:')).map((b) => b.bucket);
   if (emailBuckets.length) await query('delete from auth_throttle where bucket = any($1::text[])', [emailBuckets]);
 }

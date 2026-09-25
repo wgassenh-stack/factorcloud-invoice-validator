@@ -1,4 +1,6 @@
 -- Security hardening. Idempotent, like the other migration files.
+-- The app also creates these objects itself on first use (lib/schema.ts), so running this file is
+-- optional. Keep the two in sync; lib/security-hardening.test.ts checks that they match.
 
 -- Set when a submission's idempotency key was released because FactorCloud definitively refused
 -- the create (no invoice exists), so the same invoice may be submitted again.

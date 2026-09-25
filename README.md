@@ -65,7 +65,7 @@ AUTH_SESSION_SECRET=<long random value>
 PORTAL_SIGNING_SECRET=<a different long random value>
 ```
 
-Run `npm run db:migrate` again whenever a new file appears in `database/`. Migrations are idempotent, and sign-in depends on the `auth_throttle` table from `003_security_hardening.sql`.
+The security objects from `003_security_hardening.sql` (the `auth_throttle` table and `submissions.idempotency_released_at`) are created by the app itself on first use, so no manual step is needed on deploy. This needs a database user with CREATE/ALTER rights. If the app's user is restricted, run `npm run db:migrate` once with an admin user instead; the app then only checks that the objects exist. Migrations are idempotent and safe to re-run.
 
 ## Local setup
 

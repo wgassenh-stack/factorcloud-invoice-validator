@@ -36,7 +36,10 @@ describe.skipIf(!enabled)('portal database', () => {
     store = await import('./submission-store');
     ({ signPortalSession } = await import('./session'));
     ({ PublicError } = await import('./errors'));
-    await query('truncate audit_events, review_items, submission_files, submissions, user_client_access, portal_users, portal_clients, factors, auth_throttle cascade');
+    // Start without the 003 objects to prove the app provisions them itself on first use.
+    await query('drop table if exists auth_throttle');
+    await query('alter table submissions drop column if exists idempotency_released_at');
+    await query('truncate audit_events, review_items, submission_files, submissions, user_client_access, portal_users, portal_clients, factors cascade');
     await query(`insert into factors (id, factorcloud_factor_id, name) values ('f1','fc-factor-1','F')`);
     await query(`insert into portal_clients (id, factor_id, factorcloud_client_id, name) values ('pc1','f1','fc-client-1','Client')`);
     await query(`insert into portal_users (id, factor_id, email, role) values ('u1','f1','c@x.com','CLIENT_USER')`);

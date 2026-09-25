@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createHash, randomUUID } from 'crypto';
 import { pool } from './db';
+import { ensureSecuritySchema } from './schema';
 import { PublicError } from './errors';
 import { normalizeIdentifier } from './normalize';
 import { portalClientRecord } from './portal-auth';
@@ -173,6 +174,7 @@ export async function markSubmissionFactorCloudResult(args: {
   if (!args.submission || !args.session || !databaseAuthEnabled()) return;
   const status = args.error ? 'ERROR' : args.validationStatus === 'REVIEW' ? 'REVIEW_REQUIRED' : 'CREATED_IN_FACTORCLOUD';
   const release = Boolean(args.error && args.retryable && !args.invoiceId);
+  await ensureSecuritySchema();
   await pool().query(`
     update submissions
     set factorcloud_invoice_id=$1, workflow_status=$2, updated_at=now(),
