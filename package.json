@@ -7,17 +7,22 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:migrate": "node scripts/run-migrations.mjs",
+    "user:create": "node scripts/create-portal-user.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",
+    "bcryptjs": "^3.0.2",
     "next": "15.5.26",
+    "pg": "^8.16.3",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "zod": "^4.1.5"
   },
   "devDependencies": {
     "@types/node": "^22",
+    "@types/pg": "^8.15.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "typescript": "^5",
