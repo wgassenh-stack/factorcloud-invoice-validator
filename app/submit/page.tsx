@@ -4,38 +4,48 @@ import { useEffect, useMemo, useState } from 'react';
 import { PortalNav } from '@/app/components/PortalNav';
 import { validate } from '@/lib/rules';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
-import type { AnalyzeResponse, CreateResponse, ExtractedFields } from '@/lib/types';
+import type { AnalyzeResponse, CreateResponse, ExtractedFields, ValidationReport } from '@/lib/types';
 
 type StatusResponse = {
-  factorCloud: { signedIn: boolean; canSignIn: boolean };
+  factorCloud: { signedIn: boolean };
   ai: { configured: boolean; model: string; thinking: string };
 };
 
 export default function SubmitInvoicePage() {
   const [files, setFiles] = useState<File[]>([]);
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
+  const [originalPrimary, setOriginalPrimary] = useState<ExtractedFields | null>(null);
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
-  const [otp, setOtp] = useState('');
-  const [otpRequested, setOtpRequested] = useState(false);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [createResult, setCreateResult] = useState<CreateResponse | null>(null);
 
-  const refreshStatus = async () => {
-    const res = await fetch('/api/status', { cache: 'no-store' });
-    if (res.ok) setStatus(await res.json());
-  };
-  useEffect(() => { void refreshStatus(); }, []);
+  useEffect(() => {
+    void fetch('/api/status', { cache: 'no-store' }).then(async (res) => {
+      if (res.ok) setStatus(await res.json());
+    });
+  }, []);
 
-  const liveValidation = useMemo(() => {
+  const primary = analysis?.documents[analysis.primaryIndex];
+  const clientCorrections = useMemo(() => originalPrimary && primary ? changedFields(originalPrimary, primary.fields) : [], [originalPrimary, primary]);
+
+  const liveValidation = useMemo<ValidationReport | null>(() => {
     if (!analysis) return null;
-    return applyFactorCloudAvailability(
+    const base = applyFactorCloudAvailability(
       validate({ documents: analysis.documents, primaryIndex: analysis.primaryIndex, debtor: analysis.debtor, client: analysis.client }),
       analysis.factorCloudLookupFailed,
     );
-  }, [analysis]);
-
-  const primary = analysis?.documents[analysis.primaryIndex];
+    if (!clientCorrections.length || base.status === 'FAIL') return base;
+    return {
+      status: 'REVIEW',
+      checks: [{
+        id: 'client-corrections',
+        label: 'Corrections after verification',
+        status: 'REVIEW',
+        message: `Changed field${clientCorrections.length === 1 ? '' : 's'} will be reviewed by the factor: ${clientCorrections.join(', ')}.`,
+      }, ...base.checks],
+    };
+  }, [analysis, clientCorrections]);
 
   async function analyze() {
     setBusy('Analyzing documents');
@@ -45,9 +55,11 @@ export default function SubmitInvoicePage() {
       const form = new FormData();
       files.forEach((f) => form.append('files', f));
       const res = await fetch('/api/analyze', { method: 'POST', body: form });
-      const body = await res.json();
+      const body = await res.json() as AnalyzeResponse & { error?: string };
       if (!res.ok) throw new Error(body.error || 'Analysis failed.');
       setAnalysis(body);
+      const verifiedPrimary = body.documents[body.primaryIndex]?.fields ?? null;
+      setOriginalPrimary(verifiedPrimary ? structuredClone(verifiedPrimary) : null);
       setMessage('Verification complete. Review the invoice details below.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err));
@@ -70,42 +82,8 @@ export default function SubmitInvoicePage() {
     });
   }
 
-  async function requestOtp() {
-    setBusy('Requesting FactorCloud code');
-    setMessage('');
-    try {
-      const res = await fetch('/api/auth/start', { method: 'POST' });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Could not start sign-in.');
-      setOtpRequested(true);
-      setMessage('FactorCloud sent an email code. Enter it below.');
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy('');
-    }
-  }
-
-  async function verifyOtp() {
-    setBusy('Signing in');
-    setMessage('');
-    try {
-      const res = await fetch('/api/auth/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ otp }) });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Sign-in failed.');
-      setOtpRequested(false);
-      setOtp('');
-      await refreshStatus();
-      setMessage('Connected to FactorCloud. Re-run Analyze so the comparisons refresh.');
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy('');
-    }
-  }
-
   async function submitInvoice() {
-    if (!analysis || !primary || !analysis.debtor || !liveValidation) return;
+    if (!analysis || !primary || !analysis.debtor || !liveValidation || !analysis.analysisReceipt) return;
     setBusy('Submitting invoice');
     setMessage('');
     setCreateResult(null);
@@ -118,16 +96,11 @@ export default function SubmitInvoicePage() {
         referenceNumber: f.referenceNumber,
         invoiceAmount: f.invoiceAmount,
         invoiceDate: f.invoiceDate,
-        notes: needsReview ? 'Submitted through client portal for manual review' : 'Submitted through client portal',
         debtorId: analysis.debtor.id,
-        primaryIndex: analysis.primaryIndex,
-        documents: analysis.documents,
-        documentTypes: analysis.documents.map((d) => d.fields.documentType),
-        overrideReview: needsReview,
-        overrideReason: needsReview ? 'Client submitted packet with validator warnings for manual review' : null,
+        analysisReceipt: analysis.analysisReceipt,
       }));
       analysis.documents.forEach((d) => {
-        const original = files.find((x) => x.name === d.fileName);
+        const original = d.sourceIndex == null ? undefined : files[d.sourceIndex];
         if (original) form.append('files', original);
       });
       const res = await fetch('/api/create', { method: 'POST', body: form });
@@ -149,10 +122,10 @@ export default function SubmitInvoicePage() {
   const validationClass = liveValidation?.status?.toLowerCase() ?? 'neutral';
   const attentionChecks = liveValidation?.checks.filter((c) => c.status === 'FAIL' || c.status === 'REVIEW') ?? [];
   const canSubmit = Boolean(
-    analysis && !analysis.factorCloudLookupFailed && analysis.debtor && primary?.fields.invoiceNumber && primary?.fields.invoiceAmount && primary?.fields.invoiceDate && liveValidation?.status !== 'FAIL',
+    analysis && analysis.analysisReceipt && !analysis.factorCloudLookupFailed && analysis.debtor && primary?.fields.invoiceNumber && primary?.fields.invoiceAmount && primary?.fields.invoiceDate && liveValidation?.status !== 'FAIL',
   );
   const submitLabel = !analysis
-    ? 'Analyze documents first'
+    ? 'Verify documents first'
     : liveValidation?.status === 'REVIEW'
       ? 'Submit for manual review'
       : liveValidation?.status === 'PASS'
@@ -172,10 +145,9 @@ export default function SubmitInvoicePage() {
       </section>
 
       <section className="topbar clientConnectionBar">
-        <div><strong>FactorCloud</strong><span>{status?.factorCloud.signedIn ? 'Connected' : 'Connection required'}</span></div>
+        <div><strong>FactorCloud</strong><span>{status?.factorCloud.signedIn ? 'Connected' : 'Temporarily unavailable'}</span></div>
         <div><strong>Verification</strong><span>{status?.ai.configured ? 'Ready' : 'Unavailable'}</span></div>
-        {!status?.factorCloud.signedIn && status?.factorCloud.canSignIn && <button className="small" onClick={requestOtp} disabled={Boolean(busy)}>Connect FactorCloud</button>}
-        {otpRequested && <div className="otp"><input value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="Login code"/><button className="small" onClick={verifyOtp} disabled={!otp || Boolean(busy)}>Connect</button></div>}
+        {!status?.factorCloud.signedIn && <div><strong>Action</strong><span>Contact your factor if this persists</span></div>}
       </section>
 
       {message && <div className="message">{message}</div>}
@@ -186,7 +158,7 @@ export default function SubmitInvoicePage() {
           <h2>Upload documents</h2>
           <p>Invoice plus any BOL, POD, rate confirmation, or supporting paperwork.</p>
           <label className="dropzone">
-            <input type="file" multiple accept="application/pdf,image/png,image/jpeg,image/gif,image/webp" onChange={(e) => { setFiles(Array.from(e.target.files ?? [])); setAnalysis(null); }} />
+            <input type="file" multiple accept="application/pdf,image/png,image/jpeg,image/gif,image/webp" onChange={(e) => { setFiles(Array.from(e.target.files ?? [])); setAnalysis(null); setOriginalPrimary(null); }} />
             <strong>{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} selected` : 'Drop documents here'}</strong>
             <span>{files.length ? files.map((f) => f.name).join(', ') : 'PDF, PNG, JPEG, GIF, or WebP'}</span>
           </label>
@@ -199,13 +171,14 @@ export default function SubmitInvoicePage() {
           {!primary ? <p>Verify documents to extract invoice fields.</p> : <div className="editGrid">
             <Field label="Invoice #" value={primary.fields.invoiceNumber} onChange={(v) => updateField(analysis!.primaryIndex, 'invoiceNumber', v)} />
             <Field label="Reference / load #" value={primary.fields.referenceNumber} onChange={(v) => updateField(analysis!.primaryIndex, 'referenceNumber', v)} />
-            <Field label="Debtor" value={primary.fields.debtorName} onChange={(v) => updateField(analysis!.primaryIndex, 'debtorName', v)} />
+            <Field label="Debtor" value={primary.fields.debtorName} readOnly onChange={() => {}} />
             <Field label="Amount" type="number" value={primary.fields.invoiceAmount?.toString() ?? ''} onChange={(v) => updateField(analysis!.primaryIndex, 'invoiceAmount', v)} />
             <Field label="Invoice date" value={primary.fields.invoiceDate} onChange={(v) => updateField(analysis!.primaryIndex, 'invoiceDate', v)} />
             <Field label="Due date (source only)" value={primary.fields.dueDate} readOnly onChange={() => {}} />
-            <Field label="Address" value={primary.fields.debtorAddress} onChange={(v) => updateField(analysis!.primaryIndex, 'debtorAddress', v)} />
-            <Field label="Phone" value={primary.fields.debtorPhone} onChange={(v) => updateField(analysis!.primaryIndex, 'debtorPhone', v)} />
+            <Field label="Address" value={primary.fields.debtorAddress} readOnly onChange={() => {}} />
+            <Field label="Phone" value={primary.fields.debtorPhone} readOnly onChange={() => {}} />
           </div>}
+          {clientCorrections.length > 0 && <div className="warning">You changed {clientCorrections.join(', ')} after verification. The original document reading is preserved and this submission will require factor review.</div>}
           {primary && <p className="match">FactorCloud calculates the final due date from your configured terms.</p>}
           {analysis?.debtor && <p className="match">Matched debtor: <strong>{analysis.debtor.companyName}</strong>{analysis.debtorMatch ? ` via ${analysis.debtorMatch.method}` : ''}</p>}
         </div>
@@ -237,15 +210,14 @@ export default function SubmitInvoicePage() {
             <span>Reference: {d.fields.referenceNumber || '-'}</span>
             <span>Amount: {d.fields.invoiceAmount == null ? '-' : `$${d.fields.invoiceAmount.toLocaleString()}`}</span>
             {d.fields.uncertainFields.length > 0 && <em>Review: {d.fields.uncertainFields.join(', ')}</em>}
-          </div>)}</div>
-        </div>}
+          </div>)}</div>}
 
         <div className="card actionCard">
           <div className="step">4</div>
           <h2>Submit to FactorCloud</h2>
           <p>{!analysis ? 'Complete verification before submitting.' : liveValidation?.status === 'REVIEW' ? 'You can submit this invoice, but it will be clearly marked for manual review.' : 'Clean submissions are created in FactorCloud with the source documents attached.'}</p>
           {analysis?.factorCloudLookupFailed && <div className="warning">FactorCloud could not be reached during analysis. Re-run verification before submitting.</div>}
-          {liveValidation?.status === 'REVIEW' && !analysis?.factorCloudLookupFailed && <div className="warning">This packet has a warning. Submitting it will create the FactorCloud invoice with a note that manual review is required.</div>}
+          {liveValidation?.status === 'REVIEW' && !analysis?.factorCloudLookupFailed && <div className="warning">This packet has a warning. Submitting it will create the FactorCloud invoice with a clear manual-review marker in its notes.</div>}
           <button className="secondary" onClick={submitInvoice} disabled={!canSubmit || Boolean(busy)}>{busy === 'Submitting invoice' ? 'Submitting...' : submitLabel}</button>
           {createResult?.steps?.length ? <div className="steps">{createResult.steps.map((s, i) => <div key={i}><span>{s.ok ? 'OK' : 'ERROR'}</span>{s.step}: {s.detail}</div>)}</div> : null}
         </div>
@@ -259,6 +231,15 @@ function statusRank(status: string): number {
   if (status === 'REVIEW') return 1;
   if (status === 'PASS') return 2;
   return 3;
+}
+
+function changedFields(original: ExtractedFields, current: ExtractedFields): string[] {
+  const changes: string[] = [];
+  if ((original.invoiceNumber ?? '').trim() !== (current.invoiceNumber ?? '').trim()) changes.push('invoice number');
+  if ((original.referenceNumber ?? '').trim() !== (current.referenceNumber ?? '').trim()) changes.push('reference/load number');
+  if (original.invoiceAmount !== current.invoiceAmount) changes.push('invoice amount');
+  if ((original.invoiceDate ?? '').trim() !== (current.invoiceDate ?? '').trim()) changes.push('invoice date');
+  return changes;
 }
 
 function Field({ label, value, onChange, type = 'text', readOnly = false }: { label: string; value: string | null; onChange: (v: string) => void; type?: string; readOnly?: boolean }) {
