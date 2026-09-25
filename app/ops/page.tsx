@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { OpsSignOut } from '../components/OpsSignOut';
 
 type OpsClientSummary = {
   clientId: string;
@@ -58,7 +59,7 @@ export default function FactorOperationsPage() {
         <span>Alerts</span>
         <span>Configuration</span>
       </nav>
-      <div className="opsSidebarFooter"><strong>Internal view</strong><span>Factor-wide access</span></div>
+      <div className="opsSidebarFooter"><strong>Internal view</strong><span>Factor-wide access</span><OpsSignOut /></div>
     </aside>
 
     <section className="opsContent">
