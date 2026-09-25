@@ -1,253 +1,203 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { validate } from '@/lib/rules';
-import { applyFactorCloudAvailability } from '@/lib/validation-availability';
-import type { AnalyzeResponse, CreateResponse, ExtractedFields } from '@/lib/types';
 
-type StatusResponse = {
-  factorCloud: { signedIn: boolean; canSignIn: boolean };
-  ai: { configured: boolean; model: string; thinking: string };
+type RiskRecord = {
+  id: string;
+  invoiceNumber: string | null;
+  companyDebtorId: string | null;
+  invoiceAmount: number | null;
+  invoiceDate: string | null;
+  status: string | null;
 };
 
-export default function Home() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
-  const [busy, setBusy] = useState('');
-  const [message, setMessage] = useState('');
-  const [otp, setOtp] = useState('');
-  const [otpRequested, setOtpRequested] = useState(false);
-  const [status, setStatus] = useState<StatusResponse | null>(null);
-  const [override, setOverride] = useState(false);
-  const [overrideReason, setOverrideReason] = useState('');
-  const [createResult, setCreateResult] = useState<CreateResponse | null>(null);
+type Concentration = {
+  debtorId: string;
+  debtorName: string;
+  amount: number;
+  invoiceCount: number;
+  share: number;
+  level: 'NORMAL' | 'REVIEW' | 'HIGH';
+};
 
-  const refreshStatus = async () => {
-    const res = await fetch('/api/status', { cache: 'no-store' });
-    if (res.ok) setStatus(await res.json());
+type Alert = {
+  id: string;
+  level: 'INFO' | 'REVIEW' | 'HIGH';
+  title: string;
+  detail: string;
+};
+
+type PortalData = {
+  totalAmount: number;
+  invoiceCount: number;
+  last7Amount: number;
+  prior28Amount: number;
+  volumeRatio: number | null;
+  concentrations: Concentration[];
+  alerts: Alert[];
+  records: RiskRecord[];
+  source: {
+    clientId: string;
+    clientName: string;
+    returnedInvoiceCount: number;
+    clientInvoiceCount: number;
+    note: string;
   };
-  useEffect(() => { void refreshStatus(); }, []);
+};
 
-  const liveValidation = useMemo(() => {
-    if (!analysis) return null;
-    return applyFactorCloudAvailability(
-      validate({ documents: analysis.documents, primaryIndex: analysis.primaryIndex, debtor: analysis.debtor, client: analysis.client }),
-      analysis.factorCloudLookupFailed,
-    );
-  }, [analysis]);
+export default function ClientPortalHome() {
+  const [data, setData] = useState<PortalData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const primary = analysis?.documents[analysis.primaryIndex];
-
-  async function analyze() {
-    setBusy('Analyzing documents'); setMessage(''); setCreateResult(null);
+  async function load() {
+    setLoading(true);
+    setError('');
     try {
-      const form = new FormData();
-      files.forEach((f) => form.append('files', f));
-      const res = await fetch('/api/analyze', { method: 'POST', body: form });
+      const res = await fetch('/api/risk', { cache: 'no-store' });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Analysis failed.');
-      setAnalysis(body);
-      setOverride(false);
-      setOverrideReason('');
-      setMessage('Analysis complete. Review the extracted values before creating anything.');
-    } catch (err) { setMessage(err instanceof Error ? err.message : String(err)); }
-    finally { setBusy(''); }
-  }
-
-  function updateField(docIndex: number, key: keyof ExtractedFields, value: string) {
-    setAnalysis((current) => {
-      if (!current) return current;
-      const docs = current.documents.map((d, i) => i === docIndex ? {
-        ...d,
-        fields: {
-          ...d.fields,
-          [key]: key === 'invoiceAmount' ? (value === '' ? null : Number(value)) : (value === '' ? null : value),
-        },
-      } : d);
-      return { ...current, documents: docs };
-    });
-  }
-
-  async function requestOtp() {
-    setBusy('Requesting FactorCloud code'); setMessage('');
-    try {
-      const res = await fetch('/api/auth/start', { method: 'POST' });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Could not start sign-in.');
-      setOtpRequested(true);
-      setMessage('FactorCloud sent an email code. Enter it below.');
-    } catch (err) { setMessage(err instanceof Error ? err.message : String(err)); }
-    finally { setBusy(''); }
-  }
-
-  async function verifyOtp() {
-    setBusy('Signing in'); setMessage('');
-    try {
-      const res = await fetch('/api/auth/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ otp }) });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Sign-in failed.');
-      setOtpRequested(false); setOtp(''); await refreshStatus();
-      setMessage('Signed in to FactorCloud. Re-run Analyze so the FactorCloud comparisons refresh.');
-    } catch (err) { setMessage(err instanceof Error ? err.message : String(err)); }
-    finally { setBusy(''); }
-  }
-
-  async function createInvoice() {
-    if (!analysis || !primary || !analysis.debtor) return;
-    const v = liveValidation;
-    if (!v) return;
-    setBusy('Creating invoice'); setMessage(''); setCreateResult(null);
-    try {
-      const form = new FormData();
-      const f = primary.fields;
-      const payload = {
-        invoiceNumber: f.invoiceNumber,
-        referenceNumber: f.referenceNumber,
-        invoiceAmount: f.invoiceAmount,
-        invoiceDate: f.invoiceDate,
-        notes: 'Created through external validator prototype',
-        debtorId: analysis.debtor.id,
-        primaryIndex: analysis.primaryIndex,
-        documents: analysis.documents,
-        documentTypes: analysis.documents.map((d) => d.fields.documentType),
-        overrideReview: override,
-        overrideReason,
-      };
-      form.append('payload', JSON.stringify(payload));
-      analysis.documents.forEach((d) => {
-        const original = files.find((x) => x.name === d.fileName);
-        if (original) form.append('files', original);
-      });
-      const res = await fetch('/api/create', { method: 'POST', body: form });
-      const body = await res.json();
-      if (!res.ok) throw Object.assign(new Error(body.error || 'Create failed.'), { body });
-      setCreateResult(body);
-      setMessage(`Created FactorCloud invoice ${body.invoiceId}.`);
+      if (!res.ok) throw new Error(body.error || 'Could not load your FactorCloud data.');
+      setData(body);
     } catch (err) {
-      const anyErr = err as Error & { body?: CreateResponse };
-      if (anyErr.body) setCreateResult(anyErr.body);
-      setMessage(anyErr.message);
-    } finally { setBusy(''); }
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
   }
 
-  const validationClass = liveValidation?.status?.toLowerCase() ?? 'neutral';
-  const attentionChecks = liveValidation?.checks.filter((c) => c.status === 'FAIL' || c.status === 'REVIEW') ?? [];
-  const canCreate = Boolean(
-    analysis &&
-    !analysis.factorCloudLookupFailed &&
-    analysis.debtor &&
-    primary?.fields.invoiceNumber &&
-    primary?.fields.invoiceAmount &&
-    primary?.fields.invoiceDate &&
-    liveValidation?.status !== 'FAIL',
-  );
+  useEffect(() => { void load(); }, []);
+
+  const recent = useMemo(() => (data?.records ?? [])
+    .slice()
+    .sort((a, b) => String(b.invoiceDate ?? '').localeCompare(String(a.invoiceDate ?? '')))
+    .slice(0, 8), [data]);
+
+  const statusCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const record of data?.records ?? []) {
+      const status = (record.status || 'Unknown').replaceAll('_', ' ');
+      counts.set(status, (counts.get(status) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [data]);
+
+  const debtorNames = useMemo(() => Object.fromEntries((data?.concentrations ?? []).map((row) => [row.debtorId, row.debtorName])), [data]);
+  const topConcentration = data?.concentrations[0];
 
   return (
-    <main className="shell">
-      <section className="hero">
+    <main className="portalShell">
+      <PortalNav active="home" />
+
+      <section className="portalWelcome">
         <div>
-          <span className="eyebrow">FactorCloud Labs</span>
-          <h1>Invoice Intake + Validation</h1>
-          <p>Read freight paperwork, compare it against FactorCloud, and create the invoice without retyping it.</p>
+          <span className="eyebrow">FactorCloud Client Portal</span>
+          <h1>{loading && !data ? 'Loading your account...' : `Good morning${data?.source.clientName ? `, ${shortName(data.source.clientName)}` : ''}`}</h1>
+          <p>Submit invoices, follow activity, and see the items that need your attention in one place.</p>
         </div>
-        <div className="badges">
-          <span className="prototype activeMode">Single packet</span>
-          <a className="modeLink" href="/batch">Batch intake</a>
-          <span className="prototype">{status?.ai.model ?? 'checking AI...'}</span>
+        <div className="portalWelcomeActions">
+          <a className="primaryLink" href="/submit">+ Submit invoice</a>
+          <a className="secondaryLink" href="/batch">Batch upload</a>
         </div>
       </section>
 
-      <section className="topbar">
-        <div><strong>AI</strong><span>{status?.ai.configured ? `${status.ai.model} (${status.ai.thinking})` : 'Not configured'}</span></div>
-        <div><strong>FactorCloud</strong><span>{status?.factorCloud.signedIn ? 'Connected' : 'Not signed in'}</span></div>
-        {!status?.factorCloud.signedIn && status?.factorCloud.canSignIn && <button className="small" onClick={requestOtp} disabled={Boolean(busy)}>Email login code</button>}
-        {otpRequested && <div className="otp"><input value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="OTP code"/><button className="small" onClick={verifyOtp} disabled={!otp || Boolean(busy)}>Sign in</button></div>}
-      </section>
+      {error && <div className="attentionSummary fail"><strong>Could not load FactorCloud data</strong><span>{error}</span><button className="small retryButton" onClick={() => void load()}>Try again</button></div>}
 
-      {message && <div className="message">{message}</div>}
+      {data && <>
+        <section className="portalMetricGrid">
+          <Metric label="Invoice activity" value={money(data.totalAmount)} detail={`${data.invoiceCount} invoice${data.invoiceCount === 1 ? '' : 's'} in retrieved data`} />
+          <Metric label="Last 7 days" value={money(data.last7Amount)} detail={data.volumeRatio == null ? 'Building a baseline' : `${data.volumeRatio.toFixed(1)}x prior weekly pace`} tone={data.volumeRatio != null && data.volumeRatio >= 1.5 ? 'review' : ''} />
+          <Metric label="Top debtor share" value={topConcentration ? `${Math.round(topConcentration.share * 100)}%` : '-'} detail={topConcentration?.debtorName || 'No concentration data yet'} tone={topConcentration?.level === 'HIGH' ? 'fail' : topConcentration?.level === 'REVIEW' ? 'review' : ''} />
+          <Metric label="Needs attention" value={data.alerts.length} detail={data.alerts.length ? 'Account alerts to review' : 'No current pilot alerts'} tone={data.alerts.length ? 'review' : 'pass'} />
+        </section>
 
-      <section className="grid">
-        <div className="card uploadCard">
-          <div className="step">1</div>
-          <h2>Upload documents</h2>
-          <p>Invoice plus any BOL, POD, rate confirmation, or supporting paperwork.</p>
-          <label className="dropzone">
-            <input type="file" multiple accept="application/pdf,image/png,image/jpeg,image/gif,image/webp" onChange={(e) => { setFiles(Array.from(e.target.files ?? [])); setAnalysis(null); }} />
-            <strong>{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} selected` : 'Drop documents here'}</strong>
-            <span>{files.length ? files.map((f) => f.name).join(', ') : 'PDF, PNG, JPEG, GIF, or WebP'}</span>
-          </label>
-          <button onClick={analyze} disabled={!files.length || Boolean(busy)}>{busy === 'Analyzing documents' ? 'Analyzing...' : 'Analyze documents'}</button>
-        </div>
+        <section className="portalDashboardGrid">
+          <div className="portalPanel portalActivityPanel">
+            <div className="portalPanelHeader">
+              <div><span className="panelKicker">Funding activity</span><h2>Recent invoices</h2></div>
+              <a href="/submit">New submission</a>
+            </div>
 
-        <div className="card">
-          <div className="step">2</div>
-          <h2>Primary invoice</h2>
-          {!primary ? <p>Analyze documents to extract invoice fields.</p> : <div className="editGrid">
-            <Field label="Invoice #" value={primary.fields.invoiceNumber} onChange={(v) => updateField(analysis!.primaryIndex, 'invoiceNumber', v)} />
-            <Field label="Reference / load #" value={primary.fields.referenceNumber} onChange={(v) => updateField(analysis!.primaryIndex, 'referenceNumber', v)} />
-            <Field label="Debtor" value={primary.fields.debtorName} onChange={(v) => updateField(analysis!.primaryIndex, 'debtorName', v)} />
-            <Field label="Amount" type="number" value={primary.fields.invoiceAmount?.toString() ?? ''} onChange={(v) => updateField(analysis!.primaryIndex, 'invoiceAmount', v)} />
-            <Field label="Invoice date" value={primary.fields.invoiceDate} onChange={(v) => updateField(analysis!.primaryIndex, 'invoiceDate', v)} />
-            <Field label="Due date (source only)" value={primary.fields.dueDate} readOnly onChange={() => {}} />
-            <Field label="Address" value={primary.fields.debtorAddress} onChange={(v) => updateField(analysis!.primaryIndex, 'debtorAddress', v)} />
-            <Field label="Phone" value={primary.fields.debtorPhone} onChange={(v) => updateField(analysis!.primaryIndex, 'debtorPhone', v)} />
-          </div>}
-          {primary && <p className="match">FactorCloud calculates the final due date from the client's configured terms when the invoice is created.</p>}
-          {analysis?.debtor && <p className="match">Matched FactorCloud debtor: <strong>{analysis.debtor.companyName}</strong>{analysis.debtorMatch ? ` via ${analysis.debtorMatch.method}` : ''}</p>}
-        </div>
+            {statusCounts.length > 0 && <div className="statusStrip">
+              {statusCounts.slice(0, 4).map(([status, count]) => <div key={status}><strong>{count}</strong><span>{titleCase(status)}</span></div>)}
+            </div>}
 
-        <div className="card validationCard">
-          <div className="step">3</div>
-          <div className="validationHeader">
-            <div><h2>Validation</h2><p>AI extracts. Deterministic rules decide.</p></div>
-            <span className={`status ${validationClass}`}>{liveValidation?.status ?? 'Not run'}</span>
+            <div className="portalInvoiceList">
+              {recent.map((record) => <div className="portalInvoiceRow" key={record.id}>
+                <div className="invoiceMark"><span>{statusInitial(record.status)}</span></div>
+                <div className="invoiceIdentity">
+                  <strong>Invoice {record.invoiceNumber || record.id.slice(0, 8)}</strong>
+                  <span>{record.companyDebtorId ? debtorNames[record.companyDebtorId] || 'FactorCloud debtor' : 'Debtor unavailable'} · {record.invoiceDate || 'No date'}</span>
+                </div>
+                <span className={`portalStatus ${statusTone(record.status)}`}>{titleCase((record.status || 'Unknown').replaceAll('_', ' '))}</span>
+                <strong className="invoiceAmount">{record.invoiceAmount == null ? '-' : money(record.invoiceAmount)}</strong>
+              </div>)}
+              {!recent.length && <div className="portalEmpty"><strong>No invoice activity yet</strong><span>Submit your first invoice to get started.</span></div>}
+            </div>
           </div>
-          {analysis?.warnings.map((w) => <div className="warning" key={w}>{w}</div>)}
-          {liveValidation && <div className={`attentionSummary ${validationClass}`}>
-            <strong>{liveValidation.status === 'PASS' ? 'PASS: no validation issues found' : `${liveValidation.status}: ${attentionChecks.length} item${attentionChecks.length === 1 ? '' : 's'} need attention`}</strong>
-            {attentionChecks.map((c) => <span key={c.id}>{c.label}: {c.message}</span>)}
-          </div>}
-          <div className="checks">
-            {liveValidation?.checks.slice().sort((a, b) => statusRank(a.status) - statusRank(b.status)).map((c) => <div className="check" key={c.id}>
-              <div><strong>{c.label}</strong><span>{c.message}</span>{c.comparisons?.map((x, i) => <small key={i}>{x.label}: {x.document}{x.other ? ` | FactorCloud: ${x.other}` : ''}</small>)}</div>
-              <span className={`pill ${c.status.toLowerCase()}`}>{c.status}</span>
-            </div>) ?? <p>Validation appears after analysis.</p>}
+
+          <div className="portalSideColumn">
+            <div className="portalPanel">
+              <div className="portalPanelHeader"><div><span className="panelKicker">Attention</span><h2>Alerts</h2></div><a href="/risk">View all</a></div>
+              <div className="portalAlertList">
+                {data.alerts.slice(0, 4).map((alert) => <div className={`portalAlert ${alert.level.toLowerCase()}`} key={alert.id}><span className="alertDot"/><div><strong>{alert.title}</strong><span>{alert.detail}</span></div></div>)}
+                {!data.alerts.length && <div className="portalEmpty compact"><strong>All clear</strong><span>No concentration or volume alert is currently triggered.</span></div>}
+              </div>
+            </div>
+
+            <div className="portalPanel quickActionsPanel">
+              <div className="portalPanelHeader"><div><span className="panelKicker">Quick actions</span><h2>What do you need?</h2></div></div>
+              <a className="quickAction" href="/submit"><span className="quickIcon">↑</span><div><strong>Submit an invoice</strong><span>Upload and verify one funding packet</span></div><b>›</b></a>
+              <a className="quickAction" href="/batch"><span className="quickIcon">≡</span><div><strong>Batch upload</strong><span>Submit multiple invoices at once</span></div><b>›</b></a>
+              <a className="quickAction" href="/risk"><span className="quickIcon">!</span><div><strong>Review alerts</strong><span>See concentration and volume signals</span></div><b>›</b></a>
+            </div>
           </div>
-        </div>
+        </section>
 
-        {analysis && <div className="card documentsCard">
-          <h2>All extracted documents</h2>
-          <div className="docList">{analysis.documents.map((d, i) => <div className="doc" key={`${d.fileName}-${i}`}>
-            <strong>{d.fileName}</strong>
-            <span>{d.fields.documentType.replace('_', ' ')}</span>
-            <span>Reference: {d.fields.referenceNumber || '-'}</span>
-            <span>Amount: {d.fields.invoiceAmount == null ? '-' : `$${d.fields.invoiceAmount.toLocaleString()}`}</span>
-            {d.usage && <span className="usage">AI: {d.usage.model} · {d.usage.totalTokens.toLocaleString()} tokens{d.usage.estimatedCostUsd != null ? ` · ~$${d.usage.estimatedCostUsd.toFixed(4)}` : ''}</span>}
-            {d.fields.uncertainFields.length > 0 && <em>Review: {d.fields.uncertainFields.join(', ')}</em>}
-          </div>)}</div>
-        </div>}
+        <section className="portalPanel concentrationPanel">
+          <div className="portalPanelHeader"><div><span className="panelKicker">Portfolio view</span><h2>Debtor concentration</h2><p>Share of invoice amount in the currently retrieved FactorCloud dataset.</p></div><a href="/risk">Open risk monitor</a></div>
+          <div className="concentrationBars">
+            {data.concentrations.slice(0, 5).map((row) => <div className="concentrationRow" key={row.debtorId}>
+              <div className="concentrationLabel"><strong>{row.debtorName}</strong><span>{row.invoiceCount} invoice{row.invoiceCount === 1 ? '' : 's'} · {money(row.amount)}</span></div>
+              <div className="concentrationTrack"><span style={{ width: `${Math.max(2, Math.min(100, row.share * 100))}%` }} /></div>
+              <strong className="concentrationPct">{Math.round(row.share * 100)}%</strong>
+            </div>)}
+            {!data.concentrations.length && <div className="portalEmpty"><strong>No concentration data yet</strong><span>It will appear as invoice activity builds.</span></div>}
+          </div>
+        </section>
 
-        <div className="card actionCard">
-          <div className="step">4</div>
-          <h2>Create in FactorCloud</h2>
-          <p>The server re-runs validation and performs a duplicate check before creating anything.</p>
-          {analysis?.factorCloudLookupFailed && <div className="warning">FactorCloud could not be reached during analysis. Re-run Analyze before creating this invoice.</div>}
-          {liveValidation?.status === 'REVIEW' && !analysis?.factorCloudLookupFailed && <div className="overrideBox"><label><input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} /> I reviewed the warnings and want to continue.</label>{override && <textarea value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder="Why is this safe to create?" />}</div>}
-          <button className="secondary" onClick={createInvoice} disabled={!canCreate || Boolean(busy) || (liveValidation?.status === 'REVIEW' && !analysis?.factorCloudLookupFailed && (!override || !overrideReason.trim()))}>{busy === 'Creating invoice' ? 'Creating...' : 'Create invoice'}</button>
-          {createResult?.steps?.length ? <div className="steps">{createResult.steps.map((s, i) => <div key={i}><span>{s.ok ? 'OK' : 'ERROR'}</span>{s.step}: {s.detail}</div>)}</div> : null}
-        </div>
-      </section>
+        <p className="portalDataNote">Pilot note: this dashboard currently uses the invoice records returned by the FactorCloud integration environment. We still need Wallace's final definitions for outstanding A/R, concentration, and volume-spike rules before treating these as production risk metrics.</p>
+      </>}
     </main>
   );
 }
 
-function statusRank(status: string): number {
-  if (status === 'FAIL') return 0;
-  if (status === 'REVIEW') return 1;
-  if (status === 'PASS') return 2;
-  return 3;
+function PortalNav({ active }: { active: string }) {
+  return <nav className="portalNav"><a className="portalBrand" href="/"><span>FC</span><strong>Client Portal</strong></a><div className="portalNavLinks"><a className={active === 'home' ? 'active' : ''} href="/">Dashboard</a><a className={active === 'submit' ? 'active' : ''} href="/submit">Submit invoice</a><a className={active === 'batch' ? 'active' : ''} href="/batch">Batch upload</a><a className={active === 'risk' ? 'active' : ''} href="/risk">Alerts</a></div><div className="portalAccount"><span>Sandbox</span></div></nav>;
 }
 
-function Field({ label, value, onChange, type = 'text', readOnly = false }: { label: string; value: string | null; onChange: (v: string) => void; type?: string; readOnly?: boolean }) {
-  return <label className="field"><span>{label}</span><input type={type} value={value ?? ''} readOnly={readOnly} onChange={(e) => onChange(e.target.value)} /></label>;
+function Metric({ label, value, detail, tone = '' }: { label: string; value: string | number; detail: string; tone?: string }) {
+  return <div className={`portalMetric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>;
+}
+
+function money(value: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+}
+
+function shortName(name: string): string {
+  return name.replace(/\b(LLC|INC|CORP|CORPORATION|LTD)\.?$/i, '').trim();
+}
+
+function titleCase(value: string): string {
+  return value.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function statusInitial(status: string | null): string {
+  return (status || 'P').charAt(0).toUpperCase();
+}
+
+function statusTone(status: string | null): string {
+  const value = (status || '').toUpperCase();
+  if (value.includes('PAID') || value.includes('FUNDED') || value.includes('PURCHASE')) return 'pass';
+  if (value.includes('REJECT') || value.includes('FAIL')) return 'fail';
+  return 'review';
 }
