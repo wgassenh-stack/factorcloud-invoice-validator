@@ -85,9 +85,15 @@ export async function POST(req: Request) {
   }
 
   try {
-    const existing = await findExistingInvoice(clientId!, payload.debtorId, payload.invoiceNumber.trim());
-    if (existing) {
-      return NextResponse.json({ error: `Invoice ${payload.invoiceNumber.trim()} already exists in FactorCloud as ${existing.id}${existing.status ? ` (${existing.status})` : ''}.`, validation }, { status: 409 });
+    const duplicateNumbers = [...new Set([
+      originalPrimary.invoiceNumber?.trim(),
+      payload.invoiceNumber.trim(),
+    ].filter((value): value is string => Boolean(value)))];
+    for (const invoiceNumber of duplicateNumbers) {
+      const existing = await findExistingInvoice(clientId!, payload.debtorId, invoiceNumber);
+      if (existing) {
+        return NextResponse.json({ error: `Invoice ${invoiceNumber} already exists in FactorCloud as ${existing.id}${existing.status ? ` (${existing.status})` : ''}.`, validation }, { status: 409 });
+      }
     }
   } catch (err) {
     return NextResponse.json({ error: `Duplicate check failed, so submission was blocked: ${message(err)}`, validation }, { status: 502 });
