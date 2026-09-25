@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import './portal.css';
 import './route-nav.css';
+import './factorcloud-theme.css';
 
 export const metadata: Metadata = {
   title: 'FactorCloud Client Portal',
