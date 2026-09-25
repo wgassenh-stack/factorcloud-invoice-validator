@@ -1,0 +1,3 @@
+.portalRouteNavWrap { max-width:1240px; margin:0 auto; padding:0 24px; }
+.portalRouteNavWrap .portalNav { margin-bottom:0; }
+@media (max-width:600px) { .portalRouteNavWrap { padding:0 16px; } }
