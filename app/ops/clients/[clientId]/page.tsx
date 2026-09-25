@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { OpsSignOut } from '../../../components/OpsSignOut';
 
 type InvoiceRecord = {
   id: string;
@@ -66,7 +67,7 @@ export default function FactorClientDetailPage() {
         <span>Alerts</span>
         <span>Configuration</span>
       </nav>
-      <div className="opsSidebarFooter"><strong>Internal view</strong><span>Factor-wide access</span></div>
+      <div className="opsSidebarFooter"><strong>Internal view</strong><span>Factor-wide access</span><OpsSignOut /></div>
     </aside>
 
     <section className="opsContent">
