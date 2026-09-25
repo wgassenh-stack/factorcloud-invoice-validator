@@ -124,7 +124,14 @@ function idList(value: string | undefined): string[] {
 }
 
 export async function findDebtor(hints: DebtorHints): Promise<{ debtor: CompanyRecord; method: string; score: number } | null> {
-  const candidates = await Promise.all(idList(process.env.FACTORCLOUD_DEBTOR_IDS).map((id) => getCompany(id)));
+  const ids = idList(process.env.FACTORCLOUD_DEBTOR_IDS);
+  const settled = await Promise.allSettled(ids.map((id) => getCompany(id)));
+  const candidates = settled.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+  if (!candidates.length && ids.length) {
+    const rejected = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (rejected) throw rejected.reason;
+  }
+
   let best: { debtor: CompanyRecord; method: string; score: number } | null = null;
   for (const debtor of candidates) {
     const scored = scoreDebtor(hints, debtor);
@@ -143,13 +150,12 @@ export interface NewInvoice {
   notes: string | null;
 }
 
-export async function findExistingInvoice(clientId: string, debtorId: string, invoiceNumber: string): Promise<{ id: string; status?: string | null } | null> {
+export async function findExistingInvoice(clientId: string, _debtorId: string, invoiceNumber: string): Promise<{ id: string; status?: string | null } | null> {
   const body = await fcRequest('/invoices');
   const target = normalizeIdentifier(invoiceNumber);
   const match = collectInvoiceRecords(body).find((x) =>
     normalizeIdentifier(x.invoiceNumber) === target &&
-    (!x.companyClientId || x.companyClientId === clientId) &&
-    (!x.companyDebtorId || x.companyDebtorId === debtorId),
+    x.companyClientId === clientId,
   );
   return match ? { id: match.id, status: match.status } : null;
 }
