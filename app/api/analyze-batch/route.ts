@@ -4,6 +4,7 @@ import { extractDocument, isSupportedFile } from '@/lib/extract';
 import { FactorCloudError, getCompany } from '@/lib/factorcloud';
 import { scoreDebtor } from '@/lib/matching';
 import { validate } from '@/lib/rules';
+import { addFileIntegrity, signAnalysisReceipt } from '@/lib/submission-integrity';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
 import type {
   AnalyzedDocument,
@@ -33,9 +34,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Unsupported file type: ${unsupported.map((f) => f.name).join(', ')}.` }, { status: 400 });
   }
 
-  let documents: AnalyzedDocument[];
+  let extracted: AnalyzedDocument[];
   try {
-    documents = await mapLimit(files, EXTRACTION_CONCURRENCY, async (file) => {
+    extracted = await mapLimit(files, EXTRACTION_CONCURRENCY, async (file) => {
       const result = await extractDocument(file);
       return { fileName: file.name, fields: result.fields, usage: result.usage };
     });
@@ -43,6 +44,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Every uploaded file must be read before batch intake can continue. ${errorMessage(err)}` }, { status: 502 });
   }
 
+  const documents = await addFileIntegrity(files, extracted);
   const grouped = groupIntoInvoicePackets(documents);
   const warnings: string[] = [];
   if (!grouped.packets.length) {
@@ -55,40 +57,53 @@ export async function POST(req: Request) {
   let client: CompanyRecord | null = null;
   let debtorCandidates: CompanyRecord[] = [];
   let factorCloudLookupFailed = false;
+  const clientId = process.env.FACTORCLOUD_CLIENT_ID;
   try {
-    const clientId = process.env.FACTORCLOUD_CLIENT_ID;
     if (!clientId) throw new FactorCloudError('FACTORCLOUD_CLIENT_ID is not configured.', 500, null);
     const debtorIds = idList(process.env.FACTORCLOUD_DEBTOR_IDS);
     [client, debtorCandidates] = await Promise.all([
       getCompany(clientId),
-      Promise.all(debtorIds.map((id) => getCompany(id))),
+      loadDebtorCandidates(debtorIds),
     ]);
   } catch (err) {
     factorCloudLookupFailed = true;
     warnings.push(
       err instanceof FactorCloudError && err.status === 401
-        ? 'Not signed in to FactorCloud. Sign in, then analyze the batch again.'
+        ? 'FactorCloud connection is unavailable. Contact your factor and retry the batch.'
         : `FactorCloud lookup failed: ${errorMessage(err)}`,
     );
   }
 
-  const packets: BatchPacketAnalysis[] = grouped.packets.map((packet) => {
-    const match = factorCloudLookupFailed ? null : matchPacketDebtor(packet.documents, debtorCandidates);
-    const debtor = match?.debtor ?? null;
-    const rawValidation = validate({ documents: packet.documents, primaryIndex: packet.primaryIndex, debtor, client });
-    const validation = applyFactorCloudAvailability(rawValidation, factorCloudLookupFailed);
-    return {
-      packetId: packet.packetId,
-      documents: packet.documents,
-      primaryIndex: packet.primaryIndex,
-      debtor,
-      debtorMatch: match ? { method: match.method, score: match.score } : null,
-      client,
-      factorCloudLookupFailed,
-      validation,
-      warnings: [],
-    };
-  });
+  let packets: BatchPacketAnalysis[];
+  try {
+    packets = grouped.packets.map((packet) => {
+      const match = factorCloudLookupFailed ? null : matchPacketDebtor(packet.documents, debtorCandidates);
+      const debtor = match?.debtor ?? null;
+      const rawValidation = validate({ documents: packet.documents, primaryIndex: packet.primaryIndex, debtor, client });
+      const validation = applyFactorCloudAvailability(rawValidation, factorCloudLookupFailed);
+      const analysisReceipt = clientId ? signAnalysisReceipt({
+        version: 1,
+        clientId,
+        debtorId: debtor?.id ?? null,
+        primaryIndex: packet.primaryIndex,
+        documents: packet.documents,
+      }) : undefined;
+      return {
+        packetId: packet.packetId,
+        documents: packet.documents,
+        primaryIndex: packet.primaryIndex,
+        debtor,
+        debtorMatch: match ? { method: match.method, score: match.score } : null,
+        client,
+        factorCloudLookupFailed,
+        validation,
+        warnings: [],
+        analysisReceipt,
+      };
+    });
+  } catch (err) {
+    return NextResponse.json({ error: `Verification security setup is incomplete: ${errorMessage(err)}` }, { status: 500 });
+  }
 
   const body: BatchAnalyzeResponse = {
     packets,
@@ -119,6 +134,11 @@ function matchPacketDebtor(documents: AnalyzedDocument[], candidates: CompanyRec
 
 function idList(value: string | undefined): string[] {
   return (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+async function loadDebtorCandidates(ids: string[]): Promise<CompanyRecord[]> {
+  const settled = await Promise.allSettled(ids.map((id) => getCompany(id)));
+  return settled.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
