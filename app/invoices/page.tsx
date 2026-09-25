@@ -17,9 +17,16 @@ type Concentration = {
   debtorName: string;
 };
 
+type PortalWorkflowSummary = {
+  workflowStatus: string;
+  validationStatus: string;
+  updatedAt: string;
+};
+
 type InvoiceData = {
   records: RiskRecord[];
   concentrations: Concentration[];
+  portalWorkflows?: Record<string, PortalWorkflowSummary>;
   source: { clientName: string; clientInvoiceCount: number };
 };
 
@@ -62,7 +69,8 @@ export default function InvoicesPage() {
       .filter((record) => {
         if (!needle) return true;
         const debtor = record.companyDebtorId ? debtorNames[record.companyDebtorId] || record.companyDebtorId : '';
-        return [record.invoiceNumber, debtor, record.id, record.status]
+        const portal = data?.portalWorkflows?.[record.id];
+        return [record.invoiceNumber, debtor, record.id, record.status, portal?.workflowStatus]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(needle));
       })
@@ -78,7 +86,7 @@ export default function InvoicesPage() {
       <div>
         <span className="eyebrow">FactorCloud Client Portal</span>
         <h1>Invoices</h1>
-        <p>Search your invoice activity and see the latest FactorCloud status in one place.</p>
+        <p>Search your invoice activity and see both FactorCloud status and portal review status in one place.</p>
       </div>
       <div className="portalWelcomeActions">
         <a className="primaryLink" href="/submit">+ Submit invoice</a>
@@ -89,7 +97,7 @@ export default function InvoicesPage() {
 
     <section className="invoiceToolbar">
       <label className="invoiceSearch"><span>Search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Invoice number or debtor" /></label>
-      <label className="invoiceFilter"><span>Status</span><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="ALL">All statuses</option>{statuses.map((status) => <option key={status} value={status}>{prettyStatus(status)}</option>)}</select></label>
+      <label className="invoiceFilter"><span>FactorCloud status</span><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="ALL">All statuses</option>{statuses.map((status) => <option key={status} value={status}>{prettyStatus(status)}</option>)}</select></label>
       <div className="invoiceToolbarSummary"><strong>{filtered.length}</strong><span>invoices</span><strong>{money(total)}</strong><span>shown</span></div>
     </section>
 
@@ -97,23 +105,27 @@ export default function InvoicesPage() {
       <div className="portalPanelHeader"><div><span className="panelKicker">Invoice history</span><h2>{data?.source.clientName || 'Client invoices'}</h2></div><button className="small invoiceRefresh" onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button></div>
       <div className="batchTableWrap">
         <table className="batchTable portalInvoiceTable">
-          <thead><tr><th>Invoice</th><th>Debtor</th><th>Invoice date</th><th>Amount</th><th>Status</th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Debtor</th><th>Invoice date</th><th>Amount</th><th>FactorCloud</th><th>Portal review</th></tr></thead>
           <tbody>
-            {filtered.map((record) => <tr key={record.id}>
-              <td><a className="invoiceDetailLink" href={`/invoices/${encodeURIComponent(record.id)}`}><div className="invoiceTableIdentity"><strong>{record.invoiceNumber || record.id.slice(0, 8)}</strong><span>{record.id.slice(0, 8)}</span></div></a></td>
-              <td>{record.companyDebtorId ? debtorNames[record.companyDebtorId] || 'FactorCloud debtor' : '-'}</td>
-              <td>{record.invoiceDate || '-'}</td>
-              <td><strong>{record.invoiceAmount == null ? '-' : money(record.invoiceAmount)}</strong></td>
-              <td><span className={`portalStatus ${statusTone(record.status)}`}>{prettyStatus(record.status || 'Unknown')}</span></td>
-            </tr>)}
-            {!loading && !filtered.length && <tr><td colSpan={5}><div className="portalEmpty"><strong>No invoices match your filters</strong><span>Try a different invoice number, debtor, or status.</span></div></td></tr>}
-            {loading && !data && <tr><td colSpan={5}><div className="portalEmpty"><strong>Loading invoices...</strong><span>Reading current activity from FactorCloud.</span></div></td></tr>}
+            {filtered.map((record) => {
+              const portal = data?.portalWorkflows?.[record.id];
+              return <tr key={record.id}>
+                <td><a className="invoiceDetailLink" href={`/invoices/${encodeURIComponent(record.id)}`}><div className="invoiceTableIdentity"><strong>{record.invoiceNumber || record.id.slice(0, 8)}</strong><span>{record.id.slice(0, 8)}</span></div></a></td>
+                <td>{record.companyDebtorId ? debtorNames[record.companyDebtorId] || 'FactorCloud debtor' : '-'}</td>
+                <td>{record.invoiceDate || '-'}</td>
+                <td><strong>{record.invoiceAmount == null ? '-' : money(record.invoiceAmount)}</strong></td>
+                <td><span className={`portalStatus ${statusTone(record.status)}`}>{prettyStatus(record.status || 'Unknown')}</span></td>
+                <td>{portal ? <span className={`portalStatus ${statusTone(portal.workflowStatus)}`}>{prettyStatus(portal.workflowStatus)}</span> : <span className="portalMuted">-</span>}</td>
+              </tr>;
+            })}
+            {!loading && !filtered.length && <tr><td colSpan={6}><div className="portalEmpty"><strong>No invoices match your filters</strong><span>Try a different invoice number, debtor, or status.</span></div></td></tr>}
+            {loading && !data && <tr><td colSpan={6}><div className="portalEmpty"><strong>Loading invoices...</strong><span>Reading current activity from FactorCloud.</span></div></td></tr>}
           </tbody>
         </table>
       </div>
     </section>
 
-    <p className="portalDataNote">Open an invoice to see its current FactorCloud status plus portal submission, document, review, and audit history when available.</p>
+    <p className="portalDataNote">FactorCloud status is the accounting/factoring state. Portal review is the client-submission workflow state. Open an invoice for documents, validation checks, review history, and the audit trail.</p>
   </main>;
 }
 
@@ -127,7 +139,7 @@ function prettyStatus(value: string): string {
 
 function statusTone(status: string | null): string {
   const value = (status || '').toUpperCase();
-  if (value.includes('PAID') || value.includes('FUNDED') || value.includes('PURCHASE')) return 'pass';
-  if (value.includes('REJECT') || value.includes('FAIL')) return 'fail';
+  if (value.includes('PASS') || value.includes('APPROV') || value.includes('PAID') || value.includes('FUNDED') || value.includes('PURCHASE') || value.includes('CREATED')) return 'pass';
+  if (value.includes('REJECT') || value.includes('FAIL') || value.includes('ERROR')) return 'fail';
   return 'review';
 }

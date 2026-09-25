@@ -1,10 +1,19 @@
 import { NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 import { fcRequest, getCompany } from '@/lib/factorcloud';
 import { PortalAccessError, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
+import { databaseAuthEnabled } from '@/lib/session';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
+
+type WorkflowRow = {
+  factorcloud_invoice_id: string;
+  workflow_status: string;
+  validation_status: string;
+  updated_at: Date | string;
+};
 
 export async function GET() {
   try {
@@ -34,9 +43,35 @@ export async function GET() {
     };
 
     const summary = summarizeRisk(records, debtorNames, new Date().toISOString().slice(0, 10), thresholds);
+    const portalWorkflows: Record<string, { workflowStatus: string; validationStatus: string; updatedAt: string }> = {};
+
+    if (databaseAuthEnabled() && records.length) {
+      const invoiceIds = records.map((record) => record.id).filter(Boolean);
+      if (invoiceIds.length) {
+        const rows = await query<WorkflowRow>(`
+          select s.factorcloud_invoice_id, s.workflow_status, s.validation_status, s.updated_at
+          from submissions s
+          join portal_clients pc on pc.id = s.client_id
+          where pc.factorcloud_client_id = $1
+            and s.factorcloud_invoice_id = any($2::text[])
+          order by s.updated_at desc
+        `, [clientId, invoiceIds]);
+
+        for (const row of rows) {
+          if (!row.factorcloud_invoice_id || portalWorkflows[row.factorcloud_invoice_id]) continue;
+          portalWorkflows[row.factorcloud_invoice_id] = {
+            workflowStatus: row.workflow_status,
+            validationStatus: row.validation_status,
+            updatedAt: new Date(row.updated_at).toISOString(),
+          };
+        }
+      }
+    }
+
     return NextResponse.json({
       ...summary,
       records,
+      portalWorkflows,
       thresholds,
       source: {
         clientId,
