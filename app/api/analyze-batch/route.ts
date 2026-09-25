@@ -3,6 +3,7 @@ import { groupIntoInvoicePackets } from '@/lib/batch';
 import { extractDocument, isSupportedFile } from '@/lib/extract';
 import { FactorCloudError, getCompany } from '@/lib/factorcloud';
 import { scoreDebtor } from '@/lib/matching';
+import { PortalAccessError, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
 import { addFileIntegrity, signAnalysisReceipt } from '@/lib/submission-integrity';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
@@ -22,6 +23,13 @@ const MAX_TOTAL_BYTES = 25 * 1024 * 1024;
 const EXTRACTION_CONCURRENCY = 4;
 
 export async function POST(req: Request) {
+  let clientId: string;
+  try { clientId = await resolveConfiguredClientId(); }
+  catch (err) {
+    const status = err instanceof PortalAccessError ? err.status : 500;
+    return NextResponse.json({ error: errorMessage(err) }, { status });
+  }
+
   const form = await req.formData();
   const files = form.getAll('files').filter((f): f is File => f instanceof File && f.size > 0);
   if (!files.length) return NextResponse.json({ error: 'Upload at least one document.' }, { status: 400 });
@@ -30,9 +38,7 @@ export async function POST(req: Request) {
   if (files.reduce((sum, f) => sum + f.size, 0) > MAX_TOTAL_BYTES) return NextResponse.json({ error: 'Combined upload must be 25 MB or smaller for the pilot.' }, { status: 413 });
 
   const unsupported = files.filter((f) => !isSupportedFile(f.type));
-  if (unsupported.length) {
-    return NextResponse.json({ error: `Unsupported file type: ${unsupported.map((f) => f.name).join(', ')}.` }, { status: 400 });
-  }
+  if (unsupported.length) return NextResponse.json({ error: `Unsupported file type: ${unsupported.map((f) => f.name).join(', ')}.` }, { status: 400 });
 
   let extracted: AnalyzedDocument[];
   try {
@@ -47,24 +53,15 @@ export async function POST(req: Request) {
   const documents = await addFileIntegrity(files, extracted);
   const grouped = groupIntoInvoicePackets(documents);
   const warnings: string[] = [];
-  if (!grouped.packets.length) {
-    warnings.push('No invoice documents were detected, so no invoice packets could be formed.');
-  }
-  if (grouped.unassignedDocuments.length) {
-    warnings.push(`${grouped.unassignedDocuments.length} supporting document(s) could not be assigned confidently to a single invoice packet.`);
-  }
+  if (!grouped.packets.length) warnings.push('No invoice documents were detected, so no invoice packets could be formed.');
+  if (grouped.unassignedDocuments.length) warnings.push(`${grouped.unassignedDocuments.length} supporting document(s) could not be assigned confidently to a single invoice packet.`);
 
   let client: CompanyRecord | null = null;
   let debtorCandidates: CompanyRecord[] = [];
   let factorCloudLookupFailed = false;
-  const clientId = process.env.FACTORCLOUD_CLIENT_ID;
   try {
-    if (!clientId) throw new FactorCloudError('FACTORCLOUD_CLIENT_ID is not configured.', 500, null);
     const debtorIds = idList(process.env.FACTORCLOUD_DEBTOR_IDS);
-    [client, debtorCandidates] = await Promise.all([
-      getCompany(clientId),
-      loadDebtorCandidates(debtorIds),
-    ]);
+    [client, debtorCandidates] = await Promise.all([getCompany(clientId), loadDebtorCandidates(debtorIds)]);
   } catch (err) {
     factorCloudLookupFailed = true;
     warnings.push(
@@ -81,13 +78,13 @@ export async function POST(req: Request) {
       const debtor = match?.debtor ?? null;
       const rawValidation = validate({ documents: packet.documents, primaryIndex: packet.primaryIndex, debtor, client });
       const validation = applyFactorCloudAvailability(rawValidation, factorCloudLookupFailed);
-      const analysisReceipt = clientId ? signAnalysisReceipt({
+      const analysisReceipt = signAnalysisReceipt({
         version: 1,
         clientId,
         debtorId: debtor?.id ?? null,
         primaryIndex: packet.primaryIndex,
         documents: packet.documents,
-      }) : undefined;
+      });
       return {
         packetId: packet.packetId,
         documents: packet.documents,
@@ -105,11 +102,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Verification security setup is incomplete: ${errorMessage(err)}` }, { status: 500 });
   }
 
-  const body: BatchAnalyzeResponse = {
-    packets,
-    unassignedDocuments: grouped.unassignedDocuments,
-    warnings,
-  };
+  const body: BatchAnalyzeResponse = { packets, unassignedDocuments: grouped.unassignedDocuments, warnings };
   return NextResponse.json(body);
 }
 
@@ -121,11 +114,7 @@ function matchPacketDebtor(documents: AnalyzedDocument[], candidates: CompanyRec
   let best: { debtor: CompanyRecord; method: string; score: number } | null = null;
   for (const document of ordered) {
     for (const debtor of candidates) {
-      const scored = scoreDebtor({
-        name: document.fields.debtorName,
-        ein: document.fields.debtorEin,
-        phone: document.fields.debtorPhone,
-      }, debtor);
+      const scored = scoreDebtor({ name: document.fields.debtorName, ein: document.fields.debtorEin, phone: document.fields.debtorPhone }, debtor);
       if (scored && (!best || scored.score > best.score)) best = { debtor, ...scored };
     }
   }
