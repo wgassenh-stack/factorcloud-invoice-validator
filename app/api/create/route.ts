@@ -8,7 +8,9 @@ import {
   uploadDocument,
 } from '@/lib/factorcloud';
 import { isBlank, normalizeDate, normalizeMoney } from '@/lib/normalize';
-import { currentPortalSession, PortalAccessError, resolveConfiguredClientId } from '@/lib/portal-auth';
+import { apiErrorResponse, publicErrorMessage } from '@/lib/api-errors';
+import { isDefinitiveCreateFailure } from '@/lib/errors';
+import { currentPortalSession, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
 import { persistSubmissionStart, markSubmissionFactorCloudResult, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
 import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
@@ -29,10 +31,7 @@ interface CreatePayload {
 export async function POST(req: Request) {
   let clientId: string;
   try { clientId = await resolveConfiguredClientId(); }
-  catch (err) {
-    const status = err instanceof PortalAccessError ? err.status : 500;
-    return NextResponse.json({ error: message(err) }, { status });
-  }
+  catch (err) { return apiErrorResponse(err, 'create'); }
 
   const form = await req.formData();
   let payload: CreatePayload;
@@ -54,7 +53,7 @@ export async function POST(req: Request) {
 
   let receipt;
   try { receipt = verifyAnalysisReceipt(payload.analysisReceipt); }
-  catch (err) { return NextResponse.json({ error: `Cannot create invoice: ${message(err)}` }, { status: 400 }); }
+  catch (err) { return apiErrorResponse(err, 'create'); }
 
   if (receipt.clientId !== clientId) problems.push('verification receipt belongs to a different client');
   if (receipt.debtorId !== payload.debtorId) problems.push('debtor does not match the verified packet');
@@ -72,7 +71,7 @@ export async function POST(req: Request) {
   let debtor;
   let client;
   try { [debtor, client] = await Promise.all([getCompany(payload.debtorId), getCompany(clientId)]); }
-  catch (err) { return NextResponse.json({ error: `Cannot re-check FactorCloud records: ${message(err)}` }, { status: 502 }); }
+  catch (err) { return NextResponse.json({ error: `Cannot re-check FactorCloud records: ${publicErrorMessage(err, 'create')}` }, { status: 502 }); }
 
   const originalPrimary = receipt.documents[receipt.primaryIndex].fields;
   const corrections = collectClientCorrections(originalPrimary, payload);
@@ -87,7 +86,7 @@ export async function POST(req: Request) {
       if (existing) return NextResponse.json({ error: `Invoice ${invoiceNumber} already exists in FactorCloud as ${existing.id}${existing.status ? ` (${existing.status})` : ''}.`, validation }, { status: 409 });
     }
   } catch (err) {
-    return NextResponse.json({ error: `Duplicate check failed, so submission was blocked: ${message(err)}`, validation }, { status: 502 });
+    return NextResponse.json({ error: `Duplicate check failed, so submission was blocked: ${publicErrorMessage(err, 'create')}`, validation }, { status: 502 });
   }
 
   const session = await currentPortalSession();
@@ -106,7 +105,7 @@ export async function POST(req: Request) {
       files,
     });
   } catch (err) {
-    return NextResponse.json({ error: `Portal workflow blocked submission: ${message(err)}`, validation }, { status: 409 });
+    return apiErrorResponse(err, 'create', 500, { validation });
   }
 
   const steps: CreateStep[] = [];
@@ -133,10 +132,14 @@ export async function POST(req: Request) {
     steps.push({ step: 'Create invoice', ok: true, detail: `Invoice ${invoiceId}` });
     await markSubmissionFactorCloudResult({ submission: storedSubmission, session, invoiceId, validationStatus: validation.status });
   } catch (err) {
-    const detail = message(err);
+    const detail = publicErrorMessage(err, 'create');
+    // Only a definite FactorCloud refusal means no invoice exists, so only then may the client retry.
+    const retryable = isDefinitiveCreateFailure(err);
     steps.push({ step: 'Create invoice', ok: false, detail });
-    try { await markSubmissionFactorCloudResult({ submission: storedSubmission, session, validationStatus: validation.status, error: detail }); } catch { /* original error remains primary */ }
-    return respond(false, detail);
+    try { await markSubmissionFactorCloudResult({ submission: storedSubmission, session, validationStatus: validation.status, error: detail, retryable }); } catch { /* original error remains primary */ }
+    return respond(false, retryable
+      ? `FactorCloud did not accept the invoice, so nothing was created: ${detail} You can correct the problem and submit again.`
+      : `The FactorCloud result is uncertain: ${detail} Do not resubmit. Your factor needs to check FactorCloud first.`);
   }
 
   for (const [i, file] of files.entries()) {
@@ -147,7 +150,7 @@ export async function POST(req: Request) {
       const note = doc.type !== wanted ? ` (type ${wanted} rejected, uploaded as ${doc.type})` : ` as ${doc.type}`;
       steps.push({ step: `Upload ${file.name}`, ok: true, detail: `Document ${doc.id}${note}` });
     } catch (err) {
-      const detail = message(err);
+      const detail = publicErrorMessage(err, 'create');
       steps.push({ step: `Upload ${file.name}`, ok: false, detail });
       try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: 'DOCUMENT_UPLOAD_FAILED', eventData: { invoiceId, fileName: file.name, error: detail } }); } catch { /* original error remains primary */ }
       return respond(false, `Invoice ${invoiceId} was created, but uploading ${file.name} failed. Do not recreate it. Attach the missing file in FactorCloud and retry only after checking the existing invoice.`);
@@ -160,7 +163,7 @@ export async function POST(req: Request) {
       steps.push({ step: 'Attach documents', ok: true, detail: `${documentIds.length} document(s) attached` });
       try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: 'DOCUMENTS_ATTACHED', eventData: { invoiceId, documentIds } }); } catch { /* invoice workflow should still succeed */ }
     } catch (err) {
-      const detail = message(err);
+      const detail = publicErrorMessage(err, 'create');
       steps.push({ step: 'Attach documents', ok: false, detail });
       try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: 'DOCUMENT_ATTACH_FAILED', eventData: { invoiceId, documentIds, error: detail } }); } catch { /* original error remains primary */ }
       return respond(false, `Invoice ${invoiceId} was created and documents uploaded, but attaching them failed. Do not recreate it. Attach the uploaded documents in FactorCloud.`);
@@ -190,4 +193,3 @@ function addCorrectionReview(validation: ValidationReport, corrections: string[]
   return { status: validation.status === 'FAIL' ? 'FAIL' : 'REVIEW', checks: [correctionCheck, ...validation.checks] };
 }
 
-function message(err: unknown): string { return err instanceof Error ? err.message : String(err); }

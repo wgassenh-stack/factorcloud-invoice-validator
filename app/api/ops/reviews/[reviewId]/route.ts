@@ -2,13 +2,14 @@ import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 import { requireFactorSession } from '@/lib/portal-auth';
-import { databaseAuthEnabled } from '@/lib/session';
+import { apiErrorResponse } from '@/lib/api-errors';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: Request, context: { params: Promise<{ reviewId: string }> }) {
-  if (!databaseAuthEnabled()) return NextResponse.json({ error: 'Database review workflow is not enabled.' }, { status: 503 });
-  const session = await requireFactorSession();
+  let session;
+  try { session = await requireFactorSession(); }
+  catch (err) { return apiErrorResponse(err, 'ops-review-decision'); }
   const { reviewId } = await context.params;
   const body = await req.json().catch(() => ({})) as { decision?: 'APPROVE' | 'REJECT'; note?: string | null };
   if (!reviewId || !['APPROVE', 'REJECT'].includes(body.decision || '')) return NextResponse.json({ error: 'A valid review decision is required.' }, { status: 400 });
@@ -54,7 +55,7 @@ export async function POST(req: Request, context: { params: Promise<{ reviewId: 
     return NextResponse.json({ ok: true, status: reviewStatus });
   } catch (err) {
     await client.query('rollback');
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return apiErrorResponse(err, 'ops-review-decision');
   } finally {
     client.release();
   }

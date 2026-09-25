@@ -11,7 +11,9 @@ FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-COPY --from=build /app ./
+# Run as the unprivileged "node" user that ships with the official image, not root.
+COPY --from=build --chown=node:node /app ./
+USER node
 
 EXPOSE 3000
 CMD ["npm", "start"]

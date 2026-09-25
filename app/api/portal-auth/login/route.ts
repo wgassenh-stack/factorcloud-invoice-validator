@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { compare } from 'bcryptjs';
+import { apiErrorResponse } from '@/lib/api-errors';
+import { clearLoginFailures, clientIp, lockedUntil, recordLoginFailure, throttleBuckets } from '@/lib/login-throttle';
 import { findLoginUser, touchLogin, userClients } from '@/lib/portal-auth';
 import { databaseAuthEnabled, PORTAL_SESSION_COOKIE, signPortalSession } from '@/lib/session';
 
@@ -16,9 +18,24 @@ export async function POST(req: Request) {
   if (!email || !password) return NextResponse.json({ error: 'Email and password are required.' }, { status: 400 });
 
   try {
+    // Checked before the password so a locked account cannot be probed.
+    const buckets = throttleBuckets(email, clientIp(req.headers));
+    const until = await lockedUntil(buckets);
+    if (until) {
+      const retryAfter = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 1000));
+      return NextResponse.json(
+        { error: `Too many sign-in attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).` },
+        { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+      );
+    }
+
     const user = await findLoginUser(email);
     const valid = Boolean(user?.is_active && user.password_hash && await compare(password, user.password_hash));
-    if (!user || !valid) return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });
+    if (!user || !valid) {
+      await recordLoginFailure(buckets);
+      return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });
+    }
+    await clearLoginFailures(buckets);
 
     const clients = user.role === 'CLIENT_USER' ? await userClients(user.id) : [];
     if (user.role === 'CLIENT_USER' && clients.length !== 1) {
@@ -52,6 +69,6 @@ export async function POST(req: Request) {
     });
     return res;
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return apiErrorResponse(err, 'login');
   }
 }

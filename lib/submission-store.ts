@@ -2,6 +2,8 @@ import 'server-only';
 
 import { createHash, randomUUID } from 'crypto';
 import { pool } from './db';
+import { ensureSecuritySchema } from './schema';
+import { PublicError } from './errors';
 import { normalizeIdentifier } from './normalize';
 import { portalClientRecord } from './portal-auth';
 import { databaseAuthEnabled, type PortalSession } from './session';
@@ -12,6 +14,19 @@ export interface StoredSubmission {
   id: string;
   portalClientId: string;
 }
+
+/** The invoice already has a portal submission that blocks a new one. */
+export class SubmissionConflictError extends PublicError {
+  constructor(message: string) {
+    super(message, 409);
+  }
+}
+
+/**
+ * Suffix that releases a submission's idempotency key. Only applied after FactorCloud definitively
+ * refused the create, so no invoice exists and the client may submit the same invoice again.
+ */
+export const RELEASED_KEY_MARKER = ':released:';
 
 export async function persistSubmissionStart(args: {
   session: PortalSession | null;
@@ -117,11 +132,30 @@ export async function persistSubmissionStart(args: {
   } catch (err) {
     await client.query('rollback');
     const code = (err as { code?: string }).code;
-    if (code === '23505') throw new Error('This invoice is already being processed or was already submitted through the portal.');
+    if (code === '23505') throw await conflictFor(idempotencyKey, err);
     throw err;
   } finally {
     client.release();
   }
+}
+
+async function conflictFor(idempotencyKey: string, err: unknown): Promise<Error> {
+  const rows = (await pool().query<{ workflow_status: string; factorcloud_invoice_id: string | null }>(
+    'select workflow_status, factorcloud_invoice_id from submissions where idempotency_key = $1',
+    [idempotencyKey],
+  )).rows;
+  const existing = rows[0];
+  if (!existing) {
+    // Not the invoice-level key: the same file was included twice in one packet.
+    if ((err as { constraint?: string }).constraint?.includes('sha256')) {
+      return new PublicError('The same file appears more than once in this packet. Remove the duplicate and verify again.', 400);
+    }
+    return err instanceof Error ? err : new Error(String(err));
+  }
+  if (existing.workflow_status === 'ERROR' && !existing.factorcloud_invoice_id) {
+    return new SubmissionConflictError('A previous attempt to submit this invoice ended without a clear result from FactorCloud. Your factor needs to confirm in FactorCloud whether it was created before it can be submitted again.');
+  }
+  return new SubmissionConflictError('This invoice is already being processed or was already submitted through the portal.');
 }
 
 export async function markSubmissionFactorCloudResult(args: {
@@ -130,15 +164,29 @@ export async function markSubmissionFactorCloudResult(args: {
   invoiceId?: string | null;
   validationStatus: ValidationReport['status'];
   error?: string | null;
+  /**
+   * Set only when FactorCloud definitively refused the create (no invoice exists). Releases the
+   * idempotency key so the client can retry. Uncertain failures keep the key and block retries,
+   * because the invoice may exist in FactorCloud.
+   */
+  retryable?: boolean;
 }): Promise<void> {
   if (!args.submission || !args.session || !databaseAuthEnabled()) return;
   const status = args.error ? 'ERROR' : args.validationStatus === 'REVIEW' ? 'REVIEW_REQUIRED' : 'CREATED_IN_FACTORCLOUD';
-  await pool().query('update submissions set factorcloud_invoice_id=$1, workflow_status=$2, updated_at=now() where id=$3', [args.invoiceId ?? null, status, args.submission.id]);
+  const release = Boolean(args.error && args.retryable && !args.invoiceId);
+  await ensureSecuritySchema();
+  await pool().query(`
+    update submissions
+    set factorcloud_invoice_id=$1, workflow_status=$2, updated_at=now(),
+      idempotency_key = case when $4 then idempotency_key || $5 || id else idempotency_key end,
+      idempotency_released_at = case when $4 then now() else idempotency_released_at end
+    where id=$3
+  `, [args.invoiceId ?? null, status, args.submission.id, release, RELEASED_KEY_MARKER]);
   await recordSubmissionAudit({
     submission: args.submission,
     session: args.session,
     eventType: args.error ? 'FACTORCLOUD_CREATE_FAILED' : 'FACTORCLOUD_INVOICE_CREATED',
-    eventData: { invoiceId: args.invoiceId ?? null, error: args.error ?? null },
+    eventData: { invoiceId: args.invoiceId ?? null, error: args.error ?? null, ...(args.error ? { retryAllowed: release } : {}) },
   });
 }
 

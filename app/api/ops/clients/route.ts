@@ -3,14 +3,14 @@ import { fcRequest, getCompany } from '@/lib/factorcloud';
 import { summarizeClients } from '@/lib/ops';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
-import { databaseAuthEnabled } from '@/lib/session';
+import { apiErrorResponse } from '@/lib/api-errors';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 export async function GET() {
   try {
-    if (databaseAuthEnabled()) await requireFactorSession();
+    await requireFactorSession();
     const raw = await fcRequest('/invoices');
     const records = collectRiskInvoiceRecords(raw);
     const clientIds = [...new Set(records.map((record) => record.companyClientId).filter((id): id is string => Boolean(id)))];
@@ -37,7 +37,6 @@ export async function GET() {
       },
     });
   } catch (err) {
-    const status = (err as { status?: number }).status || 502;
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status });
+    return apiErrorResponse(err, 'ops-clients', 502);
   }
 }

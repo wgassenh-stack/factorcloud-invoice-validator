@@ -114,7 +114,7 @@ export default function ReviewQueuePage() {
           <Metric label="Needs review" value={data.records.length} />
           <Metric label="Invoice amount" value={money(data.records.reduce((sum, record) => sum + (record.invoiceAmount ?? 0), 0))} />
           <Metric label="Clients affected" value={new Set(data.records.map((record) => record.companyClientId).filter(Boolean)).size} />
-          <Metric label="Workflow" value={data.records.some((record) => record.reviewId) ? 'Database' : 'Pilot'} detail={data.records.some((record) => record.reviewId) ? 'Decisions are audited' : 'Read-only FactorCloud note marker'} />
+          <Metric label="Workflow" value="Database" detail="Decisions are audited" />
         </section>
 
         <div className="warning opsDataNote">{data.source.note}</div>

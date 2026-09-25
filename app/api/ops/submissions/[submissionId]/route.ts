@@ -2,14 +2,13 @@ import { NextResponse } from 'next/server';
 import { fcRequest, getCompany } from '@/lib/factorcloud';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
-import { databaseAuthEnabled } from '@/lib/session';
+import { apiErrorResponse } from '@/lib/api-errors';
 import { submissionDetailById } from '@/lib/submission-detail';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 export async function GET(_req: Request, context: { params: Promise<{ submissionId: string }> }) {
-  if (!databaseAuthEnabled()) return NextResponse.json({ error: 'Database workflow is not enabled.' }, { status: 503 });
   try {
     const session = await requireFactorSession();
     const { submissionId } = await context.params;
@@ -45,7 +44,6 @@ export async function GET(_req: Request, context: { params: Promise<{ submission
       note: 'Portal review decisions are audited here. FactorCloud remains the invoice system of record, so portal approval or rejection does not yet change FactorCloud verification/funding status.',
     });
   } catch (err) {
-    const status = (err as { status?: number }).status || 500;
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status });
+    return apiErrorResponse(err, 'ops-submission');
   }
 }

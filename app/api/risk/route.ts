@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
+import { apiErrorResponse } from '@/lib/api-errors';
 import { query } from '@/lib/db';
 import { fcRequest, getCompany } from '@/lib/factorcloud';
-import { PortalAccessError, resolveConfiguredClientId } from '@/lib/portal-auth';
+import { resolveConfiguredClientId } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
 import { databaseAuthEnabled } from '@/lib/session';
 
@@ -83,8 +84,7 @@ export async function GET() {
       },
     });
   } catch (err) {
-    const status = err instanceof PortalAccessError ? err.status : 502;
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status });
+    return apiErrorResponse(err, 'risk', 502);
   }
 }
 

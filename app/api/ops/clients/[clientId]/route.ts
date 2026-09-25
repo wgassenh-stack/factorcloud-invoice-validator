@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { fcRequest, getCompany } from '@/lib/factorcloud';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
-import { databaseAuthEnabled } from '@/lib/session';
+import { apiErrorResponse } from '@/lib/api-errors';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -12,7 +12,7 @@ export async function GET(_req: Request, context: { params: Promise<{ clientId: 
   if (!clientId) return NextResponse.json({ error: 'Client id is required.' }, { status: 400 });
 
   try {
-    if (databaseAuthEnabled()) await requireFactorSession();
+    await requireFactorSession();
     const [raw, client] = await Promise.all([fcRequest('/invoices'), getCompany(clientId)]);
     const allRecords = collectRiskInvoiceRecords(raw);
     const records = allRecords.filter((record) => record.companyClientId === clientId);
@@ -49,8 +49,7 @@ export async function GET(_req: Request, context: { params: Promise<{ clientId: 
       },
     });
   } catch (err) {
-    const status = (err as { status?: number }).status || 502;
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status });
+    return apiErrorResponse(err, 'ops-client', 502);
   }
 }
 
