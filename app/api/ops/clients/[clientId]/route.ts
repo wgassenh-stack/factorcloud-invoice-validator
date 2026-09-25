@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { fcRequest, getCompany } from '@/lib/factorcloud';
+import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
 import { apiErrorResponse } from '@/lib/api-errors';
@@ -13,7 +13,7 @@ export async function GET(_req: Request, context: { params: Promise<{ clientId: 
 
   try {
     await requireFactorSession();
-    const [raw, client] = await Promise.all([fcRequest('/invoices'), getCompany(clientId)]);
+    const [{ raw }, client] = await Promise.all([listInvoices(), getCompany(clientId)]);
     const allRecords = collectRiskInvoiceRecords(raw);
     const records = allRecords.filter((record) => record.companyClientId === clientId);
     const debtorIds = [...new Set(records.map((record) => record.companyDebtorId).filter((id): id is string => Boolean(id)))].slice(0, 50);

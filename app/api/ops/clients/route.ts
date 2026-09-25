@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { fcRequest, getCompany } from '@/lib/factorcloud';
+import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { summarizeClients } from '@/lib/ops';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
@@ -11,7 +11,7 @@ export const maxDuration = 120;
 export async function GET() {
   try {
     await requireFactorSession();
-    const raw = await fcRequest('/invoices');
+    const { raw } = await listInvoices();
     const records = collectRiskInvoiceRecords(raw);
     const clientIds = [...new Set(records.map((record) => record.companyClientId).filter((id): id is string => Boolean(id)))];
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { query } from '@/lib/db';
-import { fcRequest, getCompany } from '@/lib/factorcloud';
+import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { resolveConfiguredClientId } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
 import { databaseAuthEnabled } from '@/lib/session';
@@ -19,8 +19,8 @@ type WorkflowRow = {
 export async function GET() {
   try {
     const clientId = await resolveConfiguredClientId();
-    const [raw, client] = await Promise.all([
-      fcRequest('/invoices'),
+    const [{ raw }, client] = await Promise.all([
+      listInvoices(),
       getCompany(clientId),
     ]);
     const allRecords = collectRiskInvoiceRecords(raw);

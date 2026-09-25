@@ -154,10 +154,29 @@ export interface NewInvoice {
   notes: string | null;
 }
 
-export async function findExistingInvoice(clientId: string, _debtorId: string, invoiceNumber: string): Promise<{ id: string; status?: string | null } | null> {
+export interface InvoiceListResult {
+  /** Raw FactorCloud response bodies, one per page. The record collectors walk arrays, so pass as-is. */
+  raw: unknown[];
+  /**
+   * Whether every invoice is known to be included. null until FactorCloud's pagination semantics are
+   * confirmed: today this is a single request, which may be only the first page.
+   */
+  complete: boolean | null;
+}
+
+/**
+ * The one place that reads FactorCloud's invoice list. Every caller (duplicate check, dashboards,
+ * invoice pages, ops views) goes through here, so pagination is implemented once.
+ */
+export async function listInvoices(): Promise<InvoiceListResult> {
   const body = await fcRequest('/invoices');
+  return { raw: [body], complete: null };
+}
+
+export async function findExistingInvoice(clientId: string, _debtorId: string, invoiceNumber: string): Promise<{ id: string; status?: string | null } | null> {
+  const { raw } = await listInvoices();
   const target = normalizeIdentifier(invoiceNumber);
-  const match = collectInvoiceRecords(body).find((x) =>
+  const match = collectInvoiceRecords(raw).find((x) =>
     normalizeIdentifier(x.invoiceNumber) === target &&
     x.companyClientId === clientId,
   );
