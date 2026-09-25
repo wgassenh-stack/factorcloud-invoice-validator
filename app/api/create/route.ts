@@ -76,18 +76,22 @@ export async function POST(req: Request) {
   const originalPrimary = receipt.documents[receipt.primaryIndex].fields;
   const corrections = collectClientCorrections(originalPrimary, payload);
   const rawValidation = validate({ documents: receipt.documents, primaryIndex: receipt.primaryIndex, debtor, client });
-  const validation = addCorrectionReview(rawValidation, corrections);
+  let validation = addCorrectionReview(rawValidation, corrections);
   if (validation.status === 'FAIL') return NextResponse.json({ error: 'Validation failed. Fix the failed checks before submitting the invoice.', validation }, { status: 409 });
 
+  let duplicateCheckComplete = true;
   try {
     const duplicateNumbers = [...new Set([originalPrimary.invoiceNumber?.trim(), payload.invoiceNumber.trim()].filter((value): value is string => Boolean(value)))];
     for (const invoiceNumber of duplicateNumbers) {
-      const existing = await findExistingInvoice(clientId, payload.debtorId, invoiceNumber);
+      const { existing, complete } = await findExistingInvoice(clientId, invoiceNumber);
       if (existing) return NextResponse.json({ error: `Invoice ${invoiceNumber} already exists in FactorCloud as ${existing.id}${existing.status ? ` (${existing.status})` : ''}.`, validation }, { status: 409 });
+      duplicateCheckComplete &&= complete;
     }
   } catch (err) {
     return NextResponse.json({ error: `Duplicate check failed, so submission was blocked: ${publicErrorMessage(err, 'create')}`, validation }, { status: 502 });
   }
+  // Could not read FactorCloud's invoice list to the end: submit, but flag for a person to confirm.
+  if (!duplicateCheckComplete) validation = addDuplicateCheckReview(validation);
 
   const session = await currentPortalSession();
   let storedSubmission: StoredSubmission | null = null;
@@ -180,6 +184,16 @@ function collectClientCorrections(original: { invoiceNumber: string | null; refe
   if (normalizeMoney(original.invoiceAmount) !== normalizeMoney(payload.invoiceAmount)) corrections.push('invoice amount');
   if (normalizeDate(original.invoiceDate) !== normalizeDate(payload.invoiceDate)) corrections.push('invoice date');
   return corrections;
+}
+
+function addDuplicateCheckReview(validation: ValidationReport): ValidationReport {
+  const check: CheckResult = {
+    id: 'duplicate-check-incomplete',
+    label: 'Duplicate check',
+    status: 'REVIEW',
+    message: 'FactorCloud\'s invoice list could not be read completely, so a duplicate of this invoice number cannot be ruled out. Confirm in FactorCloud before approving.',
+  };
+  return { status: validation.status === 'FAIL' ? 'FAIL' : 'REVIEW', checks: [check, ...validation.checks] };
 }
 
 function addCorrectionReview(validation: ValidationReport, corrections: string[]): ValidationReport {

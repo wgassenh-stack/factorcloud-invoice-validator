@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { apiErrorResponse } from '@/lib/api-errors';
-import { getCompany, listInvoices } from '@/lib/factorcloud';
+import { getCompany, getInvoice } from '@/lib/factorcloud';
 import { currentPortalSession, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
 import { databaseAuthEnabled } from '@/lib/session';
@@ -13,8 +13,8 @@ export async function GET(_req: Request, context: { params: Promise<{ invoiceId:
   try {
     const { invoiceId } = await context.params;
     const clientId = await resolveConfiguredClientId();
-    const { raw } = await listInvoices();
-    const record = collectRiskInvoiceRecords(raw).find((invoice) => invoice.id === invoiceId && invoice.companyClientId === clientId);
+    const raw = await getInvoice(invoiceId);
+    const record = raw ? collectRiskInvoiceRecords(raw).find((invoice) => invoice.id === invoiceId && invoice.companyClientId === clientId) : undefined;
     if (!record) return NextResponse.json({ error: 'Invoice not found for this client.' }, { status: 404 });
 
     let debtor: { id: string; name: string; code: string | null; phone: string | null } | null = null;

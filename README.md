@@ -107,7 +107,7 @@ A likely production target is AWS ECS/Fargate with PostgreSQL on RDS, secrets in
 
 ## Important V1 limitations
 
-- FactorCloud invoice pagination/filter semantics still need to be confirmed before dashboard totals are treated as complete account figures.
+- Invoice lists are read page by page (FactorCloud's `X-PAGINATION-NUM` / `X-PAGINATION-LIMIT` headers; there is no total count) until the last page, filtered by `client` where only one client's data is shown. If the list can't be read to the end, dashboards say their totals may be incomplete, and the duplicate check puts the submission into REVIEW instead of passing it silently.
 - True open A/R, NFE, reserve, funding, aging, and payment metrics should only be labeled as such after the corresponding FactorCloud fields/endpoints are mapped.
 - Debtor search is not yet proven, so candidate debtor IDs can still be configured with `FACTORCLOUD_DEBTOR_IDS`.
 - Only the FactorCloud `INVOICE` document type has been manually proven. Other classified types currently fall back to `INVOICE` if FactorCloud rejects them with a 400.
