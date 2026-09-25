@@ -35,6 +35,8 @@ export interface AnalyzedDocument {
   fileName: string;
   fields: ExtractedFields;
   usage?: ExtractionUsage;
+  fileHash?: string;
+  sourceIndex?: number;
 }
 
 export interface CompanyRecord {
@@ -85,6 +87,7 @@ export interface AnalyzeResponse {
   factorCloudLookupFailed: boolean;
   validation: ValidationReport;
   warnings: string[];
+  analysisReceipt?: string;
 }
 
 export interface BatchPacketAnalysis extends AnalyzeResponse {
