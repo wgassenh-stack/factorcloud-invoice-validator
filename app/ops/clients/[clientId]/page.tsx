@@ -62,7 +62,7 @@ export default function FactorClientDetailPage() {
       <nav className="opsNav">
         <a href="/ops">Overview</a>
         <a className="active" href="/ops">Clients</a>
-        <span>Review queue</span>
+        <a href="/ops/reviews">Review queue</a>
         <span>Alerts</span>
         <span>Configuration</span>
       </nav>
