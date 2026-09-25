@@ -6,6 +6,7 @@ export interface RiskInvoiceRecord {
   invoiceAmount: number | null;
   invoiceDate: string | null;
   status: string | null;
+  notes?: string | null;
 }
 
 export interface DebtorConcentration {
@@ -68,6 +69,7 @@ export function collectRiskInvoiceRecords(body: unknown): RiskInvoiceRecord[] {
         invoiceAmount: asNumber(obj.invoiceAmount),
         invoiceDate: dateOnly(obj.invoiceDate),
         status: asString(obj.status),
+        notes: asString(obj.notes),
       });
     }
     for (const value of Object.values(obj)) walk(value);
