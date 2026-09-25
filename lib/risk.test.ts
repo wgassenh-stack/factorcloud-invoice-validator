@@ -4,7 +4,7 @@ import { collectRiskInvoiceRecords, summarizeRisk } from './risk';
 describe('risk analytics', () => {
   it('collects invoice amount and date from nested FactorCloud responses', () => {
     const records = collectRiskInvoiceRecords({ data: { items: [{ id: 'i1', invoiceNumber: '100', companyClientId: 'c1', companyDebtorId: 'd1', invoiceAmount: 12500, invoiceDate: '2026-09-24T00:00:00Z', status: 'PENDING' }] } });
-    expect(records).toEqual([{ id: 'i1', invoiceNumber: '100', companyClientId: 'c1', companyDebtorId: 'd1', invoiceAmount: 12500, invoiceDate: '2026-09-24', status: 'PENDING' }]);
+    expect(records).toEqual([{ id: 'i1', invoiceNumber: '100', companyClientId: 'c1', companyDebtorId: 'd1', invoiceAmount: 12500, invoiceDate: '2026-09-24', status: 'PENDING', notes: null }]);
   });
 
   it('flags debtor concentration above the configured threshold', () => {
