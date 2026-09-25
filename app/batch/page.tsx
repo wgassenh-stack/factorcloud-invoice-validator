@@ -5,7 +5,7 @@ import { PortalNav } from '@/app/components/PortalNav';
 import type { BatchAnalyzeResponse, BatchPacketAnalysis, CreateResponse } from '@/lib/types';
 
 type StatusResponse = {
-  factorCloud: { signedIn: boolean; canSignIn: boolean };
+  factorCloud: { signedIn: boolean };
   ai: { configured: boolean; model: string; thinking: string };
 };
 
@@ -55,7 +55,7 @@ export default function BatchPage() {
 
   async function createOne(packet: BatchPacketAnalysis): Promise<boolean> {
     const key = packet.packetId;
-    if (packet.validation.status !== 'PASS' || !packet.debtor || packet.factorCloudLookupFailed) return false;
+    if (packet.validation.status !== 'PASS' || !packet.debtor || packet.factorCloudLookupFailed || !packet.analysisReceipt) return false;
     setResults((current) => ({ ...current, [key]: { state: 'creating', message: 'Submitting...' } }));
     try {
       const primary = packet.documents[packet.primaryIndex];
@@ -66,16 +66,11 @@ export default function BatchPage() {
         referenceNumber: f.referenceNumber,
         invoiceAmount: f.invoiceAmount,
         invoiceDate: f.invoiceDate,
-        notes: 'Submitted through client portal batch intake',
         debtorId: packet.debtor.id,
-        primaryIndex: packet.primaryIndex,
-        documents: packet.documents,
-        documentTypes: packet.documents.map((d) => d.fields.documentType),
-        overrideReview: false,
-        overrideReason: null,
+        analysisReceipt: packet.analysisReceipt,
       }));
       for (const doc of packet.documents) {
-        const original = files.find((file) => file.name === doc.fileName);
+        const original = doc.sourceIndex == null ? undefined : files[doc.sourceIndex];
         if (original) form.append('files', original);
       }
       const res = await fetch('/api/create', { method: 'POST', body: form });
@@ -91,7 +86,7 @@ export default function BatchPage() {
 
   async function createAllPass() {
     if (!analysis) return;
-    const packets = analysis.packets.filter((p) => p.validation.status === 'PASS' && p.debtor && !p.factorCloudLookupFailed && results[p.packetId]?.state !== 'created');
+    const packets = analysis.packets.filter((p) => p.validation.status === 'PASS' && p.debtor && p.analysisReceipt && !p.factorCloudLookupFailed && results[p.packetId]?.state !== 'created');
     setBusy('Submitting PASS invoices');
     let created = 0;
     for (const packet of packets) {
@@ -101,7 +96,7 @@ export default function BatchPage() {
     setMessage(`Batch submission finished. ${created} of ${packets.length} eligible invoice${packets.length === 1 ? '' : 's'} submitted.`);
   }
 
-  const eligiblePass = analysis?.packets.filter((p) => p.validation.status === 'PASS' && p.debtor && !p.factorCloudLookupFailed && results[p.packetId]?.state !== 'created').length ?? 0;
+  const eligiblePass = analysis?.packets.filter((p) => p.validation.status === 'PASS' && p.debtor && p.analysisReceipt && !p.factorCloudLookupFailed && results[p.packetId]?.state !== 'created').length ?? 0;
 
   return (
     <main className="shell batchShell portalToolShell">
@@ -116,7 +111,7 @@ export default function BatchPage() {
       </section>
 
       <section className="topbar clientConnectionBar">
-        <div><strong>FactorCloud</strong><span>{status?.factorCloud.signedIn ? 'Connected' : 'Connection required'}</span></div>
+        <div><strong>FactorCloud</strong><span>{status?.factorCloud.signedIn ? 'Connected' : 'Temporarily unavailable'}</span></div>
         <div><strong>Verification</strong><span>{status?.ai.configured ? 'Ready' : 'Unavailable'}</span></div>
         <div><strong>Batch limit</strong><span>24 files / 25 MB</span></div>
       </section>
@@ -167,7 +162,7 @@ export default function BatchPage() {
                     <td><span className={`pill ${packet.validation.status.toLowerCase()}`}>{packet.validation.status === 'PASS' ? 'READY' : packet.validation.status}</span></td>
                     <td className="attentionCell">{attention.length ? attention.map((c) => <span key={c.id}>{c.label}: {c.message}</span>) : <span className="allClear">All checks clear</span>}</td>
                     <td>
-                      {result ? <span className={`rowResult ${result.state}`}>{result.message}</span> : packet.validation.status === 'PASS' && packet.debtor && !packet.factorCloudLookupFailed
+                      {result ? <span className={`rowResult ${result.state}`}>{result.message}</span> : packet.validation.status === 'PASS' && packet.debtor && packet.analysisReceipt && !packet.factorCloudLookupFailed
                         ? <button className="tinyButton" disabled={Boolean(busy)} onClick={() => void createOne(packet)}>Submit</button>
                         : <span className="muted">Not ready</span>}
                     </td>
@@ -181,7 +176,7 @@ export default function BatchPage() {
         {analysis.unassignedDocuments.length > 0 && <section className="card unassignedCard">
           <h2>Unassigned supporting documents</h2>
           <p>These files were not confidently tied to exactly one invoice. They will not be submitted until someone resolves the grouping.</p>
-          <div className="docList">{analysis.unassignedDocuments.map((doc) => <div className="doc" key={doc.fileName}><strong>{doc.fileName}</strong><span>{doc.fields.documentType.replace('_', ' ')}</span><span>Reference: {doc.fields.referenceNumber || '-'}</span></div>)}</div>
+          <div className="docList">{analysis.unassignedDocuments.map((doc) => <div className="doc" key={`${doc.fileName}-${doc.sourceIndex ?? 'x'}`}><strong>{doc.fileName}</strong><span>{doc.fields.documentType.replace('_', ' ')}</span><span>Reference: {doc.fields.referenceNumber || '-'}</span></div>)}</div>
         </section>}
       </>}
     </main>
