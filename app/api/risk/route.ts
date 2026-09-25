@@ -15,7 +15,7 @@ export async function GET() {
       getCompany(clientId),
     ]);
     const allRecords = collectRiskInvoiceRecords(raw);
-    const records = allRecords.filter((record) => !record.companyClientId || record.companyClientId === clientId);
+    const records = allRecords.filter((record) => record.companyClientId === clientId);
 
     const debtorIds = [...new Set(records.map((record) => record.companyDebtorId).filter((id): id is string => Boolean(id)))].slice(0, 50);
     const debtorEntries = await Promise.all(debtorIds.map(async (id) => {
@@ -44,7 +44,8 @@ export async function GET() {
         clientName: client.companyName || client.compCode || 'FactorCloud client',
         returnedInvoiceCount: allRecords.length,
         clientInvoiceCount: records.length,
-        note: 'Pilot analytics use the invoice records returned by FactorCloud. API pagination and open-A/R status semantics still need to be confirmed before treating these as production exposure metrics.',
+        excludedWithoutPositiveClientMatch: allRecords.length - records.length,
+        note: 'Client-facing data now requires an explicit FactorCloud client ID match. Records without a matching client ID are excluded. API pagination and open-A/R status semantics still need to be confirmed before treating these as production exposure metrics.',
       },
     });
   } catch (err) {
