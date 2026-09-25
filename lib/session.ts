@@ -37,9 +37,7 @@ export async function verifyPortalSession(token: string | undefined | null, secr
   try {
     const expected = await hmac(parts[0], secret);
     const actual = base64UrlDecode(parts[1]);
-    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
-    const ok = await crypto.subtle.verify('HMAC', key, actual, new TextEncoder().encode(parts[0]));
-    if (!ok || actual.length !== expected.length) return null;
+    if (!safeEqual(expected, actual)) return null;
     const payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[0]))) as PortalSession;
     if (payload.v !== 1 || !payload.userId || !payload.factorId || !payload.role || payload.exp <= Date.now()) return null;
     if (!['FACTOR_ADMIN', 'FACTOR_REVIEWER', 'CLIENT_USER'].includes(payload.role)) return null;
@@ -52,6 +50,13 @@ export async function verifyPortalSession(token: string | undefined | null, secr
 async function hmac(value: string, secret: string): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value)));
+}
+
+function safeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  let diff = a.length ^ b.length;
+  const length = Math.max(a.length, b.length);
+  for (let i = 0; i < length; i++) diff |= (a[i] || 0) ^ (b[i] || 0);
+  return diff === 0;
 }
 
 function base64UrlEncode(bytes: Uint8Array): string {
