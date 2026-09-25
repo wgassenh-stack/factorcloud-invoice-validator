@@ -9,7 +9,8 @@ import {
 } from '@/lib/factorcloud';
 import { isBlank, normalizeDate, normalizeMoney } from '@/lib/normalize';
 import { validate } from '@/lib/rules';
-import type { AnalyzedDocument, CreateResponse, CreateStep } from '@/lib/types';
+import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
+import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '@/lib/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -19,13 +20,8 @@ interface CreatePayload {
   referenceNumber: string | null;
   invoiceAmount: number | string;
   invoiceDate: string;
-  notes: string | null;
   debtorId: string;
-  primaryIndex: number;
-  documents: AnalyzedDocument[];
-  documentTypes: string[];
-  overrideReview?: boolean;
-  overrideReason?: string | null;
+  analysisReceipt: string;
 }
 
 export async function POST(req: Request) {
@@ -45,12 +41,31 @@ export async function POST(req: Request) {
   if (isBlank(payload.invoiceNumber)) problems.push('invoice # is required');
   if (amount === null || amount <= 0) problems.push('invoice amount must be positive');
   if (!invoiceDate) problems.push('invoice date is required');
-  if (!Array.isArray(payload.documents) || !payload.documents.length) problems.push('analyzed documents are required');
-  if (!Number.isInteger(payload.primaryIndex) || payload.primaryIndex < 0 || payload.primaryIndex >= (payload.documents?.length ?? 0)) problems.push('primary invoice selection is invalid');
+  if (!payload.analysisReceipt) problems.push('signed verification receipt is required');
   if (!files.length) problems.push('at least one source document is required');
-  if (files.length !== payload.documentTypes?.length) problems.push('document type list does not match uploaded files');
-  if (files.length !== payload.documents?.length) problems.push('uploaded files do not match the analyzed document set');
-  if (Array.isArray(payload.documents) && files.some((file, i) => payload.documents[i]?.fileName !== file.name)) problems.push('uploaded file order/names do not match the analyzed document set');
+  if (problems.length) return NextResponse.json({ error: `Cannot create invoice: ${problems.join('; ')}.` }, { status: 400 });
+
+  let receipt;
+  try {
+    receipt = verifyAnalysisReceipt(payload.analysisReceipt);
+  } catch (err) {
+    return NextResponse.json({ error: `Cannot create invoice: ${message(err)}` }, { status: 400 });
+  }
+
+  if (receipt.clientId !== clientId) problems.push('verification receipt belongs to a different client');
+  if (receipt.debtorId !== payload.debtorId) problems.push('debtor does not match the verified packet');
+  if (receipt.primaryIndex < 0 || receipt.primaryIndex >= receipt.documents.length) problems.push('verified primary invoice selection is invalid');
+  if (files.length !== receipt.documents.length) problems.push('uploaded files do not match the verified document set');
+
+  if (!problems.length) {
+    const actualHashes = await Promise.all(files.map((file) => hashFile(file)));
+    for (let i = 0; i < receipt.documents.length; i++) {
+      const expected = receipt.documents[i];
+      if (expected.fileHash !== actualHashes[i]) {
+        problems.push(`uploaded file ${i + 1} is not the same file that was verified`);
+      }
+    }
+  }
   if (problems.length) return NextResponse.json({ error: `Cannot create invoice: ${problems.join('; ')}.` }, { status: 400 });
 
   let debtor;
@@ -61,22 +76,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Cannot re-check FactorCloud records: ${message(err)}` }, { status: 502 });
   }
 
-  const serverDocuments = payload.documents.map((d, i) => i === payload.primaryIndex ? {
-    ...d,
-    fields: {
-      ...d.fields,
-      invoiceNumber: payload.invoiceNumber.trim(),
-      referenceNumber: payload.referenceNumber?.trim() || null,
-      invoiceAmount: amount,
-      invoiceDate,
-    },
-  } : d);
-  const validation = validate({ documents: serverDocuments, primaryIndex: payload.primaryIndex, debtor, client });
+  const originalPrimary = receipt.documents[receipt.primaryIndex].fields;
+  const corrections = collectClientCorrections(originalPrimary, payload);
+  const rawValidation = validate({ documents: receipt.documents, primaryIndex: receipt.primaryIndex, debtor, client });
+  const validation = addCorrectionReview(rawValidation, corrections);
   if (validation.status === 'FAIL') {
-    return NextResponse.json({ error: 'Validation failed. Fix the failed checks before creating the invoice.', validation }, { status: 409 });
-  }
-  if (validation.status === 'REVIEW' && (!payload.overrideReview || !payload.overrideReason?.trim())) {
-    return NextResponse.json({ error: 'This packet is in REVIEW. Confirm the override and enter a short reason before creating it.', validation }, { status: 409 });
+    return NextResponse.json({ error: 'Validation failed. Fix the failed checks before submitting the invoice.', validation }, { status: 409 });
   }
 
   try {
@@ -85,7 +90,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Invoice ${payload.invoiceNumber.trim()} already exists in FactorCloud as ${existing.id}${existing.status ? ` (${existing.status})` : ''}.`, validation }, { status: 409 });
     }
   } catch (err) {
-    return NextResponse.json({ error: `Duplicate check failed, so creation was blocked: ${message(err)}`, validation }, { status: 502 });
+    return NextResponse.json({ error: `Duplicate check failed, so submission was blocked: ${message(err)}`, validation }, { status: 502 });
   }
 
   const steps: CreateStep[] = [];
@@ -94,15 +99,19 @@ export async function POST(req: Request) {
   const respond = (ok: boolean, error?: string) => NextResponse.json({ ok, invoiceId, documentIds, steps, validation, error } satisfies CreateResponse, { status: ok ? 200 : 502 });
 
   try {
-    const noteParts = [payload.notes?.trim(), validation.status === 'REVIEW' ? `Validator override: ${payload.overrideReason?.trim()}` : null].filter(Boolean);
+    const noteParts = [
+      'Submitted through FactorCloud client portal',
+      validation.status === 'REVIEW' ? 'PORTAL REVIEW REQUIRED' : null,
+      corrections.length ? `Client corrected after verification: ${corrections.join(', ')}` : null,
+    ].filter(Boolean);
     const created = await createInvoice({
       invoiceNumber: payload.invoiceNumber.trim(),
       referenceNumber: payload.referenceNumber?.trim() || null,
       companyClientId: clientId!,
       companyDebtorId: payload.debtorId,
       invoiceAmount: amount!,
-      invoiceDate,
-      notes: noteParts.join(' | ') || null,
+      invoiceDate: invoiceDate!,
+      notes: noteParts.join(' | '),
     });
     invoiceId = created.id;
     steps.push({ step: 'Create invoice', ok: true, detail: `Invoice ${invoiceId}` });
@@ -112,7 +121,7 @@ export async function POST(req: Request) {
   }
 
   for (const [i, file] of files.entries()) {
-    const wanted = FC_DOCUMENT_TYPES[payload.documentTypes[i]] ?? 'INVOICE';
+    const wanted = FC_DOCUMENT_TYPES[receipt.documents[i].fields.documentType] ?? 'INVOICE';
     try {
       const doc = await uploadDocument(clientId!, file, wanted);
       documentIds.push(doc.id);
@@ -135,6 +144,29 @@ export async function POST(req: Request) {
   }
 
   return respond(true);
+}
+
+function collectClientCorrections(original: { invoiceNumber: string | null; referenceNumber: string | null; invoiceAmount: number | null; invoiceDate: string | null }, payload: CreatePayload): string[] {
+  const corrections: string[] = [];
+  if ((original.invoiceNumber ?? '').trim() !== (payload.invoiceNumber ?? '').trim()) corrections.push('invoice number');
+  if ((original.referenceNumber ?? '').trim() !== (payload.referenceNumber ?? '').trim()) corrections.push('reference/load number');
+  if (normalizeMoney(original.invoiceAmount) !== normalizeMoney(payload.invoiceAmount)) corrections.push('invoice amount');
+  if (normalizeDate(original.invoiceDate) !== normalizeDate(payload.invoiceDate)) corrections.push('invoice date');
+  return corrections;
+}
+
+function addCorrectionReview(validation: ValidationReport, corrections: string[]): ValidationReport {
+  if (!corrections.length) return validation;
+  const correctionCheck: CheckResult = {
+    id: 'client-corrections',
+    label: 'Client corrections',
+    status: 'REVIEW',
+    message: `The client changed verified field${corrections.length === 1 ? '' : 's'} after document analysis: ${corrections.join(', ')}.`,
+  };
+  return {
+    status: validation.status === 'FAIL' ? 'FAIL' : 'REVIEW',
+    checks: [correctionCheck, ...validation.checks],
+  };
 }
 
 function message(err: unknown): string {
