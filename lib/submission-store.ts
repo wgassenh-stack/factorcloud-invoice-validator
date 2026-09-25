@@ -3,7 +3,7 @@ import 'server-only';
 import { createHash, randomUUID } from 'crypto';
 import { pool } from './db';
 import { normalizeIdentifier } from './normalize';
-import { portalClientRecord, type PortalAccessError } from './portal-auth';
+import { portalClientRecord } from './portal-auth';
 import { databaseAuthEnabled, type PortalSession } from './session';
 import type { AnalysisReceiptPayload } from './submission-integrity';
 import type { ValidationReport } from './types';
@@ -77,27 +77,40 @@ export async function persistSubmissionStart(args: {
       `, [`file_${randomUUID()}`, submissionId, document.fileName, i, document.fileHash, document.fields.documentType, file?.size ?? null]);
     }
 
+    let reviewId: string | null = null;
     if (args.validation.status === 'REVIEW') {
       const reasons = args.validation.checks.filter((check) => check.status === 'REVIEW').map((check) => `${check.label}: ${check.message}`);
+      reviewId = `review_${randomUUID()}`;
       await client.query(`insert into review_items (id, submission_id, reason) values ($1,$2,$3)`, [
-        `review_${randomUUID()}`,
+        reviewId,
         submissionId,
         reasons.join(' | ') || 'Portal validation requires manual review.',
       ]);
     }
 
-    await client.query(`
-      insert into audit_events (id, factor_id, client_id, submission_id, actor_user_id, event_type, event_data)
-      values ($1,$2,$3,$4,$5,$6,$7::jsonb)
-    `, [
-      `audit_${randomUUID()}`,
-      args.session.factorId,
-      portalClient.id,
+    await insertAudit(client, {
+      factorId: args.session.factorId,
+      clientId: portalClient.id,
       submissionId,
-      args.session.userId,
-      'SUBMISSION_RECEIVED',
-      JSON.stringify({ validationStatus: args.validation.status, invoiceNumber: args.invoiceNumber }),
-    ]);
+      actorUserId: args.session.userId,
+      eventType: 'SUBMISSION_RECEIVED',
+      eventData: {
+        validationStatus: args.validation.status,
+        invoiceNumber: args.invoiceNumber,
+        checks: args.validation.checks.map((check) => ({ id: check.id, label: check.label, status: check.status, message: check.message })),
+      },
+    });
+
+    if (reviewId) {
+      await insertAudit(client, {
+        factorId: args.session.factorId,
+        clientId: portalClient.id,
+        submissionId,
+        actorUserId: args.session.userId,
+        eventType: 'REVIEW_OPENED',
+        eventData: { reviewId },
+      });
+    }
 
     await client.query('commit');
     return { id: submissionId, portalClientId: portalClient.id };
@@ -121,6 +134,21 @@ export async function markSubmissionFactorCloudResult(args: {
   if (!args.submission || !args.session || !databaseAuthEnabled()) return;
   const status = args.error ? 'ERROR' : args.validationStatus === 'REVIEW' ? 'REVIEW_REQUIRED' : 'CREATED_IN_FACTORCLOUD';
   await pool().query('update submissions set factorcloud_invoice_id=$1, workflow_status=$2, updated_at=now() where id=$3', [args.invoiceId ?? null, status, args.submission.id]);
+  await recordSubmissionAudit({
+    submission: args.submission,
+    session: args.session,
+    eventType: args.error ? 'FACTORCLOUD_CREATE_FAILED' : 'FACTORCLOUD_INVOICE_CREATED',
+    eventData: { invoiceId: args.invoiceId ?? null, error: args.error ?? null },
+  });
+}
+
+export async function recordSubmissionAudit(args: {
+  submission: StoredSubmission | null;
+  session: PortalSession | null;
+  eventType: string;
+  eventData?: Record<string, unknown>;
+}): Promise<void> {
+  if (!args.submission || !args.session || !databaseAuthEnabled()) return;
   await pool().query(`
     insert into audit_events (id, factor_id, client_id, submission_id, actor_user_id, event_type, event_data)
     values ($1,$2,$3,$4,$5,$6,$7::jsonb)
@@ -130,7 +158,25 @@ export async function markSubmissionFactorCloudResult(args: {
     args.submission.portalClientId,
     args.submission.id,
     args.session.userId,
-    args.error ? 'FACTORCLOUD_CREATE_FAILED' : 'FACTORCLOUD_INVOICE_CREATED',
-    JSON.stringify({ invoiceId: args.invoiceId ?? null, error: args.error ?? null }),
+    args.eventType,
+    JSON.stringify(args.eventData ?? {}),
+  ]);
+}
+
+async function insertAudit(
+  client: { query: (text: string, values?: unknown[]) => Promise<unknown> },
+  args: { factorId: string; clientId: string; submissionId: string; actorUserId: string | null; eventType: string; eventData?: Record<string, unknown> },
+) {
+  await client.query(`
+    insert into audit_events (id, factor_id, client_id, submission_id, actor_user_id, event_type, event_data)
+    values ($1,$2,$3,$4,$5,$6,$7::jsonb)
+  `, [
+    `audit_${randomUUID()}`,
+    args.factorId,
+    args.clientId,
+    args.submissionId,
+    args.actorUserId,
+    args.eventType,
+    JSON.stringify(args.eventData ?? {}),
   ]);
 }
