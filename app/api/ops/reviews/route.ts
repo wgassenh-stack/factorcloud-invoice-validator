@@ -1,14 +1,11 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { fcRequest, getCompany } from '@/lib/factorcloud';
+import { apiErrorResponse } from '@/lib/api-errors';
+import { getCompany } from '@/lib/factorcloud';
 import { requireFactorSession } from '@/lib/portal-auth';
-import { collectRiskInvoiceRecords } from '@/lib/risk';
-import { databaseAuthEnabled } from '@/lib/session';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
-
-const REVIEW_MARKER = 'PORTAL REVIEW REQUIRED';
 
 type DbReviewRow = {
   review_id: string;
@@ -27,11 +24,6 @@ type DbReviewRow = {
 };
 
 export async function GET() {
-  if (databaseAuthEnabled()) return databaseQueue();
-  return legacyQueue();
-}
-
-async function databaseQueue() {
   try {
     const session = await requireFactorSession();
     const rows = await query<DbReviewRow>(`
@@ -76,37 +68,6 @@ async function databaseQueue() {
       source: { note: 'Review items are stored in the portal database with assignment-ready workflow state and audit history. FactorCloud remains the invoice system of record.' },
     });
   } catch (err) {
-    const status = (err as { status?: number }).status || 500;
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status });
-  }
-}
-
-async function legacyQueue() {
-  try {
-    const raw = await fcRequest('/invoices');
-    const records = collectRiskInvoiceRecords(raw)
-      .filter((record) => (record.notes || '').toUpperCase().includes(REVIEW_MARKER))
-      .sort((a, b) => String(b.invoiceDate ?? '').localeCompare(String(a.invoiceDate ?? '')));
-
-    const clientIds = [...new Set(records.map((record) => record.companyClientId).filter((id): id is string => Boolean(id)))].slice(0, 50);
-    const debtorIds = [...new Set(records.map((record) => record.companyDebtorId).filter((id): id is string => Boolean(id)))].slice(0, 50);
-    const [clients, debtors] = await Promise.all([
-      Promise.all(clientIds.map(async (id) => {
-        try { const company = await getCompany(id); return [id, company.companyName || company.compCode || id] as const; }
-        catch { return [id, id] as const; }
-      })),
-      Promise.all(debtorIds.map(async (id) => {
-        try { const company = await getCompany(id); return [id, company.companyName || company.compCode || id] as const; }
-        catch { return [id, id] as const; }
-      })),
-    ]);
-    return NextResponse.json({
-      records,
-      clientNames: Object.fromEntries(clients),
-      debtorNames: Object.fromEntries(debtors),
-      source: { marker: REVIEW_MARKER, note: 'Pilot review queue is derived from the explicit portal review marker written into FactorCloud invoice notes.' },
-    });
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
+    return apiErrorResponse(err, 'ops-reviews');
   }
 }

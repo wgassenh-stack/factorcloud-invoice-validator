@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { apiErrorResponse } from '@/lib/api-errors';
 import { INTERIM_COOKIE, cookieOptions, startLogin } from '@/lib/factorcloud';
 
 export const runtime = 'nodejs';
@@ -13,6 +14,6 @@ export async function POST() {
     res.cookies.set(INTERIM_COOKIE, interim, cookieOptions(10 * 60));
     return res;
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
+    return apiErrorResponse(err, 'factorcloud-login-start', 502);
   }
 }

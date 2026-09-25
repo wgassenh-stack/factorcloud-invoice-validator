@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
+import { apiErrorResponse } from '@/lib/api-errors';
 import { fcRequest, getCompany } from '@/lib/factorcloud';
-import { currentPortalSession, PortalAccessError, resolveConfiguredClientId } from '@/lib/portal-auth';
+import { currentPortalSession, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
 import { databaseAuthEnabled } from '@/lib/session';
 import { submissionDetailByInvoice } from '@/lib/submission-detail';
@@ -46,7 +47,6 @@ export async function GET(_req: Request, context: { params: Promise<{ invoiceId:
       },
     });
   } catch (err) {
-    const status = err instanceof PortalAccessError ? err.status : 502;
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status });
+    return apiErrorResponse(err, 'invoice-detail', 502);
   }
 }

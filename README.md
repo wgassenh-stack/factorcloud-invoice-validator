@@ -27,6 +27,12 @@ Client paperwork is treated as untrusted input.
 - Client-facing FactorCloud data requires an exact client ID match.
 - Database authentication supports `CLIENT_USER`, `FACTOR_REVIEWER`, and `FACTOR_ADMIN` roles.
 - REVIEW decisions and submission events can be stored in the portal database audit trail.
+- Verification receipts are signed with the dedicated `PORTAL_SIGNING_SECRET` (required, no fallback) and expire after 24 hours.
+- Factor operations (`/ops`, `/api/ops`) exist only with database authentication. In pilot mode they return 404.
+- Every protected API re-checks the signed session against the database, so deactivating a user or changing their role or client assignment takes effect on their next request.
+- Sign-in is throttled per email (5 failures per 15 minutes) and per client IP (25 per 15 minutes), each with a 15-minute lock.
+- Unexpected server errors are logged with a reference and never returned to the browser.
+- A submission can be retried only when FactorCloud definitively refused the create (a 4xx response, so no invoice exists). Uncertain failures stay blocked until the factor checks FactorCloud.
 
 ## Development database
 
@@ -56,7 +62,10 @@ PORTAL_AUTH_MODE=database
 DATABASE_URL=postgresql://...
 DATABASE_SSL=true
 AUTH_SESSION_SECRET=<long random value>
+PORTAL_SIGNING_SECRET=<a different long random value>
 ```
+
+Run `npm run db:migrate` again whenever a new file appears in `database/`. Migrations are idempotent, and sign-in depends on the `auth_throttle` table from `003_security_hardening.sql`.
 
 ## Local setup
 

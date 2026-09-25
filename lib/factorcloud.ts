@@ -2,6 +2,7 @@ import 'server-only';
 
 import { cookies } from 'next/headers';
 import type { CompanyRecord } from './types';
+import { FactorCloudError } from './errors';
 import { collectInvoiceRecords, findToken, unwrapRecord } from './fc-response';
 import { normalizeIdentifier } from './normalize';
 import { scoreDebtor, type DebtorHints } from './matching';
@@ -13,11 +14,7 @@ export function cookieOptions(maxAge: number) {
   return { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' as const, path: '/', maxAge };
 }
 
-export class FactorCloudError extends Error {
-  constructor(message: string, public status: number, public body: unknown) {
-    super(message);
-  }
-}
+export { FactorCloudError } from './errors';
 
 function config() {
   const base = (process.env.FACTORCLOUD_API_BASE || 'https://api.int.factorcloud.com').replace(/\/+$/, '');
@@ -64,7 +61,14 @@ export async function fcRequest<T = unknown>(path: string, opts: RequestOptions 
   const attempts = method === 'GET' ? 1 + RETRY_DELAYS_MS.length : 1;
   let lastError: FactorCloudError | null = null;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const res = await fetch(url, { method, headers, body, cache: 'no-store' });
+    let res: Response;
+    try {
+      res = await fetch(url, { method, headers, body, cache: 'no-store' });
+    } catch (err) {
+      // No HTTP response (DNS, connection reset, timeout). For a write the outcome is unknown.
+      console.error(`[factorcloud] ${method} ${path} network error`, err);
+      throw new FactorCloudError(`FactorCloud could not be reached (${method} ${path}).`, 503, null);
+    }
     const text = await res.text();
     let parsed: unknown = text;
     try { parsed = text ? JSON.parse(text) : null; } catch { /* keep text */ }

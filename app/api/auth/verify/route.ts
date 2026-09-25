@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { apiErrorResponse } from '@/lib/api-errors';
 import { INTERIM_COOKIE, TOKEN_COOKIE, completeLogin, cookieOptions } from '@/lib/factorcloud';
 
 export const runtime = 'nodejs';
@@ -20,6 +21,6 @@ export async function POST(req: Request) {
     res.cookies.delete(INTERIM_COOKIE);
     return res;
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
+    return apiErrorResponse(err, 'factorcloud-login-verify', 502);
   }
 }

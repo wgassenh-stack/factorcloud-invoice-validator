@@ -10,7 +10,8 @@
     "test": "vitest run",
     "db:migrate": "node scripts/run-migrations.mjs",
     "db:bootstrap": "node scripts/bootstrap-dev.mjs",
-    "user:create": "node scripts/create-portal-user.mjs"
+    "user:create": "node scripts/create-portal-user.mjs",
+    "test:db": "vitest run lib/db-integration.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",

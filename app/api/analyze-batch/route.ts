@@ -3,9 +3,10 @@ import { groupIntoInvoicePackets } from '@/lib/batch';
 import { extractDocument, isSupportedFile } from '@/lib/extract';
 import { FactorCloudError, getCompany } from '@/lib/factorcloud';
 import { scoreDebtor } from '@/lib/matching';
-import { PortalAccessError, resolveConfiguredClientId } from '@/lib/portal-auth';
+import { resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
-import { addFileIntegrity, signAnalysisReceipt } from '@/lib/submission-integrity';
+import { addFileIntegrity, assertReceiptSigningConfigured, signAnalysisReceipt } from '@/lib/submission-integrity';
+import { apiErrorResponse } from '@/lib/api-errors';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
 import type {
   AnalyzedDocument,
@@ -24,10 +25,11 @@ const EXTRACTION_CONCURRENCY = 4;
 
 export async function POST(req: Request) {
   let clientId: string;
-  try { clientId = await resolveConfiguredClientId(); }
-  catch (err) {
-    const status = err instanceof PortalAccessError ? err.status : 500;
-    return NextResponse.json({ error: errorMessage(err) }, { status });
+  try {
+    clientId = await resolveConfiguredClientId();
+    assertReceiptSigningConfigured();
+  } catch (err) {
+    return apiErrorResponse(err, 'analyze-batch');
   }
 
   const form = await req.formData();
@@ -99,7 +101,7 @@ export async function POST(req: Request) {
       };
     });
   } catch (err) {
-    return NextResponse.json({ error: `Verification security setup is incomplete: ${errorMessage(err)}` }, { status: 500 });
+    return apiErrorResponse(err, 'analyze-batch');
   }
 
   const body: BatchAnalyzeResponse = { packets, unassignedDocuments: grouped.unassignedDocuments, warnings };

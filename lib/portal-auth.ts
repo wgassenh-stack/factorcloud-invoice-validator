@@ -2,7 +2,8 @@ import 'server-only';
 
 import { cookies } from 'next/headers';
 import { query } from './db';
-import { databaseAuthEnabled, PORTAL_SESSION_COOKIE, verifyPortalSession, type PortalRole, type PortalSession } from './session';
+import { PublicError } from './errors';
+import { databaseAuthEnabled, PORTAL_SESSION_COOKIE, sessionMismatch, verifyPortalSession, type PortalRole, type PortalSession, type SessionAccountState } from './session';
 
 type UserRow = {
   id: string;
@@ -26,13 +27,46 @@ export async function currentPortalSession(): Promise<PortalSession | null> {
   return verifyPortalSession(jar.get(PORTAL_SESSION_COOKIE)?.value);
 }
 
+/**
+ * The signed session, re-checked against the database. Every protected API goes through this, so
+ * deactivating a user, changing their role or removing their client assignment takes effect on
+ * their next request instead of when the 8-hour session cookie expires.
+ */
 export async function requirePortalSession(): Promise<PortalSession> {
   const session = await currentPortalSession();
   if (!session) throw new PortalAccessError('Portal authentication required.', 401);
+  const mismatch = sessionMismatch(session, await loadAccountState(session.userId));
+  if (mismatch) throw new PortalAccessError('Your access has changed. Please sign in again.', 401);
   return session;
 }
 
+/** Like requirePortalSession, but returns null instead of throwing. */
+export async function currentValidPortalSession(): Promise<PortalSession | null> {
+  try {
+    return await requirePortalSession();
+  } catch (err) {
+    if (err instanceof PortalAccessError) return null;
+    throw err;
+  }
+}
+
+async function loadAccountState(userId: string): Promise<SessionAccountState | null> {
+  const rows = await query<{ is_active: boolean; role: PortalRole; factor_id: string; client_ids: string[] }>(`
+    select u.is_active, u.role, u.factor_id,
+      coalesce(array_agg(c.factorcloud_client_id) filter (where c.id is not null and c.is_active), '{}') as client_ids
+    from portal_users u
+    left join user_client_access a on a.user_id = u.id
+    left join portal_clients c on c.id = a.client_id
+    where u.id = $1
+    group by u.id
+  `, [userId]);
+  const row = rows[0];
+  return row ? { isActive: row.is_active, role: row.role, factorId: row.factor_id, activeClientIds: row.client_ids } : null;
+}
+
+/** Factor staff only. Fails closed: without database authentication there are no roles, so no access. */
 export async function requireFactorSession(): Promise<PortalSession> {
+  if (!databaseAuthEnabled()) throw new PortalAccessError('Factor operations require database authentication.', 404);
   const session = await requirePortalSession();
   if (session.role === 'CLIENT_USER') throw new PortalAccessError('Factor access required.', 403);
   return session;
@@ -92,8 +126,4 @@ export async function portalClientRecord(factorId: string, factorCloudClientId: 
   return rows[0] ?? null;
 }
 
-export class PortalAccessError extends Error {
-  constructor(message: string, public status: number) {
-    super(message);
-  }
-}
+export class PortalAccessError extends PublicError {}

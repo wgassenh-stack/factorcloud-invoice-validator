@@ -25,8 +25,7 @@ async function databaseAuth(req: NextRequest) {
     return NextResponse.redirect(login);
   }
 
-  const isOps = path === '/ops' || path.startsWith('/ops/') || path.startsWith('/api/ops');
-  if (isOps && session.role === 'CLIENT_USER') {
+  if (isOpsPath(path) && session.role === 'CLIENT_USER') {
     if (path.startsWith('/api/')) return NextResponse.json({ error: 'Factor access required.' }, { status: 403 });
     return NextResponse.redirect(new URL('/', req.url));
   }
@@ -35,6 +34,11 @@ async function databaseAuth(req: NextRequest) {
 }
 
 function pilotAuth(req: NextRequest) {
+  // Factor operations show every client's data, so they need per-user roles. Without database
+  // authentication they are switched off entirely rather than left open to the shared password.
+  if (isOpsPath(req.nextUrl.pathname)) {
+    return NextResponse.json({ error: 'Factor operations require database authentication.' }, { status: 404 });
+  }
   const password = process.env.APP_ACCESS_PASSWORD;
   if (!password) {
     if (process.env.NODE_ENV === 'production') return new NextResponse('APP_ACCESS_PASSWORD is not configured.', { status: 503 });
@@ -52,6 +56,10 @@ function pilotAuth(req: NextRequest) {
     status: 401,
     headers: { 'WWW-Authenticate': 'Basic realm="Invoice Validator", charset="UTF-8"' },
   });
+}
+
+function isOpsPath(path: string): boolean {
+  return path === '/ops' || path.startsWith('/ops/') || path === '/api/ops' || path.startsWith('/api/ops/');
 }
 
 function timingSafeEqual(a: string, b: string): boolean {

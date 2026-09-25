@@ -73,3 +73,30 @@ function base64UrlDecode(value: string): Uint8Array {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
+
+/** The account state a session is re-checked against on every protected request. */
+export interface SessionAccountState {
+  isActive: boolean;
+  role: PortalRole;
+  factorId: string;
+  /** FactorCloud client IDs of the user's active client assignments. */
+  activeClientIds: string[];
+}
+
+/**
+ * A signed session is only a snapshot of the account at login. Returns null when the snapshot still
+ * matches the account, or the reason it no longer does (user removed or deactivated, role changed,
+ * or client assignment changed). Any mismatch means the user must sign in again.
+ */
+export function sessionMismatch(session: PortalSession, account: SessionAccountState | null): string | null {
+  if (!account) return 'user no longer exists';
+  if (!account.isActive) return 'user is deactivated';
+  if (account.factorId !== session.factorId) return 'user belongs to a different factor';
+  if (account.role !== session.role) return 'role changed';
+  if (session.role === 'CLIENT_USER') {
+    const assigned = session.clients[0]?.factorCloudClientId;
+    if (session.clients.length !== 1 || !assigned) return 'session has no single client';
+    if (account.activeClientIds.length !== 1 || account.activeClientIds[0] !== assigned) return 'client assignment changed';
+  }
+  return null;
+}
