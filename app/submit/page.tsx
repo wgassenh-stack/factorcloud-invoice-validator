@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { PortalNav } from '@/app/components/PortalNav';
 import { validate } from '@/lib/rules';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
 import type { AnalyzeResponse, CreateResponse, ExtractedFields } from '@/lib/types';
@@ -47,7 +48,7 @@ export default function SubmitInvoicePage() {
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Analysis failed.');
       setAnalysis(body);
-      setMessage('Analysis complete. Review the extracted values below.');
+      setMessage('Verification complete. Review the invoice details below.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err));
     } finally {
@@ -95,7 +96,7 @@ export default function SubmitInvoicePage() {
       setOtpRequested(false);
       setOtp('');
       await refreshStatus();
-      setMessage('Signed in to FactorCloud. Re-run Analyze so the comparisons refresh.');
+      setMessage('Connected to FactorCloud. Re-run Analyze so the comparisons refresh.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err));
     } finally {
@@ -159,22 +160,22 @@ export default function SubmitInvoicePage() {
         : 'Fix issues before submitting';
 
   return (
-    <main className="shell">
+    <main className="shell portalToolShell">
       <PortalNav active="submit" />
       <section className="hero portalSubHero">
         <div>
-          <span className="eyebrow">Client Portal</span>
+          <span className="eyebrow">FactorCloud Client Portal</span>
           <h1>Submit an Invoice</h1>
-          <p>Upload the invoice and supporting freight paperwork. We will read it, check it against FactorCloud, and tell you if anything needs attention before submission.</p>
+          <p>Upload your invoice and freight paperwork. We will read it, verify the key details, and flag anything that needs attention before it enters FactorCloud.</p>
         </div>
-        <div className="badges"><span className="prototype">AI assisted</span><span className="prototype">FactorCloud connected</span></div>
+        <div className="badges"><span className="prototype">Automated verification</span><span className="prototype">Secure submission</span></div>
       </section>
 
-      <section className="topbar">
-        <div><strong>AI</strong><span>{status?.ai.configured ? `${status.ai.model} (${status.ai.thinking})` : 'Not configured'}</span></div>
-        <div><strong>FactorCloud</strong><span>{status?.factorCloud.signedIn ? 'Connected' : 'Not signed in'}</span></div>
-        {!status?.factorCloud.signedIn && status?.factorCloud.canSignIn && <button className="small" onClick={requestOtp} disabled={Boolean(busy)}>Email login code</button>}
-        {otpRequested && <div className="otp"><input value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="OTP code"/><button className="small" onClick={verifyOtp} disabled={!otp || Boolean(busy)}>Sign in</button></div>}
+      <section className="topbar clientConnectionBar">
+        <div><strong>FactorCloud</strong><span>{status?.factorCloud.signedIn ? 'Connected' : 'Connection required'}</span></div>
+        <div><strong>Verification</strong><span>{status?.ai.configured ? 'Ready' : 'Unavailable'}</span></div>
+        {!status?.factorCloud.signedIn && status?.factorCloud.canSignIn && <button className="small" onClick={requestOtp} disabled={Boolean(busy)}>Connect FactorCloud</button>}
+        {otpRequested && <div className="otp"><input value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="Login code"/><button className="small" onClick={verifyOtp} disabled={!otp || Boolean(busy)}>Connect</button></div>}
       </section>
 
       {message && <div className="message">{message}</div>}
@@ -189,13 +190,13 @@ export default function SubmitInvoicePage() {
             <strong>{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} selected` : 'Drop documents here'}</strong>
             <span>{files.length ? files.map((f) => f.name).join(', ') : 'PDF, PNG, JPEG, GIF, or WebP'}</span>
           </label>
-          <button onClick={analyze} disabled={!files.length || Boolean(busy)}>{busy === 'Analyzing documents' ? 'Analyzing...' : 'Analyze documents'}</button>
+          <button onClick={analyze} disabled={!files.length || Boolean(busy)}>{busy === 'Analyzing documents' ? 'Verifying...' : 'Verify documents'}</button>
         </div>
 
         <div className="card">
           <div className="step">2</div>
           <h2>Invoice details</h2>
-          {!primary ? <p>Analyze documents to extract invoice fields.</p> : <div className="editGrid">
+          {!primary ? <p>Verify documents to extract invoice fields.</p> : <div className="editGrid">
             <Field label="Invoice #" value={primary.fields.invoiceNumber} onChange={(v) => updateField(analysis!.primaryIndex, 'invoiceNumber', v)} />
             <Field label="Reference / load #" value={primary.fields.referenceNumber} onChange={(v) => updateField(analysis!.primaryIndex, 'referenceNumber', v)} />
             <Field label="Debtor" value={primary.fields.debtorName} onChange={(v) => updateField(analysis!.primaryIndex, 'debtorName', v)} />
@@ -212,7 +213,7 @@ export default function SubmitInvoicePage() {
         <div className="card validationCard">
           <div className="step">3</div>
           <div className="validationHeader">
-            <div><h2>Verification</h2><p>AI reads the documents. Deterministic rules decide the result.</p></div>
+            <div><h2>Verification</h2><p>We compare the documents with each other and with your FactorCloud records.</p></div>
             <span className={`status ${validationClass}`}>{liveValidation?.status ?? 'Not run'}</span>
           </div>
           {analysis?.warnings.map((w) => <div className="warning" key={w}>{w}</div>)}
@@ -224,7 +225,7 @@ export default function SubmitInvoicePage() {
             {liveValidation?.checks.slice().sort((a, b) => statusRank(a.status) - statusRank(b.status)).map((c) => <div className="check" key={c.id}>
               <div><strong>{c.label}</strong><span>{c.message}</span>{c.comparisons?.map((x, i) => <small key={i}>{x.label}: {x.document}{x.other ? ` | FactorCloud: ${x.other}` : ''}</small>)}</div>
               <span className={`pill ${c.status.toLowerCase()}`}>{c.status}</span>
-            </div>) ?? <p>Verification appears after analysis.</p>}
+            </div>) ?? <p>Verification appears after document analysis.</p>}
           </div>
         </div>
 
@@ -235,7 +236,6 @@ export default function SubmitInvoicePage() {
             <span>{d.fields.documentType.replace('_', ' ')}</span>
             <span>Reference: {d.fields.referenceNumber || '-'}</span>
             <span>Amount: {d.fields.invoiceAmount == null ? '-' : `$${d.fields.invoiceAmount.toLocaleString()}`}</span>
-            {d.usage && <span className="usage">AI: {d.usage.model} · {d.usage.totalTokens.toLocaleString()} tokens{d.usage.estimatedCostUsd != null ? ` · ~$${d.usage.estimatedCostUsd.toFixed(4)}` : ''}</span>}
             {d.fields.uncertainFields.length > 0 && <em>Review: {d.fields.uncertainFields.join(', ')}</em>}
           </div>)}</div>
         </div>}
@@ -244,7 +244,7 @@ export default function SubmitInvoicePage() {
           <div className="step">4</div>
           <h2>Submit to FactorCloud</h2>
           <p>{!analysis ? 'Complete verification before submitting.' : liveValidation?.status === 'REVIEW' ? 'You can submit this invoice, but it will be clearly marked for manual review.' : 'Clean submissions are created in FactorCloud with the source documents attached.'}</p>
-          {analysis?.factorCloudLookupFailed && <div className="warning">FactorCloud could not be reached during analysis. Re-run Analyze before submitting.</div>}
+          {analysis?.factorCloudLookupFailed && <div className="warning">FactorCloud could not be reached during analysis. Re-run verification before submitting.</div>}
           {liveValidation?.status === 'REVIEW' && !analysis?.factorCloudLookupFailed && <div className="warning">This packet has a warning. Submitting it will create the FactorCloud invoice with a note that manual review is required.</div>}
           <button className="secondary" onClick={submitInvoice} disabled={!canSubmit || Boolean(busy)}>{busy === 'Submitting invoice' ? 'Submitting...' : submitLabel}</button>
           {createResult?.steps?.length ? <div className="steps">{createResult.steps.map((s, i) => <div key={i}><span>{s.ok ? 'OK' : 'ERROR'}</span>{s.step}: {s.detail}</div>)}</div> : null}
@@ -252,10 +252,6 @@ export default function SubmitInvoicePage() {
       </section>
     </main>
   );
-}
-
-function PortalNav({ active }: { active: string }) {
-  return <nav className="portalNav"><a className="portalBrand" href="/"><span>FC</span><strong>Client Portal</strong></a><div className="portalNavLinks"><a className={active === 'home' ? 'active' : ''} href="/">Dashboard</a><a className={active === 'submit' ? 'active' : ''} href="/submit">Submit invoice</a><a className={active === 'batch' ? 'active' : ''} href="/batch">Batch upload</a><a className={active === 'risk' ? 'active' : ''} href="/risk">Alerts</a></div></nav>;
 }
 
 function statusRank(status: string): number {
