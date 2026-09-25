@@ -4,12 +4,16 @@ import { useEffect, useMemo, useState } from 'react';
 
 type ReviewRecord = {
   id: string;
+  reviewId?: string;
+  submissionId?: string;
   invoiceNumber: string | null;
   companyClientId: string | null;
   companyDebtorId: string | null;
   invoiceAmount: number | null;
   invoiceDate: string | null;
   status: string | null;
+  reviewStatus?: string;
+  reason?: string;
   notes?: string | null;
 };
 
@@ -26,6 +30,7 @@ export default function ReviewQueuePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
+  const [deciding, setDeciding] = useState('');
 
   async function load() {
     setLoading(true);
@@ -44,13 +49,35 @@ export default function ReviewQueuePage() {
 
   useEffect(() => { void load(); }, []);
 
+  async function decide(record: ReviewRecord, decision: 'APPROVE' | 'REJECT') {
+    if (!record.reviewId) return;
+    const note = decision === 'REJECT' ? window.prompt('Optional rejection note for the audit trail:') : null;
+    if (decision === 'REJECT' && note === null) return;
+    setDeciding(record.reviewId);
+    setError('');
+    try {
+      const res = await fetch(`/api/ops/reviews/${encodeURIComponent(record.reviewId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision, note }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Could not save review decision.');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeciding('');
+    }
+  }
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return data?.records ?? [];
     return (data?.records ?? []).filter((record) => {
       const client = record.companyClientId ? data?.clientNames[record.companyClientId] || record.companyClientId : '';
       const debtor = record.companyDebtorId ? data?.debtorNames[record.companyDebtorId] || record.companyDebtorId : '';
-      return [record.invoiceNumber, client, debtor, record.status].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
+      return [record.invoiceNumber, client, debtor, record.status, record.reason].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
     });
   }, [data, query]);
 
@@ -70,7 +97,7 @@ export default function ReviewQueuePage() {
 
     <section className="opsContent">
       <header className="opsHeader">
-        <div><span className="eyebrow">Factor operations</span><h1>Review Queue</h1><p>Client submissions that reached FactorCloud with a portal review marker.</p></div>
+        <div><span className="eyebrow">Factor operations</span><h1>Review Queue</h1><p>Client submissions that require a factor decision before the portal treats them as cleared.</p></div>
         <button className="small opsRefresh" onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
       </header>
 
@@ -81,30 +108,34 @@ export default function ReviewQueuePage() {
           <Metric label="Needs review" value={data.records.length} />
           <Metric label="Invoice amount" value={money(data.records.reduce((sum, record) => sum + (record.invoiceAmount ?? 0), 0))} />
           <Metric label="Clients affected" value={new Set(data.records.map((record) => record.companyClientId).filter(Boolean)).size} />
-          <Metric label="Workflow" value="V1" detail="Database-backed decisions and audit history are next" />
+          <Metric label="Workflow" value={data.records.some((record) => record.reviewId) ? 'Database' : 'Pilot'} detail={data.records.some((record) => record.reviewId) ? 'Decisions are audited' : 'Read-only FactorCloud note marker'} />
         </section>
 
         <div className="warning opsDataNote">{data.source.note}</div>
 
         <section className="opsPanel">
           <div className="opsPanelHeader">
-            <div><h2>Items requiring factor review</h2><p>These submissions were not presented as clean PASS invoices to the factor.</p></div>
+            <div><h2>Items requiring factor review</h2><p>Review the reason, client, debtor and amount before making a decision.</p></div>
             <label className="opsSearch"><span>Search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Invoice, client, or debtor" /></label>
           </div>
 
           <div className="batchTableWrap">
             <table className="batchTable opsTable">
-              <thead><tr><th>Invoice</th><th>Client</th><th>Debtor</th><th>Date</th><th>Amount</th><th>FactorCloud status</th></tr></thead>
+              <thead><tr><th>Invoice</th><th>Client</th><th>Debtor</th><th>Date</th><th>Amount</th><th>Reason / status</th><th>Decision</th></tr></thead>
               <tbody>
-                {filtered.map((record) => <tr key={record.id}>
+                {filtered.map((record) => <tr key={record.reviewId || record.id}>
                   <td><strong>{record.invoiceNumber || record.id.slice(0, 8)}</strong></td>
                   <td>{record.companyClientId ? <a className="opsInlineLink" href={`/ops/clients/${encodeURIComponent(record.companyClientId)}`}>{data.clientNames[record.companyClientId] || record.companyClientId}</a> : '-'}</td>
                   <td>{record.companyDebtorId ? data.debtorNames[record.companyDebtorId] || record.companyDebtorId : '-'}</td>
                   <td>{record.invoiceDate || '-'}</td>
                   <td>{record.invoiceAmount == null ? '-' : money(record.invoiceAmount)}</td>
-                  <td>{pretty(record.status || 'Unknown')}</td>
+                  <td><div className="opsReviewReason"><strong>{pretty(record.status || 'Unknown')}</strong>{record.reason && <span>{record.reason}</span>}</div></td>
+                  <td>{record.reviewId
+                    ? <div className="opsReviewActions"><button className="tinyButton" disabled={Boolean(deciding)} onClick={() => void decide(record, 'APPROVE')}>{deciding === record.reviewId ? 'Saving...' : 'Approve'}</button><button className="tinyButton dangerButton" disabled={Boolean(deciding)} onClick={() => void decide(record, 'REJECT')}>Reject</button></div>
+                    : <span className="muted">Read only</span>}
+                  </td>
                 </tr>)}
-                {!loading && !filtered.length && <tr><td colSpan={6}>No portal review items were found in the retrieved FactorCloud invoice data.</td></tr>}
+                {!loading && !filtered.length && <tr><td colSpan={7}>No open portal review items.</td></tr>}
               </tbody>
             </table>
           </div>
