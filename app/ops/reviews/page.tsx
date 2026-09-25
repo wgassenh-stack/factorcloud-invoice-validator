@@ -52,15 +52,20 @@ export default function ReviewQueuePage() {
 
   async function decide(record: ReviewRecord, decision: 'APPROVE' | 'REJECT') {
     if (!record.reviewId) return;
-    const note = decision === 'REJECT' ? window.prompt('Optional rejection note for the audit trail:') : null;
-    if (decision === 'REJECT' && note === null) return;
+    const prompt = decision === 'APPROVE' ? 'Optional approval note for the audit trail:' : 'Rejection note for the audit trail:';
+    const note = window.prompt(prompt, '');
+    if (note === null) return;
+    if (decision === 'REJECT' && !note.trim()) {
+      setError('Add a short reason before rejecting a client submission.');
+      return;
+    }
     setDeciding(record.reviewId);
     setError('');
     try {
       const res = await fetch(`/api/ops/reviews/${encodeURIComponent(record.reviewId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision, note }),
+        body: JSON.stringify({ decision, note: note.trim() || null }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Could not save review decision.');
@@ -116,7 +121,7 @@ export default function ReviewQueuePage() {
 
         <section className="opsPanel">
           <div className="opsPanelHeader">
-            <div><h2>Items requiring factor review</h2><p>Review the reason, client, debtor and amount before making a decision.</p></div>
+            <div><h2>Items requiring factor review</h2><p>Open a submission to inspect the verified fields, exact files, validation checks, and audit trail.</p></div>
             <label className="opsSearch"><span>Search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Invoice, client, or debtor" /></label>
           </div>
 
@@ -125,7 +130,7 @@ export default function ReviewQueuePage() {
               <thead><tr><th>Invoice</th><th>Client</th><th>Debtor</th><th>Date</th><th>Amount</th><th>Reason / status</th><th>Decision</th></tr></thead>
               <tbody>
                 {filtered.map((record) => <tr key={record.reviewId || record.id}>
-                  <td><strong>{record.invoiceNumber || record.id.slice(0, 8)}</strong></td>
+                  <td>{record.submissionId ? <a className="opsInlineLink opsSubmissionLink" href={`/ops/submissions/${encodeURIComponent(record.submissionId)}`}><strong>{record.invoiceNumber || record.id.slice(0, 8)}</strong><span>Open details</span></a> : <strong>{record.invoiceNumber || record.id.slice(0, 8)}</strong>}</td>
                   <td>{record.companyClientId ? <a className="opsInlineLink" href={`/ops/clients/${encodeURIComponent(record.companyClientId)}`}>{data.clientNames[record.companyClientId] || record.companyClientId}</a> : '-'}</td>
                   <td>{record.companyDebtorId ? data.debtorNames[record.companyDebtorId] || record.companyDebtorId : '-'}</td>
                   <td>{record.invoiceDate || '-'}</td>
