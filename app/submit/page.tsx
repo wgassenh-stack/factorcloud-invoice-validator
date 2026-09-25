@@ -125,6 +125,8 @@ export default function SubmitInvoicePage() {
 
   const validationClass = liveValidation?.status?.toLowerCase() ?? 'neutral';
   const attentionChecks = liveValidation?.checks.filter((check) => check.status === 'FAIL' || check.status === 'REVIEW') ?? [];
+  const submitted = Boolean(createResult?.ok && createResult.invoiceId);
+  const submittedForReview = submitted && (createResult?.validation?.status === 'REVIEW' || liveValidation?.status === 'REVIEW');
   const canSubmit = Boolean(
     analysis
     && analysis.analysisReceipt
@@ -133,7 +135,8 @@ export default function SubmitInvoicePage() {
     && primary?.fields.invoiceNumber
     && primary?.fields.invoiceAmount
     && primary?.fields.invoiceDate
-    && liveValidation?.status !== 'FAIL',
+    && liveValidation?.status !== 'FAIL'
+    && !submitted,
   );
   const submitLabel = !analysis
     ? 'Verify documents first'
@@ -177,17 +180,19 @@ export default function SubmitInvoicePage() {
               type="file"
               multiple
               accept="application/pdf,image/png,image/jpeg,image/gif,image/webp"
+              disabled={submitted}
               onChange={(event) => {
                 setFiles(Array.from(event.target.files ?? []));
                 setAnalysis(null);
                 setOriginalPrimary(null);
+                setCreateResult(null);
               }}
             />
             <strong>{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} selected` : 'Drop documents here'}</strong>
             <span>{files.length ? files.map((file) => file.name).join(', ') : 'PDF, PNG, JPEG, GIF, or WebP'}</span>
           </label>
-          <button onClick={analyze} disabled={!files.length || Boolean(busy)}>
-            {busy === 'Analyzing documents' ? 'Verifying...' : 'Verify documents'}
+          <button onClick={analyze} disabled={!files.length || Boolean(busy) || submitted}>
+            {busy === 'Analyzing documents' ? 'Verifying...' : submitted ? 'Submitted' : 'Verify documents'}
           </button>
         </div>
 
@@ -198,11 +203,11 @@ export default function SubmitInvoicePage() {
             <p>Verify documents to extract invoice fields.</p>
           ) : (
             <div className="editGrid">
-              <Field label="Invoice #" value={primary.fields.invoiceNumber} onChange={(value) => updateField(analysis!.primaryIndex, 'invoiceNumber', value)} />
-              <Field label="Reference / load #" value={primary.fields.referenceNumber} onChange={(value) => updateField(analysis!.primaryIndex, 'referenceNumber', value)} />
+              <Field label="Invoice #" value={primary.fields.invoiceNumber} readOnly={submitted} onChange={(value) => updateField(analysis!.primaryIndex, 'invoiceNumber', value)} />
+              <Field label="Reference / load #" value={primary.fields.referenceNumber} readOnly={submitted} onChange={(value) => updateField(analysis!.primaryIndex, 'referenceNumber', value)} />
               <Field label="Debtor" value={primary.fields.debtorName} readOnly onChange={() => {}} />
-              <Field label="Amount" type="number" value={primary.fields.invoiceAmount?.toString() ?? ''} onChange={(value) => updateField(analysis!.primaryIndex, 'invoiceAmount', value)} />
-              <Field label="Invoice date" value={primary.fields.invoiceDate} onChange={(value) => updateField(analysis!.primaryIndex, 'invoiceDate', value)} />
+              <Field label="Amount" type="number" value={primary.fields.invoiceAmount?.toString() ?? ''} readOnly={submitted} onChange={(value) => updateField(analysis!.primaryIndex, 'invoiceAmount', value)} />
+              <Field label="Invoice date" value={primary.fields.invoiceDate} readOnly={submitted} onChange={(value) => updateField(analysis!.primaryIndex, 'invoiceDate', value)} />
               <Field label="Due date (source only)" value={primary.fields.dueDate} readOnly onChange={() => {}} />
               <Field label="Address" value={primary.fields.debtorAddress} readOnly onChange={() => {}} />
               <Field label="Phone" value={primary.fields.debtorPhone} readOnly onChange={() => {}} />
@@ -269,13 +274,30 @@ export default function SubmitInvoicePage() {
 
         <div className="card actionCard">
           <div className="step">4</div>
-          <h2>Submit to FactorCloud</h2>
-          <p>{!analysis ? 'Complete verification before submitting.' : liveValidation?.status === 'REVIEW' ? 'You can submit this invoice, but it will be clearly marked for manual review.' : 'Clean submissions are created in FactorCloud with the source documents attached.'}</p>
-          {analysis?.factorCloudLookupFailed && <div className="warning">FactorCloud could not be reached during analysis. Re-run verification before submitting.</div>}
-          {liveValidation?.status === 'REVIEW' && !analysis?.factorCloudLookupFailed && <div className="warning">This packet has a warning. Submitting it will create the FactorCloud invoice with a clear manual-review marker in its notes.</div>}
-          <button className="secondary" onClick={submitInvoice} disabled={!canSubmit || Boolean(busy)}>
-            {busy === 'Submitting invoice' ? 'Submitting...' : submitLabel}
-          </button>
+          {submitted ? (
+            <>
+              <h2>{submittedForReview ? 'Submitted for manual review' : 'Invoice submitted'}</h2>
+              <div className={`attentionSummary ${submittedForReview ? 'review' : 'pass'}`}>
+                <strong>{submittedForReview ? 'Your factor has received this submission for review.' : 'Submission complete.'}</strong>
+                <span>FactorCloud invoice: {createResult?.invoiceId}</span>
+                {submittedForReview && <span>You do not need to submit it again. The factor review decision will appear in the invoice history.</span>}
+              </div>
+              <div className="portalWelcomeActions">
+                <a className="primaryLink" href={`/invoices/${encodeURIComponent(createResult!.invoiceId!)}`}>View submitted invoice</a>
+                <a className="secondaryLink" href="/submit">Submit another invoice</a>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2>Submit to FactorCloud</h2>
+              <p>{!analysis ? 'Complete verification before submitting.' : liveValidation?.status === 'REVIEW' ? 'You can submit this invoice, but it will be clearly marked for manual review.' : 'Clean submissions are created in FactorCloud with the source documents attached.'}</p>
+              {analysis?.factorCloudLookupFailed && <div className="warning">FactorCloud could not be reached during analysis. Re-run verification before submitting.</div>}
+              {liveValidation?.status === 'REVIEW' && !analysis?.factorCloudLookupFailed && <div className="warning">This packet has a warning. Submitting it will create the FactorCloud invoice with a clear manual-review marker in its notes.</div>}
+              <button className="secondary" onClick={submitInvoice} disabled={!canSubmit || Boolean(busy)}>
+                {busy === 'Submitting invoice' ? 'Submitting...' : submitLabel}
+              </button>
+            </>
+          )}
           {createResult?.steps?.length ? (
             <div className="steps">
               {createResult.steps.map((step, index) => <div key={index}><span>{step.ok ? 'OK' : 'ERROR'}</span>{step.step}: {step.detail}</div>)}
