@@ -16,7 +16,6 @@ export function PortalNav({ active }: { active: NavKey }) {
   return <nav className="portalNav">
     <a className="portalBrand" href="/" aria-label="FactorCloud client portal home">
       <img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" />
-      <span className="portalBrandSubtitle">Client Portal</span>
     </a>
 
     <div className="portalNavLinks">
