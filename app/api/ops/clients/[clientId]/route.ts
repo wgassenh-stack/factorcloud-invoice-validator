@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { fcRequest, getCompany } from '@/lib/factorcloud';
+import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
+import { databaseAuthEnabled } from '@/lib/session';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -10,21 +12,14 @@ export async function GET(_req: Request, context: { params: Promise<{ clientId: 
   if (!clientId) return NextResponse.json({ error: 'Client id is required.' }, { status: 400 });
 
   try {
-    const [raw, client] = await Promise.all([
-      fcRequest('/invoices'),
-      getCompany(clientId),
-    ]);
-
+    if (databaseAuthEnabled()) await requireFactorSession();
+    const [raw, client] = await Promise.all([fcRequest('/invoices'), getCompany(clientId)]);
     const allRecords = collectRiskInvoiceRecords(raw);
     const records = allRecords.filter((record) => record.companyClientId === clientId);
     const debtorIds = [...new Set(records.map((record) => record.companyDebtorId).filter((id): id is string => Boolean(id)))].slice(0, 50);
     const debtorEntries = await Promise.all(debtorIds.map(async (id) => {
-      try {
-        const debtor = await getCompany(id);
-        return [id, debtor.companyName || debtor.compCode || id] as const;
-      } catch {
-        return [id, id] as const;
-      }
+      try { const debtor = await getCompany(id); return [id, debtor.companyName || debtor.compCode || id] as const; }
+      catch { return [id, id] as const; }
     }));
     const debtorNames = Object.fromEntries(debtorEntries);
 
@@ -33,7 +28,6 @@ export async function GET(_req: Request, context: { params: Promise<{ clientId: 
       concentrationHigh: percentEnv('RISK_CONCENTRATION_HIGH_PCT', 50),
       volumeSpikeRatio: numberEnv('RISK_VOLUME_SPIKE_RATIO', 1.5),
     };
-
     const summary = summarizeRisk(records, debtorNames, new Date().toISOString().slice(0, 10), thresholds);
 
     return NextResponse.json({
@@ -55,7 +49,8 @@ export async function GET(_req: Request, context: { params: Promise<{ clientId: 
       },
     });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
+    const status = (err as { status?: number }).status || 502;
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status });
   }
 }
 
