@@ -5,6 +5,9 @@ import { INTERIM_COOKIE, TOKEN_COOKIE, completeLogin, cookieOptions } from '@/li
 export const runtime = 'nodejs';
 
 export async function POST(req: Request) {
+  if (process.env.ALLOW_INTERACTIVE_FACTORCLOUD_LOGIN !== 'true') {
+    return NextResponse.json({ error: 'Interactive FactorCloud staff login is disabled for this client portal.' }, { status: 403 });
+  }
   const { otp } = (await req.json().catch(() => ({}))) as { otp?: string };
   const jar = await cookies();
   const interim = jar.get(INTERIM_COOKIE)?.value;
