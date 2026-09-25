@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './portal.css';
 
 export const metadata: Metadata = {
-  title: 'FactorCloud Invoice Validator',
-  description: 'External invoice intake and validation prototype for FactorCloud',
+  title: 'FactorCloud Client Portal',
+  description: 'Client invoice intake, status, alerts and portfolio dashboard powered by FactorCloud',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
