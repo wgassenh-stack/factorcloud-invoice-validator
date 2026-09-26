@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { PortalNav } from '@/app/components/PortalNav';
+import { ProcessingTheater, type TheaterPhase } from '@/app/components/ProcessingTheater';
 import { validate } from '@/lib/rules';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
 import type { AnalyzeResponse, CreateResponse, ExtractedFields, ValidationReport } from '@/lib/types';
@@ -123,6 +124,11 @@ export default function SubmitInvoicePage() {
     }
   }
 
+  const theaterPhase: TheaterPhase = busy === 'Analyzing documents' ? 'analyzing'
+    : busy === 'Submitting invoice' ? 'submitting'
+      : createResult?.ok ? 'submitted'
+        : analysis ? 'analyzed' : 'idle';
+
   const validationClass = liveValidation?.status?.toLowerCase() ?? 'neutral';
   const attentionChecks = liveValidation?.checks.filter((check) => check.status === 'FAIL' || check.status === 'REVIEW') ?? [];
   const submitted = Boolean(createResult?.ok && createResult.invoiceId);
@@ -169,6 +175,8 @@ export default function SubmitInvoicePage() {
       </section>
 
       {message && <div className="message">{message}</div>}
+
+      <ProcessingTheater files={files} phase={theaterPhase} analysis={analysis} validation={liveValidation} createResult={createResult} />
 
       <section className="grid">
         <div className="card uploadCard">

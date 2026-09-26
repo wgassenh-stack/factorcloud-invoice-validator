@@ -7,6 +7,22 @@ export interface RiskInvoiceRecord {
   invoiceDate: string | null;
   status: string | null;
   notes?: string | null;
+  // Optional detail FactorCloud's list and single-invoice responses include. Used by the richer
+  // dashboards; null when FactorCloud does not send the field.
+  referenceNumber?: string | null;
+  companyClientName?: string | null;
+  companyDebtorName?: string | null;
+  invoiceBalance?: number | null;
+  advanceAmount?: number | null;
+  escrowReserveAmount?: number | null;
+  purchaseFeeAmount?: number | null;
+  verificationStatus?: string | null;
+  paymentStatus?: string | null;
+  fundedDate?: string | null;
+  paidDate?: string | null;
+  dueDate?: string | null;
+  createdOn?: string | null;
+  disputed?: boolean | null;
 }
 
 export interface DebtorConcentration {
@@ -70,6 +86,20 @@ export function collectRiskInvoiceRecords(body: unknown): RiskInvoiceRecord[] {
         invoiceDate: dateOnly(obj.invoiceDate),
         status: asString(obj.status),
         notes: asString(obj.notes),
+        referenceNumber: asString(obj.referenceNumber),
+        companyClientName: asString(obj.companyClientName),
+        companyDebtorName: asString(obj.companyDebtorName),
+        invoiceBalance: asNumber(obj.invoiceBalance),
+        advanceAmount: asNumber(obj.advanceAmount),
+        escrowReserveAmount: asNumber(obj.escrowReserveAmount),
+        purchaseFeeAmount: asNumber(obj.purchaseFeeAmount),
+        verificationStatus: asString(obj.verificationStatus),
+        paymentStatus: asString(obj.paymentStatus),
+        fundedDate: dateOnly(obj.fundedDate),
+        paidDate: dateOnly(obj.paidDate),
+        dueDate: dateOnly(obj.dueDate),
+        createdOn: dateOnly(obj.createdOn),
+        disputed: typeof obj.disputed === 'boolean' ? obj.disputed : null,
       });
     }
     for (const value of Object.values(obj)) walk(value);

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 
 type SessionResponse = {
-  mode: 'pilot' | 'database';
+  mode: 'pilot' | 'database' | 'demo';
   authenticated: boolean;
   user?: { email: string; displayName: string | null; role: string };
 };
@@ -17,7 +17,10 @@ export function SessionUser() {
     });
   }, []);
 
-  if (!session || session.mode !== 'database' || !session.authenticated || !session.user) return null;
+  if (!session || session.mode === 'pilot' || !session.authenticated || !session.user) return null;
+  if (session.mode === 'demo') {
+    return <div className="portalUserSession"><strong>{session.user.displayName}</strong><span>Demo mode · no sign-in</span></div>;
+  }
 
   async function logout() {
     await fetch('/api/portal-auth/logout', { method: 'POST' });

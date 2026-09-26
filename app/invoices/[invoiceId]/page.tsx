@@ -3,16 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { PortalNav } from '@/app/components/PortalNav';
+import { InvoiceTracker, Skeleton } from '@/app/components/CommandCharts';
+import { DemoBadge } from '@/app/components/DemoBadge';
+import { lifecycleStage } from '@/lib/analytics';
+import type { RiskInvoiceRecord } from '@/lib/risk';
 
-type InvoiceRecord = {
-  id: string;
-  invoiceNumber: string | null;
-  companyClientId: string | null;
-  companyDebtorId: string | null;
-  invoiceAmount: number | null;
-  invoiceDate: string | null;
-  status: string | null;
-};
+type InvoiceRecord = RiskInvoiceRecord;
 
 type PortalWorkflow = {
   id: string;
@@ -72,12 +68,12 @@ export default function InvoiceDetailPage() {
     <a className="portalBackLink" href="/invoices">← Back to invoices</a>
 
     {error && <div className="attentionSummary fail"><strong>Could not load invoice</strong><span>{error}</span></div>}
-    {loading && !data && <section className="portalPanel invoiceDetailLoading"><div className="portalEmpty"><strong>Loading invoice...</strong><span>Reading the latest invoice and portal workflow data.</span></div></section>}
+    {loading && !data && <section className="portalPanel invoiceDetailLoading"><Skeleton height={90} lines={3} /></section>}
 
     {data && <>
       <section className="invoiceDetailHero">
         <div>
-          <span className="eyebrow">Invoice detail</span>
+          <div className="dashboardHeroMeta"><span className="eyebrow">Invoice detail</span><DemoBadge /></div>
           <h1>{data.invoice.invoiceNumber || data.invoice.id.slice(0, 8)}</h1>
           <p>{data.debtor?.name || 'FactorCloud debtor'} · FactorCloud ID {data.invoice.id}</p>
         </div>
@@ -85,6 +81,11 @@ export default function InvoiceDetailPage() {
           <span className={`portalStatus ${statusTone(data.invoice.status)}`}>{pretty(data.invoice.status || 'Unknown')}</span>
           <button className="small invoiceRefresh" onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
         </div>
+      </section>
+
+      <section className="portalPanel invoiceTrackerPanel">
+        <InvoiceTracker stage={lifecycleStage(data.invoice)} dates={{ SUBMITTED: data.invoice.createdOn || data.invoice.invoiceDate, VERIFIED: null, FUNDED: data.invoice.fundedDate ?? null, PAID: data.invoice.paidDate ?? null }} />
+        {data.invoice.advanceAmount ? <MoneyBreakdown invoice={data.invoice} /> : null}
       </section>
 
       <section className="invoiceDetailMetrics">
@@ -152,6 +153,23 @@ export default function InvoiceDetailPage() {
       <p className="portalDataNote">{data.source.note}</p>
     </>}
   </main>;
+}
+
+function MoneyBreakdown({ invoice }: { invoice: InvoiceRecord }) {
+  const amount = invoice.invoiceAmount ?? 0;
+  const advance = invoice.advanceAmount ?? 0;
+  const fee = invoice.purchaseFeeAmount ?? 0;
+  const reserve = Math.max(0, (invoice.escrowReserveAmount ?? amount - advance) - fee);
+  const parts = [
+    { label: 'Advanced to you', value: advance, color: '#2a78d6' },
+    { label: invoice.paidDate ? 'Reserve released' : 'Reserve (paid when debtor pays)', value: reserve, color: '#86b6ef' },
+    { label: 'Factoring fee', value: fee, color: '#c3c2b7' },
+  ];
+  return <div className="moneySplit">
+    <div className="moneySplitBar">{parts.map((part) => part.value > 0 && <span key={part.label} style={{ flexGrow: part.value, background: part.color }} title={`${part.label}: ${money(part.value)}`} />)}</div>
+    <div className="moneySplitLegend">{parts.map((part) => <div key={part.label}><i style={{ background: part.color }} /><span>{part.label}</span><strong>{money(part.value)}</strong></div>)}</div>
+    {invoice.invoiceBalance != null && !invoice.paidDate && <small>{money(invoice.invoiceBalance)} still owed by the debtor{invoice.dueDate ? ` · due ${invoice.dueDate}` : ''}</small>}
+  </div>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) { return <div className="portalMetric"><span>{label}</span><strong>{value}</strong></div>; }

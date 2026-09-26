@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
 import { apiErrorResponse } from '@/lib/api-errors';
-import { averageInvoiceAmount, buildStatusMix, buildWeeklyActivity, periodAmount, trendPercent } from '@/lib/dashboard';
+import { buildAging, buildDailyVolume, buildDsoTrend, buildExposure, buildKpis, buildMonthlyCash } from '@/lib/analytics';
+import { averageInvoiceAmount, buildStatusMix, buildWeeklyActivity, periodAmount, periodCount, trendPercent } from '@/lib/dashboard';
 import { query } from '@/lib/db';
 import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { summarizeClients } from '@/lib/ops';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
+import { demoMode } from '@/lib/demo';
+import { demoReviews } from '@/lib/demo-store';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -38,10 +41,18 @@ export async function GET() {
     const totalInvoices = clients.reduce((sum, client) => sum + client.invoiceCount, 0);
     const last30Amount = periodAmount(records, 30);
     const prior30Amount = periodAmount(records, 30, new Date(), 30);
+    const today = new Date().toISOString().slice(0, 10);
     const topClient = [...clients].sort((a, b) => b.invoiceAmount - a.invoiceAmount)[0];
 
     let reviewSummary = { openCount: 0, openAmount: 0, oldestCreatedAt: null as string | null };
-    try {
+    if (demoMode()) {
+      const open = demoReviews().filter((review) => review.status === 'OPEN');
+      reviewSummary = {
+        openCount: open.length,
+        openAmount: open.reduce((sum, review) => sum + review.invoiceAmount, 0),
+        oldestCreatedAt: open.map((review) => review.createdAt).sort()[0] ?? null,
+      };
+    } else try {
       const rows = await query<ReviewSummaryRow>(`
         select count(*)::int as open_count,
           coalesce(sum(s.invoice_amount_submitted), 0) as open_amount,
@@ -88,6 +99,17 @@ export async function GET() {
         recentInvoices,
         reviewSummary,
       },
+      analytics: {
+        today,
+        kpis: buildKpis(records, today),
+        aging: buildAging(records, clientNames, today),
+        exposure: buildExposure(records, clientNames).slice(0, 24),
+        monthlyCash: buildMonthlyCash(records, today),
+        dso: buildDsoTrend(records, today),
+        daily: buildDailyVolume(records, today),
+        invoicesLast30: periodCount(records, 30),
+      },
+      demo: demoMode(),
       source: {
         returnedInvoiceCount: records.length,
         complete: list.complete,

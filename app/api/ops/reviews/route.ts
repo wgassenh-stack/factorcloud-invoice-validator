@@ -3,6 +3,8 @@ import { query } from '@/lib/db';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { getCompany } from '@/lib/factorcloud';
 import { requireFactorSession } from '@/lib/portal-auth';
+import { demoMode } from '@/lib/demo';
+import { demoCompany, demoReviews } from '@/lib/demo-store';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -18,6 +20,7 @@ type DbReviewRow = {
   workflow_status: string;
   review_status: string;
   reason: string;
+  created_at: Date | string;
   client_id: string;
   factorcloud_client_id: string;
   client_name: string;
@@ -26,10 +29,11 @@ type DbReviewRow = {
 export async function GET() {
   try {
     const session = await requireFactorSession();
+    if (demoMode()) return NextResponse.json(demoReviewList());
     const rows = await query<DbReviewRow>(`
       select r.id as review_id, r.submission_id, s.factorcloud_invoice_id, s.invoice_number_submitted,
         s.debtor_factorcloud_id, s.invoice_amount_submitted, s.invoice_date_submitted, s.workflow_status,
-        r.status as review_status, r.reason, c.id as client_id, c.factorcloud_client_id, c.name as client_name
+        r.status as review_status, r.reason, r.created_at, c.id as client_id, c.factorcloud_client_id, c.name as client_name
       from review_items r
       join submissions s on s.id = r.submission_id
       join portal_clients c on c.id = s.client_id
@@ -59,6 +63,7 @@ export async function GET() {
       status: row.workflow_status,
       reviewStatus: row.review_status,
       reason: row.reason,
+      createdAt: new Date(row.created_at).toISOString(),
     }));
 
     return NextResponse.json({
@@ -70,4 +75,28 @@ export async function GET() {
   } catch (err) {
     return apiErrorResponse(err, 'ops-reviews');
   }
+}
+
+function demoReviewList() {
+  const open = demoReviews().filter((review) => review.status === 'OPEN');
+  return {
+    records: open.map((review) => ({
+      id: review.invoiceId,
+      reviewId: review.reviewId,
+      submissionId: review.submissionId,
+      invoiceNumber: review.invoiceNumber,
+      companyClientId: review.clientId,
+      companyDebtorId: review.debtorId,
+      invoiceAmount: review.invoiceAmount,
+      invoiceDate: review.invoiceDate,
+      status: 'REVIEW_REQUIRED',
+      reviewStatus: review.status,
+      reason: review.reason,
+      createdAt: review.createdAt,
+      checks: review.checks,
+    })),
+    clientNames: Object.fromEntries(open.map((review) => [review.clientId, review.clientName])),
+    debtorNames: Object.fromEntries(open.map((review) => [review.debtorId, demoCompany(review.debtorId)?.companyName ?? review.debtorId])),
+    source: { note: 'Demo data. Review decisions are kept in memory for this demo only.' },
+  };
 }

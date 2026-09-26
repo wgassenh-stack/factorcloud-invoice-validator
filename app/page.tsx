@@ -6,16 +6,12 @@ import { DashboardViewSwitcher, type DashboardPreset, type DashboardWidgetOption
 import { PortalNav } from '@/app/components/PortalNav';
 import { averageInvoiceAmount, buildStatusMix, buildWeeklyActivity, periodAmount, trendPercent } from '@/lib/dashboard';
 import { portalConfig } from '@/lib/portal-config';
+import { lifecycleStage, type AgingSummary, type CashSummary, type DsoPoint } from '@/lib/analytics';
+import type { RiskInvoiceRecord } from '@/lib/risk';
+import { AgingBars, CountUp, DashboardSkeleton, DsoLine, LifecyclePipeline, compactMoney } from '@/app/components/CommandCharts';
+import { DemoBadge } from '@/app/components/DemoBadge';
 
-type RiskRecord = {
-  id: string;
-  invoiceNumber: string | null;
-  companyClientId: string | null;
-  companyDebtorId: string | null;
-  invoiceAmount: number | null;
-  invoiceDate: string | null;
-  status: string | null;
-};
+type RiskRecord = RiskInvoiceRecord;
 
 type Concentration = {
   debtorId: string;
@@ -49,6 +45,10 @@ type PortalData = {
   alerts: Alert[];
   records: RiskRecord[];
   portalWorkflows?: Record<string, PortalWorkflowSummary>;
+  cash: CashSummary;
+  debtorAging: AgingSummary;
+  dso: DsoPoint[];
+  demo?: boolean;
   source: {
     clientId: string;
     clientName: string;
@@ -60,13 +60,18 @@ type PortalData = {
 };
 
 const CLIENT_PRESETS: DashboardPreset[] = [
-  { id: 'overview', label: 'Overview', description: 'The full client picture', widgets: ['metrics', 'trend', 'status', 'recent', 'alerts', 'concentration', 'quick-actions'] },
+  { id: 'overview', label: 'Overview', description: 'The full client picture', widgets: ['metrics', 'pipeline', 'cash', 'trend', 'status', 'recent', 'alerts', 'concentration', 'quick-actions'] },
+  { id: 'cash', label: 'Cash', description: 'Funding, reserves and collections', widgets: ['metrics', 'pipeline', 'cash', 'debtor-aging', 'dso'] },
   { id: 'activity', label: 'Activity', description: 'Invoice pace and statuses', widgets: ['metrics', 'trend', 'status', 'recent'] },
   { id: 'debtors', label: 'Debtors', description: 'Concentration and exceptions', widgets: ['metrics', 'concentration', 'alerts', 'status'] },
   { id: 'reviews', label: 'Reviews', description: 'Portal review workload', widgets: ['metrics', 'recent', 'alerts', 'quick-actions'] },
 ];
 
 const CLIENT_WIDGETS: DashboardWidgetOption[] = [
+  { id: 'pipeline', label: 'Invoice pipeline', description: 'Submitted, verified, funded and paid at a glance' },
+  { id: 'cash', label: 'Cash panel', description: 'Advances, reserve held and expected releases' },
+  { id: 'debtor-aging', label: 'Debtor aging', description: 'Open balances by debtor and age' },
+  { id: 'dso', label: 'Days to pay', description: 'How fast your debtors pay, month by month' },
   { id: 'metrics', label: 'Key metrics', description: '30-day activity, average size, reviews and concentration' },
   { id: 'trend', label: 'Activity trend', description: 'Eight weeks of invoice amount and volume' },
   { id: 'status', label: 'Status mix', description: 'How invoices are distributed across FactorCloud statuses' },
@@ -130,7 +135,7 @@ export default function ClientPortalHome() {
 
       <section className="portalWelcome dashboardHero">
         <div>
-          <div className="dashboardHeroMeta"><span className="eyebrow">FactorCloud Client Portal</span><span className="dashLiveBadge"><i />Live account data</span></div>
+          <div className="dashboardHeroMeta"><span className="eyebrow">FactorCloud Client Portal</span>{data?.demo ? <DemoBadge /> : <span className="dashLiveBadge"><i />Live account data</span>}</div>
           <h1>{loading && !data ? 'Loading your account...' : `Good to see you, ${data?.source.clientName ? shortName(data.source.clientName) : portalConfig.clientShortName}`}</h1>
           <p>Track invoice activity, review exceptions, and debtor concentration without digging through separate screens.</p>
         </div>
@@ -150,16 +155,35 @@ export default function ClientPortalHome() {
       {data?.source.complete === false && <div className="attentionSummary review"><strong>Some invoices may be missing</strong><span>Not every invoice could be loaded from FactorCloud, so totals below may be incomplete. Try again shortly.</span></div>}
       {error && <div className="attentionSummary fail"><strong>Could not load FactorCloud data</strong><span>{error}</span><button className="small retryButton" onClick={() => void load()}>Try again</button></div>}
 
+      {loading && !data && <DashboardSkeleton />}
+
       {data && <>
         {show('metrics') && <section className="dashMetricGrid">
-          <DashMetric icon="$" label="30-day activity" value={money(last30Amount)} detail={trendCopy(thirtyDayTrend, 'vs. prior 30 days')} trend={thirtyDayTrend} />
-          <DashMetric icon="7" label="Last 7 days" value={money(data.last7Amount)} detail={data.volumeRatio == null ? 'Building a weekly baseline' : `${data.volumeRatio.toFixed(1)}x prior weekly pace`} trend={data.volumeRatio == null ? null : (data.volumeRatio - 1) * 100} />
+          <DashMetric icon="$" label="30-day activity" value={<CountUp value={last30Amount} format={(v) => money(v)} />} detail={trendCopy(thirtyDayTrend, 'vs. prior 30 days')} trend={thirtyDayTrend} />
+          <DashMetric icon="7" label="Last 7 days" value={<CountUp value={data.last7Amount} format={(v) => money(v)} />} detail={data.volumeRatio == null ? 'Building a weekly baseline' : `${data.volumeRatio.toFixed(1)}x prior weekly pace`} trend={data.volumeRatio == null ? null : (data.volumeRatio - 1) * 100} />
           <DashMetric icon="Ø" label="Average invoice" value={money(averageInvoice)} detail={`${data.invoiceCount} invoice${data.invoiceCount === 1 ? '' : 's'} in loaded history`} />
           <DashMetric icon="!" label="Portal reviews" value={openReviews} detail={openReviews ? 'Waiting on factor review' : 'Nothing waiting for review'} tone={openReviews ? 'review' : 'good'} />
           <DashMetric icon="%" label="Top debtor share" value={topConcentration ? `${Math.round(topConcentration.share * 100)}%` : '-'} detail={topConcentration?.debtorName || 'No concentration data yet'} tone={topConcentration?.level === 'HIGH' ? 'bad' : topConcentration?.level === 'REVIEW' ? 'review' : 'good'} />
         </section>}
 
         <section className="dashBoard">
+          {show('pipeline') && <DashboardCard className="dashSpan8" kicker="Invoice pipeline" title="From submitted to paid" action={<a href="/invoices">Track invoices</a>}>
+            <LifecyclePipeline stages={data.cash.pipeline} />
+            <p className="dashCardFootnote">Paid shows the last 30 days.</p>
+          </DashboardCard>}
+
+          {show('cash') && <DashboardCard className="dashSpan4" kicker="Your cash" title="Money in motion">
+            <CashPanel cash={data.cash} />
+          </DashboardCard>}
+
+          {show('debtor-aging') && <DashboardCard className="dashSpan8" kicker="Receivables" title="Open balance by debtor">
+            <AgingBars aging={data.debtorAging} />
+          </DashboardCard>}
+
+          {show('dso') && <DashboardCard className="dashSpan4" kicker="Collections" title="Days for debtors to pay">
+            <DsoLine points={data.dso} />
+          </DashboardCard>}
+
           {show('trend') && <DashboardCard className="dashSpan8" kicker="Invoice activity" title="Eight-week volume trend" action={<a href="/invoices">Explore invoices</a>}>
             <div className="dashCardStatline"><strong>{money(trend.reduce((sum, point) => sum + point.amount, 0))}</strong><span>{trend.reduce((sum, point) => sum + point.count, 0)} invoices across the last eight calendar weeks</span></div>
             <ActivityTrendChart points={trend} />
@@ -180,7 +204,7 @@ export default function ClientPortalHome() {
                     <span>{record.companyDebtorId ? debtorNames[record.companyDebtorId] || 'FactorCloud debtor' : 'Debtor unavailable'} · {record.invoiceDate || 'No date'}</span>
                   </div>
                   <div className="dashInvoiceStatuses">
-                    <span className={`portalStatus ${statusTone(record.status)}`}>{pretty(record.status || 'Unknown')}</span>
+                    <MiniStages record={record} />
                     {workflow && <span className={`dashReviewPill ${workflowTone(workflow.workflowStatus)}`}>{pretty(workflow.workflowStatus)}</span>}
                   </div>
                   <strong>{record.invoiceAmount == null ? '-' : money(record.invoiceAmount)}</strong>
@@ -221,10 +245,33 @@ export default function ClientPortalHome() {
           </DashboardCard>}
         </section>
 
-        <p className="portalDataNote">{data.source.note} Dashboard views use invoice activity and portal workflow data only; they do not relabel these figures as open A/R, cash, or exposure.</p>
+        <p className="portalDataNote">{data.source.note} Cash and aging figures come from FactorCloud's balance, advance, reserve, funded and paid fields.</p>
       </>}
     </main>
   );
+}
+
+function CashPanel({ cash }: { cash: CashSummary }) {
+  return <div className="cashPanel">
+    <div className="cashHero"><span>Open with debtors</span><strong><CountUp value={cash.openBalance} format={(v) => money(v)} /></strong><small>{cash.avgDaysToPay == null ? 'Payment pace builds as invoices are paid' : `Debtors pay in about ${Math.round(cash.avgDaysToPay)} days`}</small></div>
+    <div className="cashRows">
+      <div><i style={{ background: '#2a78d6' }} /><span>Advanced to you, 30 days</span><strong>{compactMoney(cash.advancedLast30)}</strong></div>
+      <div><i style={{ background: '#86b6ef' }} /><span>Reserve held</span><strong>{compactMoney(cash.reserveHeld)}</strong></div>
+      <div><i style={{ background: '#eb6834' }} /><span>Reserve expected back, next 30 days</span><strong>{compactMoney(cash.expectedRelease30)}</strong></div>
+      <div><i style={{ background: '#c3c2b7' }} /><span>Fees, 30 days</span><strong>{compactMoney(cash.feesLast30)}</strong></div>
+    </div>
+  </div>;
+}
+
+const STAGES = ['SUBMITTED', 'VERIFIED', 'FUNDED', 'PAID'] as const;
+function MiniStages({ record }: { record: RiskRecord }) {
+  const stage = lifecycleStage(record);
+  const reached = STAGES.indexOf(stage);
+  const label = { SUBMITTED: 'Submitted', VERIFIED: 'Verified', FUNDED: 'Funded', PAID: 'Paid' }[stage];
+  return <span className="miniStages" title={`${label} · step ${reached + 1} of 4`}>
+    {STAGES.map((s, i) => <i key={s} className={i <= reached ? 'on' : ''} />)}
+    <em>{label}</em>
+  </span>;
 }
 
 function DashboardCard({ kicker, title, action, className = '', children }: { kicker: string; title: string; action?: React.ReactNode; className?: string; children: React.ReactNode }) {
@@ -234,7 +281,7 @@ function DashboardCard({ kicker, title, action, className = '', children }: { ki
   </section>;
 }
 
-function DashMetric({ icon, label, value, detail, trend, tone = '' }: { icon: string; label: string; value: string | number; detail: string; trend?: number | null; tone?: string }) {
+function DashMetric({ icon, label, value, detail, trend, tone = '' }: { icon: string; label: string; value: React.ReactNode; detail: string; trend?: number | null; tone?: string }) {
   return <div className={`dashMetric ${tone}`}>
     <div className="dashMetricTop"><span className="dashMetricIcon">{icon}</span>{trend != null && Number.isFinite(trend) && <span className={`dashMetricTrend ${trend >= 0 ? 'up' : 'down'}`}>{trend >= 0 ? '↗' : '↘'} {Math.abs(trend).toFixed(0)}%</span>}</div>
     <span className="dashMetricLabel">{label}</span>
