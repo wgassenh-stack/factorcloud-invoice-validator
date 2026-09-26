@@ -10,6 +10,7 @@ import { lifecycleStage, type AgingSummary, type CashSummary, type DsoPoint } fr
 import type { RiskInvoiceRecord } from '@/lib/risk';
 import { AgingBars, CountUp, DashboardSkeleton, DsoLine, LifecyclePipeline, compactMoney } from '@/app/components/CommandCharts';
 import { DemoBadge } from '@/app/components/DemoBadge';
+import { FixRequestsBanner } from '@/app/components/FixRequests';
 
 type RiskRecord = RiskInvoiceRecord;
 
@@ -151,6 +152,8 @@ export default function ClientPortalHome() {
         widgets={CLIENT_WIDGETS}
         onWidgetsChange={setVisibleWidgets}
       />
+
+      <FixRequestsBanner />
 
       {data?.source.complete === false && <div className="attentionSummary review"><strong>Some invoices may be missing</strong><span>Not every invoice could be loaded from FactorCloud, so totals below may be incomplete. Try again shortly.</span></div>}
       {error && <div className="attentionSummary fail"><strong>Could not load FactorCloud data</strong><span>{error}</span><button className="small retryButton" onClick={() => void load()}>Try again</button></div>}

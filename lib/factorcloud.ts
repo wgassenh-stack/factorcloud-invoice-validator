@@ -335,6 +335,12 @@ export async function uploadDocument(clientId: string, file: File, type: string)
   }
 }
 
+/** POST /invoices/{id}/documents: adds documents to an invoice without replacing the ones it has. */
+export async function addDocumentsToInvoice(invoiceId: string, documentIds: string[]): Promise<unknown> {
+  if (await demoRequest()) return { status: 'SUCCESS', invoiceId, documents: documentIds };
+  return fcRequest(`/invoices/${encodeURIComponent(invoiceId)}/documents`, { method: 'POST', json: { documentIds } });
+}
+
 export async function attachDocuments(invoiceId: string, documentIds: string[]): Promise<unknown> {
   if (await demoRequest()) return { status: 'SUCCESS', invoiceId, documents: documentIds };
   return fcRequest(`/invoices/${encodeURIComponent(invoiceId)}`, { method: 'PUT', json: { documents: documentIds } });

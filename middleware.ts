@@ -3,6 +3,8 @@ import { DEMO_COOKIE, demoFromCookie, demoMode } from './lib/demo';
 import { databaseAuthEnabled, PORTAL_SESSION_COOKIE, verifyPortalSession } from './lib/session';
 
 export async function middleware(req: NextRequest) {
+  // The scheduled notification job authenticates itself with CRON_SECRET (see its route).
+  if (req.nextUrl.pathname === '/api/cron/notifications') return NextResponse.next();
   // Demo mode holds no real data, so client and factor pages are both open (behind the shared
   // password when one is set).
   if (demoMode()) return passwordGate(req);

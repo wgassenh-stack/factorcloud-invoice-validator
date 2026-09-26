@@ -6,6 +6,7 @@ import { resolveConfiguredClientId } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
 import { buildAging, buildCashSummary, buildDsoTrend } from '@/lib/analytics';
 import { demoReviews } from '@/lib/demo-store';
+import { notifyInvoiceProgress } from '@/lib/progress-notify';
 import { databaseAuthEnabled } from '@/lib/session';
 import { demoRequest } from '@/lib/demo-request';
 
@@ -47,6 +48,8 @@ export async function GET() {
     };
 
     const today = new Date().toISOString().slice(0, 10);
+    // Fresh invoice data: a good moment to email about newly funded or paid invoices.
+    await notifyInvoiceProgress(records, debtorNames).catch((err) => console.error('[risk] progress emails failed', err));
     const summary = summarizeRisk(records, debtorNames, today, thresholds);
     const portalWorkflows: Record<string, { workflowStatus: string; validationStatus: string; updatedAt: string }> = {};
 

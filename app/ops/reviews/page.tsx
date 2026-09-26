@@ -22,7 +22,12 @@ type ReviewRecord = {
   notes?: string | null;
   createdAt?: string;
   checks?: CheckResult[];
+  fix?: { status: 'OPEN' | 'DONE'; message: string; requestedAt: string; answeredAt: string | null; responseNote: string | null; fileCount: number | null } | null;
 };
+
+type Decision = 'APPROVE' | 'REJECT' | 'REQUEST_FIX';
+
+const FIX_PRESETS = ['Signed POD is missing.', 'Load number on the BOL doesn\'t match the invoice.', 'Please add the rate confirmation.', 'Invoice amount doesn\'t match the rate confirmation.'];
 
 type ReviewResponse = {
   records: ReviewRecord[];
@@ -59,10 +64,10 @@ export default function ReviewQueuePage() {
 
   useEffect(() => { void load(); }, []);
 
-  async function decide(record: ReviewRecord, decision: 'APPROVE' | 'REJECT', note: string | null) {
+  async function decide(record: ReviewRecord, decision: Decision, note: string | null) {
     if (!record.reviewId) return;
-    if (decision === 'REJECT' && !note?.trim()) {
-      setError('Add a short reason before rejecting a client submission.');
+    if (decision !== 'APPROVE' && !note?.trim()) {
+      setError(decision === 'REJECT' ? 'Add a short reason before rejecting a client submission.' : 'Tell the client what to fix.');
       return;
     }
     setDeciding(record.reviewId);
@@ -75,6 +80,14 @@ export default function ReviewQueuePage() {
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Could not save review decision.');
+      const label = record.invoiceNumber || record.id.slice(0, 8);
+      if (decision === 'REQUEST_FIX') {
+        // The item stays in the queue, now marked as waiting on the client.
+        setToast({ tone: 'pass', text: `Fix requested on ${label}${body.emailed === 'sent' ? ' · client emailed' : ''}` });
+        setTimeout(() => setToast(null), 3200);
+        await load();
+        return;
+      }
       // Let the card play its exit before it leaves the list.
       setLeaving(record.reviewId);
       setToast({ tone: decision === 'APPROVE' ? 'pass' : 'fail', text: `${decision === 'APPROVE' ? 'Approved' : 'Rejected'} invoice ${record.invoiceNumber || record.id.slice(0, 8)}` });
@@ -161,9 +174,9 @@ export default function ReviewQueuePage() {
 
 function ReviewCard({ record, index, now, clientName, debtorName, busy, disabled, leaving, onDecide }: {
   record: ReviewRecord; index: number; now: number; clientName: string; debtorName: string; busy: boolean; disabled: boolean; leaving: boolean;
-  onDecide: (decision: 'APPROVE' | 'REJECT', note: string | null) => void;
+  onDecide: (decision: Decision, note: string | null) => void;
 }) {
-  const [rejecting, setRejecting] = useState(false);
+  const [mode, setMode] = useState<'idle' | 'reject' | 'fix'>('idle');
   const [note, setNote] = useState('');
   const hours = record.createdAt ? (now - Date.parse(record.createdAt)) / 3_600_000 : null;
   const sla = hours == null ? null : hours < 4 ? 'GOOD' : hours < 24 ? 'REVIEW' : 'HIGH';
@@ -174,6 +187,8 @@ function ReviewCard({ record, index, now, clientName, debtorName, busy, disabled
       <div className="reviewCardTop">
         {record.submissionId ? <a className="reviewCardTitle" href={`/ops/submissions/${encodeURIComponent(record.submissionId)}`}>Invoice {record.invoiceNumber || record.id.slice(0, 8)}</a> : <strong className="reviewCardTitle">Invoice {record.invoiceNumber || record.id.slice(0, 8)}</strong>}
         {sla && <StatusFlag level={sla as 'GOOD' | 'REVIEW' | 'HIGH'}>Waiting {waitCopy(hours!)}</StatusFlag>}
+        {record.fix?.status === 'OPEN' && <span className="fixChip waiting">Waiting on client · asked {waitCopy((now - Date.parse(record.fix.requestedAt)) / 3_600_000)} ago</span>}
+        {record.fix?.status === 'DONE' && <span className="fixChip answered">Client responded{record.fix.fileCount ? ` · ${record.fix.fileCount} file${record.fix.fileCount === 1 ? '' : 's'}` : ''}</span>}
       </div>
       <div className="reviewCardMeta">
         {record.companyClientId ? <a href={`/ops/clients/${encodeURIComponent(record.companyClientId)}`}>{clientName}</a> : <span>{clientName}</span>}
@@ -181,6 +196,10 @@ function ReviewCard({ record, index, now, clientName, debtorName, busy, disabled
         <span>{record.invoiceDate || 'No date'}</span>
       </div>
       <p className="reviewCardReason">{record.reason || pretty(record.status || 'Review required')}</p>
+      {record.fix && <div className={`fixThread ${record.fix.status === 'DONE' ? 'answered' : ''}`}>
+        <div><b>You asked</b><span>{record.fix.message}</span></div>
+        {record.fix.status === 'DONE' && <div><b>Client</b><span>{record.fix.responseNote || 'Uploaded the requested files.'}{record.submissionId && <> · <a href={`/ops/submissions/${encodeURIComponent(record.submissionId)}`}>see files</a></>}</span></div>}
+      </div>}
       {flagged.length > 0 && <div className="reviewChecks">
         {flagged.map((check) => <div className={`reviewCheck ${check.status.toLowerCase()}`} key={check.id}>
           <b aria-hidden="true">{check.status === 'FAIL' ? '✕' : '!'}</b>
@@ -192,14 +211,21 @@ function ReviewCard({ record, index, now, clientName, debtorName, busy, disabled
     </div>
     <div className="reviewCardSide">
       <strong className="reviewCardAmount">{record.invoiceAmount == null ? '-' : money(record.invoiceAmount)}</strong>
-      {record.reviewId ? (rejecting
+      {record.reviewId ? (mode !== 'idle'
         ? <div className="reviewReject">
-            <textarea autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason for the client and the audit trail" rows={3} />
-            <div><button className="tinyButton" onClick={() => setRejecting(false)} disabled={disabled}>Cancel</button><button className="tinyButton dangerButton" disabled={disabled || !note.trim()} onClick={() => onDecide('REJECT', note)}>{busy ? 'Saving...' : 'Reject'}</button></div>
+            {mode === 'fix' && <div className="fixPresets">{FIX_PRESETS.map((preset) => <button type="button" key={preset} onClick={() => setNote(preset)}>{preset}</button>)}</div>}
+            <textarea autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder={mode === 'fix' ? 'What should the client fix or send?' : 'Reason for the client and the audit trail'} rows={3} />
+            <div>
+              <button className="tinyButton" onClick={() => { setMode('idle'); setNote(''); }} disabled={disabled}>Cancel</button>
+              {mode === 'fix'
+                ? <button className="tinyButton fixButton" disabled={disabled || !note.trim()} onClick={() => onDecide('REQUEST_FIX', note)}>{busy ? 'Sending...' : 'Send to client'}</button>
+                : <button className="tinyButton dangerButton" disabled={disabled || !note.trim()} onClick={() => onDecide('REJECT', note)}>{busy ? 'Saving...' : 'Reject'}</button>}
+            </div>
           </div>
         : <div className="reviewActions">
             <button className="reviewApprove" disabled={disabled} onClick={() => onDecide('APPROVE', null)}>{busy ? 'Saving...' : '✓ Approve'}</button>
-            <button className="tinyButton dangerButton" disabled={disabled} onClick={() => setRejecting(true)}>Reject…</button>
+            {record.fix?.status !== 'OPEN' && <button className="tinyButton fixButton" disabled={disabled} onClick={() => setMode('fix')}>Request fix…</button>}
+            <button className="tinyButton dangerButton" disabled={disabled} onClick={() => setMode('reject')}>Reject…</button>
           </div>)
         : <span className="muted">Read only</span>}
     </div>
