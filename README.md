@@ -115,6 +115,10 @@ Emails go through [Resend](https://resend.com) when `RESEND_API_KEY` and `NOTIFY
 
 FactorCloud has no webhooks, so "funded" and "paid" are noticed when a dashboard loads fresh invoice data and by a daily job (`vercel.json`, protected by `CRON_SECRET`). Each email goes out once. Only events from the last 7 days are announced, so turning email on later doesn't send old history.
 
+## Debtor credit check
+
+When a packet is verified, the portal reads the client–debtor credit terms from FactorCloud (`GET /clients/{client}/debtors/{debtor}`: `creditLimit`, `creditLimitApproved`) and adds up what that debtor still owes on the client's unpaid invoices. The submit page shows how much of the limit is in use and where this invoice lands. The invoice goes to review, not blocked, when it would pass the limit, when the limit isn't approved, or when FactorCloud marks the debtor as not approved for purchase. The check runs again with fresh balances at submit time. If FactorCloud can't be reached, the check is skipped rather than blocking.
+
 ## Extraction model
 
 The current default is `gemini-3.5-flash-lite` with minimal thinking. The extractor is isolated in `lib/extract.ts`, so the model can be changed with `EXTRACTION_MODEL` if real paperwork shows quality problems.

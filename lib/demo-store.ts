@@ -80,6 +80,17 @@ export function demoHeadlineDebtor(): CompanyRecord {
   return state().portfolio.debtors[0];
 }
 
+/** Credit terms per client–debtor pair in demo mode, sized from what is already open. */
+export function demoClientDebtor(clientId: string, debtorId: string): { creditLimit: number | null; creditLimitApproved: boolean | null; creditRating: number | null } | null {
+  const open = demoInvoices()
+    .filter((inv) => inv.companyClientId === clientId && inv.companyDebtorId === debtorId && inv.status !== 'PAID')
+    .reduce((sum, inv) => sum + inv.invoiceBalance, 0);
+  const roundUp = (v: number) => Math.ceil(v / 5000) * 5000;
+  if (debtorId === 'demo-debtor-01') return { creditLimit: roundUp(open + 22_000), creditLimitApproved: true, creditRating: 82 }; // Acme: well used, still room
+  if (debtorId === 'demo-debtor-02') return { creditLimit: 15_000, creditLimitApproved: false, creditRating: 41 }; // Titan: slow payer, limit not approved
+  return { creditLimit: Math.max(25_000, roundUp(open * 1.8)), creditLimitApproved: true, creditRating: 70 };
+}
+
 export function demoToday(): string {
   return state().day;
 }

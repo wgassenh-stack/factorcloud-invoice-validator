@@ -436,3 +436,20 @@ button.tinyButton.fixButton:hover:not(:disabled) { background:#e2ecfa; }
 .reviewActions button.tinyButton.dangerButton, .reviewReject button.tinyButton:not(.fixButton):not(.dangerButton) { background:#fff; color:#374151; border:1px solid #dfe3e8; }
 .reviewActions button.tinyButton.dangerButton { color:#b42318; border-color:#f1c4c4; }
 .reviewActions button.tinyButton.dangerButton:hover:not(:disabled) { background:#fff5f5; }
+
+/* Debtor credit meter */
+.creditMeter { display:grid; gap:9px; margin-top:12px; padding:12px 14px; border:1px solid #e3e7ec; border-radius:12px; background:#fbfcfd; }
+.creditMeter.review { border-color:#f5d98f; background:#fffdf5; }
+.creditMeterHead { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.creditMeterHead div { display:grid; gap:1px; }
+.creditMeterHead span { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--viz-muted); }
+.creditMeterHead strong { font-size:17px; font-variant-numeric:tabular-nums; }
+.creditBar { position:relative; display:flex; gap:2px; height:12px; border-radius:6px; background:#eceef1; overflow:visible; }
+.creditBar span { height:100%; transition:width .5s var(--viz-ease); }
+.creditBar span:first-child { border-radius:6px 0 0 6px; }
+.creditThis { border-radius:0 6px 6px 0; }
+.creditLimitMark { position:absolute; top:-4px; bottom:-4px; width:2px; margin-left:-1px; background:var(--viz-ink); border-radius:1px; }
+.creditLegend { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:11px; color:var(--viz-secondary); }
+.creditLegend span { display:inline-flex; align-items:center; gap:5px; }
+.creditLegend i { width:9px; height:9px; border-radius:2px; }
+.creditNote { font-size:11px; color:var(--viz-secondary); }

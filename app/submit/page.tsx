@@ -6,6 +6,8 @@ import { ProcessingTheater, type TheaterPhase } from '@/app/components/Processin
 import { CameraCapture } from '@/app/components/CameraCapture';
 import { validate } from '@/lib/rules';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
+import { applyCreditCheck, withInvoiceAmount } from '@/lib/credit';
+import { CreditMeter } from '@/app/components/CreditMeter';
 import type { AnalyzeResponse, CreateResponse, ExtractedFields, ValidationReport } from '@/lib/types';
 
 type StatusResponse = {
@@ -36,10 +38,10 @@ export default function SubmitInvoicePage() {
 
   const liveValidation = useMemo<ValidationReport | null>(() => {
     if (!analysis) return null;
-    const base = applyFactorCloudAvailability(
+    const base = applyCreditCheck(applyFactorCloudAvailability(
       validate({ documents: analysis.documents, primaryIndex: analysis.primaryIndex, debtor: analysis.debtor, client: analysis.client }),
       analysis.factorCloudLookupFailed,
-    );
+    ), analysis.credit ? withInvoiceAmount(analysis.credit, analysis.documents[analysis.primaryIndex]?.fields.invoiceAmount) : null);
     if (!clientCorrections.length || base.status === 'FAIL') return base;
     return {
       status: 'REVIEW',
@@ -237,6 +239,7 @@ export default function SubmitInvoicePage() {
           )}
           {primary && <p className="match">FactorCloud calculates the final due date from your configured terms.</p>}
           {analysis?.debtor && <p className="match">Matched debtor: <strong>{analysis.debtor.companyName}</strong>{analysis.debtorMatch ? ` via ${analysis.debtorMatch.method}` : ''}</p>}
+          {analysis?.credit && <CreditMeter credit={withInvoiceAmount(analysis.credit, primary?.fields.invoiceAmount)} />}
         </div>
 
         <div className="card validationCard">
