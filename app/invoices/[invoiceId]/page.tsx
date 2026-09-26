@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { PortalNav } from '@/app/components/PortalNav';
 import { InvoiceTracker, Skeleton } from '@/app/components/CommandCharts';
 import { DemoBadge } from '@/app/components/DemoBadge';
+import { FixRequestPanel } from '@/app/components/FixRequests';
 import { lifecycleStage } from '@/lib/analytics';
 import type { RiskInvoiceRecord } from '@/lib/risk';
 
@@ -82,6 +83,8 @@ export default function InvoiceDetailPage() {
           <button className="small invoiceRefresh" onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
         </div>
       </section>
+
+      <FixRequestPanel invoiceId={data.invoice.id} onDone={() => void load()} />
 
       <section className="portalPanel invoiceTrackerPanel">
         <InvoiceTracker stage={lifecycleStage(data.invoice)} dates={{ SUBMITTED: data.invoice.createdOn || data.invoice.invoiceDate, VERIFIED: null, FUNDED: data.invoice.fundedDate ?? null, PAID: data.invoice.paidDate ?? null }} />

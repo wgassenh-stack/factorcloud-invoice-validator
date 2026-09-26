@@ -1,3 +1,5 @@
+import type { DebtorCredit } from './credit';
+
 export type DocumentType = 'invoice' | 'bol' | 'pod' | 'rate_confirmation' | 'other';
 
 export interface ExtractedFields {
@@ -88,6 +90,8 @@ export interface AnalyzeResponse {
   validation: ValidationReport;
   warnings: string[];
   analysisReceipt?: string;
+  /** Credit position with the matched debtor, when one was matched. */
+  credit?: DebtorCredit | null;
 }
 
 export interface BatchPacketAnalysis extends AnalyzeResponse {

@@ -6,7 +6,7 @@ import { FactorCloudError } from './errors';
 import { collectInvoiceRecords, findToken, unwrapRecord } from './fc-response';
 import { normalizeIdentifier } from './normalize';
 import { scoreDebtor, type DebtorHints } from './matching';
-import { addDemoInvoice, demoCompany, demoDebtors, demoInvoice, demoInvoices, nextDemoDocumentId } from './demo-store';
+import { addDemoInvoice, demoClientDebtor, demoCompany, demoDebtors, demoInvoice, demoInvoices, nextDemoDocumentId } from './demo-store';
 import { demoRequest } from './demo-request';
 
 export const TOKEN_COOKIE = 'fc_token';
@@ -175,6 +175,8 @@ export interface InvoiceListQuery {
   client?: string;
   /** FactorCloud search: matches invoice number, reference number, client/debtor name or amount. */
   q?: string;
+  /** FactorCloud company debtor ID: only invoices owed by that debtor. */
+  debtor?: string;
 }
 
 export interface InvoiceListResult {
@@ -203,6 +205,7 @@ export async function listInvoices(filter: InvoiceListQuery = {}): Promise<Invoi
     const q = filter.q?.toLowerCase();
     const invoices = demoInvoices().filter((invoice) =>
       (!filter.client || invoice.companyClientId === filter.client)
+      && (!filter.debtor || invoice.companyDebtorId === filter.debtor)
       && (!q || invoice.invoiceNumber.toLowerCase().includes(q) || invoice.referenceNumber.toLowerCase().includes(q)),
     );
     return { raw: [{ status: 'SUCCESS', code: 200, invoices }], complete: true, pages: 1 };
@@ -210,6 +213,7 @@ export async function listInvoices(filter: InvoiceListQuery = {}): Promise<Invoi
   const query: Record<string, string> = {};
   if (filter.client) query.client = filter.client;
   if (filter.q) query.q = filter.q;
+  if (filter.debtor) query.debtor = filter.debtor;
 
   const raw: unknown[] = [];
   const seen = new Set<string>();
@@ -257,6 +261,33 @@ function invoicePageItems(body: unknown): { id: string }[] {
     return invoices.filter((x): x is { id: string } => Boolean(x) && typeof (x as { id?: unknown }).id === 'string');
   }
   return collectInvoiceRecords(body);
+}
+
+export interface ClientDebtorTerms {
+  creditLimit: number | null;
+  creditLimitApproved: boolean | null;
+  creditRating: number | null;
+}
+
+/** GET /clients/{clientId}/debtors/{debtorId}: credit terms for this client–debtor pair, or null if none. */
+export async function getClientDebtor(clientId: string, debtorId: string): Promise<ClientDebtorTerms | null> {
+  if (await demoRequest()) return demoClientDebtor(clientId, debtorId);
+  let body: unknown;
+  try {
+    body = await fcRequest(`/clients/${encodeURIComponent(clientId)}/debtors/${encodeURIComponent(debtorId)}`);
+  } catch (err) {
+    if (err instanceof FactorCloudError && (err.status === 404 || err.status === 400)) return null;
+    throw err;
+  }
+  const raw = (body as { clientDebtors?: unknown; clientDebtor?: unknown } | null);
+  const record = (Array.isArray(raw?.clientDebtors) ? raw.clientDebtors[0] : raw?.clientDebtors ?? raw?.clientDebtor) as Record<string, unknown> | undefined;
+  if (!record) return null;
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() && Number.isFinite(Number(v)) ? Number(v) : null);
+  return {
+    creditLimit: num(record.creditLimit),
+    creditLimitApproved: typeof record.creditLimitApproved === 'boolean' ? record.creditLimitApproved : null,
+    creditRating: num(record.creditRating),
+  };
 }
 
 /** GET /invoices/{id}. Returns the raw response body, or null when FactorCloud has no such invoice. */
@@ -333,6 +364,12 @@ export async function uploadDocument(clientId: string, file: File, type: string)
     if (type !== 'INVOICE' && err instanceof FactorCloudError && err.status === 400) return attempt('INVOICE');
     throw err;
   }
+}
+
+/** POST /invoices/{id}/documents: adds documents to an invoice without replacing the ones it has. */
+export async function addDocumentsToInvoice(invoiceId: string, documentIds: string[]): Promise<unknown> {
+  if (await demoRequest()) return { status: 'SUCCESS', invoiceId, documents: documentIds };
+  return fcRequest(`/invoices/${encodeURIComponent(invoiceId)}/documents`, { method: 'POST', json: { documentIds } });
 }
 
 export async function attachDocuments(invoiceId: string, documentIds: string[]): Promise<unknown> {

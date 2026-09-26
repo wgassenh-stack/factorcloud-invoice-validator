@@ -109,23 +109,37 @@ function lastMonths(today: string, count: number): string[] {
   });
 }
 
+// FactorCloud's documented values: invoice status PENDING, HELD, REJECTED, CANCELED, NEED_VERIFIED,
+// APPROVED, PURCHASED, FUNDED, PAID; verificationStatus DENIED, NOT_VERIFIED, PENDING, VERIFIED;
+// paymentStatus is free text such as "Open". Match whole values, never substrings ("NOT_VERIFIED"
+// contains "VERIFIED", "Unpaid" contains "PAID").
+function token(value: string | null | undefined): string {
+  return (value ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+}
+
+/** Rejected or canceled: no longer part of the pipeline or the receivables. */
+export function isClosedOut(record: RiskInvoiceRecord): boolean {
+  return ['REJECTED', 'CANCELED', 'CANCELLED', 'VOID'].includes(token(record.status));
+}
+
 /** Whether an invoice is paid off, by any of the signals FactorCloud may send. */
 export function isPaid(record: RiskInvoiceRecord): boolean {
   if (record.paidDate) return true;
-  if (record.paymentStatus && /PAID|CLOSED/i.test(record.paymentStatus) && !/PARTIAL/i.test(record.paymentStatus)) return true;
-  return /PAID|CLOSED/i.test(record.status ?? '');
+  if (['PAID', 'CLOSED', 'PAID_IN_FULL'].includes(token(record.paymentStatus))) return true;
+  return token(record.status) === 'PAID';
 }
 
 /** Money still owed on an invoice that has been bought (funded) and not yet paid off. */
 export function openBalance(record: RiskInvoiceRecord): number {
-  if (isPaid(record) || /REJECT|VOID|CANCEL/i.test(record.status ?? '')) return 0;
+  if (isPaid(record) || isClosedOut(record)) return 0;
   return Math.max(0, record.invoiceBalance ?? record.invoiceAmount ?? 0);
 }
 
 export function lifecycleStage(record: RiskInvoiceRecord): LifecycleStage {
   if (isPaid(record)) return 'PAID';
-  if (record.fundedDate || /FUND|PURCHAS/i.test(record.status ?? '')) return 'FUNDED';
-  if (/VERIFIED/i.test(record.verificationStatus ?? '') || /APPROV|VERIF/i.test(record.status ?? '')) return 'VERIFIED';
+  const status = token(record.status);
+  if (record.fundedDate || status === 'FUNDED' || status === 'PURCHASED') return 'FUNDED';
+  if (token(record.verificationStatus) === 'VERIFIED' || status === 'APPROVED') return 'VERIFIED';
   return 'SUBMITTED';
 }
 
@@ -319,6 +333,7 @@ export function buildCashSummary(records: RiskInvoiceRecord[], today: string): C
   let feesLast30 = 0;
 
   for (const record of records) {
+    if (isClosedOut(record)) continue;
     const stage = lifecycleStage(record);
     const bucket = pipeline.find((p) => p.stage === stage)!;
     // Paid invoices only count toward the pipeline for the last 30 days, so the bar stays readable.

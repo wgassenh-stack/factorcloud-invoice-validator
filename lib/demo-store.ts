@@ -15,6 +15,22 @@ interface DemoState {
   reviews: DemoReview[];
   submissions: DemoSubmission[];
   documentSeq: number;
+  tasks?: DemoTask[];
+}
+
+export interface DemoTask {
+  id: string;
+  reviewId: string;
+  submissionId: string;
+  invoiceId: string;
+  clientId: string;
+  invoiceNumber: string;
+  message: string;
+  status: 'OPEN' | 'DONE' | 'CANCELED';
+  createdAt: string;
+  resolvedAt: string | null;
+  responseNote: string | null;
+  files: { fileName: string; sizeBytes: number }[];
 }
 
 const globalState = globalThis as unknown as { __fcDemoState?: DemoState };
@@ -64,6 +80,17 @@ export function demoHeadlineDebtor(): CompanyRecord {
   return state().portfolio.debtors[0];
 }
 
+/** Credit terms per client–debtor pair in demo mode, sized from what is already open. */
+export function demoClientDebtor(clientId: string, debtorId: string): { creditLimit: number | null; creditLimitApproved: boolean | null; creditRating: number | null } | null {
+  const open = demoInvoices()
+    .filter((inv) => inv.companyClientId === clientId && inv.companyDebtorId === debtorId && inv.status !== 'PAID')
+    .reduce((sum, inv) => sum + inv.invoiceBalance, 0);
+  const roundUp = (v: number) => Math.ceil(v / 5000) * 5000;
+  if (debtorId === 'demo-debtor-01') return { creditLimit: roundUp(open + 22_000), creditLimitApproved: true, creditRating: 82 }; // Acme: well used, still room
+  if (debtorId === 'demo-debtor-02') return { creditLimit: 15_000, creditLimitApproved: false, creditRating: 41 }; // Titan: slow payer, limit not approved
+  return { creditLimit: Math.max(25_000, roundUp(open * 1.8)), creditLimitApproved: true, creditRating: 70 };
+}
+
 export function demoToday(): string {
   return state().day;
 }
@@ -92,7 +119,7 @@ export function addDemoInvoice(input: { invoiceNumber: string; referenceNumber: 
     paidDate: null,
     dueDate: new Date(Date.parse(`${input.invoiceDate}T00:00:00Z`) + 30 * 86_400_000).toISOString(),
     status: 'PENDING',
-    verificationStatus: 'PENDING',
+    verificationStatus: 'NOT_VERIFIED',
     paymentStatus: 'OPEN',
     disputed: false,
     notes: input.notes,
@@ -145,9 +172,58 @@ export function demoReviews(): DemoReview[] {
   return state().reviews;
 }
 
+function demoTaskList(): DemoTask[] {
+  const s = state();
+  s.tasks ??= [];
+  return s.tasks;
+}
+
+/** A reviewer asks the client for a fix; the review stays open. */
+export function demoRequestFix(reviewId: string, message: string): DemoTask | null {
+  const review = state().reviews.find((r) => r.reviewId === reviewId && r.status === 'OPEN');
+  if (!review) return null;
+  const tasks = demoTaskList();
+  for (const task of tasks) if (task.submissionId === review.submissionId && task.status === 'OPEN') { task.status = 'CANCELED'; task.resolvedAt = new Date().toISOString(); }
+  const task: DemoTask = {
+    id: `demo-task-${tasks.length + 1}`,
+    reviewId,
+    submissionId: review.submissionId,
+    invoiceId: review.invoiceId,
+    clientId: review.clientId,
+    invoiceNumber: review.invoiceNumber,
+    message,
+    status: 'OPEN',
+    createdAt: new Date().toISOString(),
+    resolvedAt: null,
+    responseNote: null,
+    files: [],
+  };
+  tasks.push(task);
+  return task;
+}
+
+export function demoClientTasks(clientId: string, status: DemoTask['status'] = 'OPEN'): DemoTask[] {
+  return demoTaskList().filter((task) => task.clientId === clientId && task.status === status).reverse();
+}
+
+export function demoLatestTask(submissionId: string): DemoTask | null {
+  return demoTaskList().filter((task) => task.submissionId === submissionId && task.status !== 'CANCELED').at(-1) ?? null;
+}
+
+export function demoSubmitFix(taskId: string, clientId: string, files: { fileName: string; sizeBytes: number }[], note: string | null): DemoTask | null {
+  const task = demoTaskList().find((t) => t.id === taskId && t.clientId === clientId && t.status === 'OPEN');
+  if (!task) return null;
+  task.status = 'DONE';
+  task.resolvedAt = new Date().toISOString();
+  task.responseNote = note;
+  task.files = files;
+  return task;
+}
+
 export function decideDemoReview(reviewId: string, decision: 'APPROVE' | 'REJECT', note: string | null): DemoReview | null {
   const review = state().reviews.find((r) => r.reviewId === reviewId && r.status === 'OPEN');
   if (!review) return null;
+  for (const task of demoTaskList()) if (task.submissionId === review.submissionId && task.status === 'OPEN') { task.status = 'CANCELED'; task.resolvedAt = new Date().toISOString(); }
   review.status = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
   review.decisionNote = note;
   review.decidedAt = new Date().toISOString();
@@ -192,14 +268,21 @@ export function demoSubmissionDetail(by: { invoiceId?: string; submissionId?: st
     { id: `${invoice.id}-a3`, eventType: 'DOCUMENTS_ATTACHED', eventData: { invoiceId: invoice.id }, createdAt: at(6), actor: system },
   ];
   if (review) audit.push({ id: `${invoice.id}-a4`, eventType: 'REVIEW_OPENED', eventData: { reason: review.reason }, createdAt: at(7), actor: system });
+  const tasks = demoTaskList().filter((task) => task.submissionId === (submission?.submissionId ?? review?.submissionId));
+  for (const task of tasks) {
+    audit.push({ id: `${task.id}-req`, eventType: 'FIX_REQUESTED', eventData: { note: task.message }, createdAt: task.createdAt, actor: { email: DEMO_SESSION.email, name: DEMO_SESSION.displayName } });
+    if (task.status === 'DONE') audit.push({ id: `${task.id}-done`, eventType: 'FIX_SUBMITTED', eventData: { note: task.responseNote, files: task.files.map((f) => f.fileName) }, createdAt: task.resolvedAt!, actor });
+  }
   if (review?.decidedAt) audit.push({ id: `${invoice.id}-a5`, eventType: review.status === 'APPROVED' ? 'REVIEW_APPROVED' : 'REVIEW_REJECTED', eventData: { note: review.decisionNote }, createdAt: review.decidedAt, actor: { email: DEMO_SESSION.email, name: DEMO_SESSION.displayName } });
-  audit.reverse();
+  audit.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  const files = submission?.files ?? [
+  const fixFiles = tasks.flatMap((task) => task.files.map((f) => ({ fileName: f.fileName, documentType: 'fix', sizeBytes: f.sizeBytes })));
+  const baseFiles = submission?.files ?? [
     { fileName: `${invoice.invoiceNumber}.pdf`, documentType: 'invoice', sizeBytes: 184_220 },
     { fileName: `BOL-${invoice.referenceNumber}.pdf`, documentType: 'bol', sizeBytes: 402_918 },
     { fileName: `POD-${invoice.referenceNumber}.jpg`, documentType: 'pod', sizeBytes: 1_208_331 },
   ];
+  const files = [...baseFiles, ...fixFiles];
   const fields = { invoiceNumber: invoice.invoiceNumber, referenceNumber: invoice.referenceNumber, invoiceAmount: invoice.invoiceAmount, invoiceDate: invoice.invoiceDate.slice(0, 10) };
   return {
     id: submission?.submissionId ?? review?.submissionId ?? `demo-sub-${invoice.id}`,

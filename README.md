@@ -104,6 +104,14 @@ For sales demos, click **Load demo data** in the sidebar. That browser then sees
 
 Changing either `NEXT_PUBLIC_` setting needs a rebuild, because Next.js inlines those values into the browser bundle. The switch itself needs no rebuild.
 
+## Fix requests
+
+In the review queue, **Request fix…** sends the client a message (for example "Signed POD is missing") instead of rejecting. The client sees it on their dashboard and on the invoice, uploads the corrected paperwork, and it is attached to the same FactorCloud invoice through FactorCloud's add-documents endpoint. The item stays in the queue, marked "Waiting on client" and then "Client responded", until someone approves or rejects it. Fix requests need database sign-in; their tables are created automatically (or by `database/004_client_tasks.sql`). There are no email notifications yet; clients see requests when they open the portal.
+
+## Debtor credit check
+
+When a packet is verified, the portal reads the client–debtor credit terms from FactorCloud (`GET /clients/{client}/debtors/{debtor}`: `creditLimit`, `creditLimitApproved`) and adds up what that debtor still owes on the client's unpaid invoices. The submit page shows how much of the limit is in use and where this invoice lands. The invoice goes to review, not blocked, when it would pass the limit, when the limit isn't approved, or when FactorCloud marks the debtor as not approved for purchase. The check runs again with fresh balances at submit time. If FactorCloud can't be reached, the check is skipped rather than blocking.
+
 ## Extraction model
 
 The current default is `gemini-3.5-flash-lite` with minimal thinking. The extractor is isolated in `lib/extract.ts`, so the model can be changed with `EXTRACTION_MODEL` if real paperwork shows quality problems.

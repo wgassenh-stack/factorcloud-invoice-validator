@@ -131,4 +131,12 @@ describe('self-provisioned schema', () => {
     const migration = squash(readFileSync(new URL('../database/003_security_hardening.sql', import.meta.url), 'utf8'));
     for (const statement of SECURITY_SCHEMA_STATEMENTS) expect(migration).toContain(`${squash(statement)};`);
   });
+
+  it('matches database/004_client_tasks.sql', async () => {
+    const { readFileSync } = await import('fs');
+    const { WORKFLOW_SCHEMA_STATEMENTS } = await import('./schema');
+    const squash = (sql: string) => sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+    const migration = squash(readFileSync(new URL('../database/004_client_tasks.sql', import.meta.url), 'utf8'));
+    for (const statement of WORKFLOW_SCHEMA_STATEMENTS) expect(migration).toContain(`${squash(statement)};`);
+  });
 });

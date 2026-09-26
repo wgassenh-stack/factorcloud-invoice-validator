@@ -3,7 +3,8 @@ import { query } from '@/lib/db';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { getCompany } from '@/lib/factorcloud';
 import { requireFactorSession } from '@/lib/portal-auth';
-import { demoCompany, demoReviews } from '@/lib/demo-store';
+import { demoCompany, demoLatestTask, demoReviews } from '@/lib/demo-store';
+import { latestTasksBySubmission, type ClientTask } from '@/lib/client-tasks';
 import { demoRequest } from '@/lib/demo-request';
 
 export const runtime = 'nodejs';
@@ -51,6 +52,10 @@ export async function GET() {
       }
     }));
 
+    let tasks: Record<string, ClientTask> = {};
+    try { tasks = await latestTasksBySubmission(rows.map((row) => row.submission_id)); }
+    catch (err) { console.error('[ops-reviews] fix requests unavailable', err); }
+
     const records = rows.map((row) => ({
       id: row.factorcloud_invoice_id || row.submission_id,
       reviewId: row.review_id,
@@ -64,6 +69,7 @@ export async function GET() {
       reviewStatus: row.review_status,
       reason: row.reason,
       createdAt: new Date(row.created_at).toISOString(),
+      fix: fixSummary(tasks[row.submission_id]),
     }));
 
     return NextResponse.json({
@@ -94,9 +100,16 @@ function demoReviewList() {
       reason: review.reason,
       createdAt: review.createdAt,
       checks: review.checks,
+      fix: fixSummary(demoLatestTask(review.submissionId), demoLatestTask(review.submissionId)?.files.length),
     })),
     clientNames: Object.fromEntries(open.map((review) => [review.clientId, review.clientName])),
     debtorNames: Object.fromEntries(open.map((review) => [review.debtorId, demoCompany(review.debtorId)?.companyName ?? review.debtorId])),
     source: { note: 'Demo data. Review decisions are kept in memory for this demo only.' },
   };
+}
+
+/** What the queue needs to know about a fix request: waiting on the client, or answered. */
+function fixSummary(task: Pick<ClientTask, 'status' | 'message' | 'createdAt' | 'resolvedAt' | 'responseNote'> | null | undefined, fileCount?: number) {
+  if (!task || task.status === 'CANCELED') return null;
+  return { status: task.status, message: task.message, requestedAt: task.createdAt, answeredAt: task.resolvedAt, responseNote: task.responseNote, fileCount: fileCount ?? null };
 }

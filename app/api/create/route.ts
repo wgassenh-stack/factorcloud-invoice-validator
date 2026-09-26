@@ -13,6 +13,8 @@ import { apiErrorResponse, publicErrorMessage } from '@/lib/api-errors';
 import { isDefinitiveCreateFailure } from '@/lib/errors';
 import { currentPortalSession, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
+import { applyCreditCheck } from '@/lib/credit';
+import { loadDebtorCredit } from '@/lib/debtor-credit';
 import { recordDemoSubmission } from '@/lib/demo-store';
 import { persistSubmissionStart, markSubmissionFactorCloudResult, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
 import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
@@ -79,7 +81,8 @@ export async function POST(req: Request) {
   const originalPrimary = receipt.documents[receipt.primaryIndex].fields;
   const corrections = collectClientCorrections(originalPrimary, payload);
   const rawValidation = validate({ documents: receipt.documents, primaryIndex: receipt.primaryIndex, debtor, client });
-  let validation = addCorrectionReview(rawValidation, corrections);
+  // Credit is re-checked with fresh balances and the amount actually being submitted.
+  let validation = applyCreditCheck(addCorrectionReview(rawValidation, corrections), await loadDebtorCredit(clientId, debtor, amount));
   if (validation.status === 'FAIL') return NextResponse.json({ error: 'Validation failed. Fix the failed checks before submitting the invoice.', validation }, { status: 409 });
 
   let duplicateCheckComplete = true;

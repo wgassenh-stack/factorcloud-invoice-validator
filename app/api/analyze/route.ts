@@ -6,6 +6,8 @@ import { validate } from '@/lib/rules';
 import { addFileIntegrity, assertReceiptSigningConfigured, signAnalysisReceipt } from '@/lib/submission-integrity';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
+import { applyCreditCheck } from '@/lib/credit';
+import { loadDebtorCredit } from '@/lib/debtor-credit';
 import type { AnalyzeResponse, AnalyzedDocument, CompanyRecord } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -66,7 +68,8 @@ export async function POST(req: Request) {
       : 'FactorCloud is temporarily unavailable. The document-to-document checks below are still valid, but retry analysis before creating the invoice.');
   }
 
-  const validation = applyFactorCloudAvailability(validate({ documents, primaryIndex, debtor, client }), factorCloudLookupFailed);
+  const credit = debtor && !factorCloudLookupFailed ? await loadDebtorCredit(clientId, debtor, documents[primaryIndex].fields.invoiceAmount) : null;
+  const validation = applyCreditCheck(applyFactorCloudAvailability(validate({ documents, primaryIndex, debtor, client }), factorCloudLookupFailed), credit);
   let analysisReceipt: string;
   try {
     analysisReceipt = signAnalysisReceipt({ version: 1, clientId, debtorId: debtor?.id ?? null, primaryIndex, documents });
@@ -74,7 +77,7 @@ export async function POST(req: Request) {
     return apiErrorResponse(err, 'analyze');
   }
 
-  const body: AnalyzeResponse = { documents, primaryIndex, debtor, debtorMatch, client, factorCloudLookupFailed, validation, warnings, analysisReceipt };
+  const body: AnalyzeResponse = { documents, primaryIndex, debtor, debtorMatch, client, factorCloudLookupFailed, validation, warnings, analysisReceipt, credit };
   return NextResponse.json(body);
 }
 
