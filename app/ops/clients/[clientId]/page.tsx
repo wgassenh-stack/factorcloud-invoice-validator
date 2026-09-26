@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { OpsSignOut } from '../../../components/OpsSignOut';
+import { ViewSwitch } from '@/app/components/ViewSwitch';
 
 type InvoiceRecord = {
   id: string;
@@ -60,6 +61,7 @@ export default function FactorClientDetailPage() {
     <aside className="opsSidebar">
       <a className="opsBrand" href="/ops"><img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" /></a>
       <div className="opsRole">Factor Operations</div>
+      <ViewSwitch current="staff" />
       <nav className="opsNav">
         <a href="/ops">Overview</a>
         <a className="active" href="/ops">Clients</a>

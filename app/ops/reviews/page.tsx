@@ -5,6 +5,7 @@ import { OpsSignOut } from '../../components/OpsSignOut';
 import { CountUp, Skeleton, StatusFlag, VizEmpty } from '@/app/components/CommandCharts';
 import { DemoBadge } from '@/app/components/DemoBadge';
 import type { CheckResult } from '@/lib/types';
+import { ViewSwitch } from '@/app/components/ViewSwitch';
 
 type ReviewRecord = {
   id: string;
@@ -103,6 +104,7 @@ export default function ReviewQueuePage() {
     <aside className="opsSidebar">
       <a className="opsBrand" href="/ops"><img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" /></a>
       <div className="opsRole">Factor Operations</div>
+      <ViewSwitch current="staff" />
       <nav className="opsNav">
         <a href="/ops">Overview</a>
         <a href="/ops">Clients</a>

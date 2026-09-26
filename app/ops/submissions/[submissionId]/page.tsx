@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { OpsSignOut } from '@/app/components/OpsSignOut';
+import { ViewSwitch } from '@/app/components/ViewSwitch';
 
 type Submission = {
   id: string;
@@ -93,6 +94,7 @@ export default function OpsSubmissionDetailPage() {
     <aside className="opsSidebar">
       <a className="opsBrand" href="/ops"><img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" /></a>
       <div className="opsRole">Factor Operations</div>
+      <ViewSwitch current="staff" />
       <nav className="opsNav">
         <a href="/ops">Overview</a>
         <a href="/ops">Clients</a>
