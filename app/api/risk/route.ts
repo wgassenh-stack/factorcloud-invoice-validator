@@ -4,6 +4,9 @@ import { query } from '@/lib/db';
 import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { resolveConfiguredClientId } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
+import { buildAging, buildCashSummary, buildDsoTrend } from '@/lib/analytics';
+import { demoMode } from '@/lib/demo';
+import { demoReviews } from '@/lib/demo-store';
 import { databaseAuthEnabled } from '@/lib/session';
 
 export const runtime = 'nodejs';
@@ -43,10 +46,16 @@ export async function GET() {
       volumeSpikeRatio: numberEnv('RISK_VOLUME_SPIKE_RATIO', 1.5),
     };
 
-    const summary = summarizeRisk(records, debtorNames, new Date().toISOString().slice(0, 10), thresholds);
+    const today = new Date().toISOString().slice(0, 10);
+    const summary = summarizeRisk(records, debtorNames, today, thresholds);
     const portalWorkflows: Record<string, { workflowStatus: string; validationStatus: string; updatedAt: string }> = {};
 
-    if (databaseAuthEnabled() && records.length) {
+    if (demoMode()) {
+      for (const review of demoReviews()) {
+        if (review.clientId !== clientId) continue;
+        portalWorkflows[review.invoiceId] = { workflowStatus: review.status === 'OPEN' ? 'REVIEW_REQUIRED' : review.status, validationStatus: 'REVIEW', updatedAt: review.decidedAt ?? review.createdAt };
+      }
+    } else if (databaseAuthEnabled() && records.length) {
       const invoiceIds = records.map((record) => record.id).filter(Boolean);
       if (invoiceIds.length) {
         const rows = await query<WorkflowRow>(`
@@ -74,6 +83,11 @@ export async function GET() {
       records,
       portalWorkflows,
       thresholds,
+      cash: buildCashSummary(records, today),
+      debtorAging: buildAging(records, debtorNames, today, 'debtor', 5),
+      dso: buildDsoTrend(records, today, 6),
+      debtorNames,
+      demo: demoMode(),
       source: {
         clientId,
         clientName: client.companyName || client.compCode || 'FactorCloud client',

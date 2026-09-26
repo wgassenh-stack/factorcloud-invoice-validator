@@ -7,6 +7,8 @@ import './ops.css';
 import './detail.css';
 import './auth.css';
 import './dashboard.css';
+import './viz.css';
+import { DemoBadge } from './components/DemoBadge';
 
 export const metadata: Metadata = {
   title: 'FactorCloud Client Portal',
@@ -14,5 +16,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body>{children}</body></html>;
+  return <html lang="en"><body>{children}<DemoBadge floating /></body></html>;
 }

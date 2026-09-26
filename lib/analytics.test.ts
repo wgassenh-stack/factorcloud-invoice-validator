@@ -1,0 +1,57 @@
+import { describe, expect, it } from 'vitest';
+import { buildAging, buildCashSummary, buildDailyVolume, buildDsoTrend, buildExposure, buildKpis, buildMonthlyCash, lifecycleStage } from './analytics';
+import type { RiskInvoiceRecord } from './risk';
+
+const TODAY = '2026-09-25';
+const inv = (id: string, over: Partial<RiskInvoiceRecord>): RiskInvoiceRecord => ({
+  id, invoiceNumber: id, companyClientId: 'c1', companyDebtorId: 'd1', invoiceAmount: 1000, invoiceDate: '2026-09-20', status: 'FUNDED', ...over,
+});
+
+describe('portfolio analytics', () => {
+  const records = [
+    inv('fresh', { fundedDate: '2026-09-21', advanceAmount: 900, escrowReserveAmount: 100, purchaseFeeAmount: 20 }),
+    inv('old', { invoiceDate: '2026-06-01', fundedDate: '2026-06-02', invoiceBalance: 400, companyClientId: 'c2' }),
+    inv('paid', { invoiceDate: '2026-08-01', fundedDate: '2026-08-02', paidDate: '2026-09-10', status: 'PAID', advanceAmount: 900, purchaseFeeAmount: 30 }),
+    inv('pending', { status: 'PENDING', verificationStatus: 'PENDING' }),
+  ];
+
+  it('ages open funded balances into buckets by group', () => {
+    const aging = buildAging(records, { c1: 'One', c2: 'Two' }, TODAY);
+    expect(aging.totals).toEqual([1000, 0, 0, 400]);
+    expect(aging.rows.map((r) => r.label)).toEqual(['One', 'Two']);
+    expect(aging.openCount).toBe(2);
+  });
+
+  it('flags concentrated exposure', () => {
+    const exposure = buildExposure(records, {});
+    expect(exposure[0]).toMatchObject({ id: 'c1', level: 'HIGH' });
+    expect(exposure[0].share).toBeCloseTo(1000 / 1400);
+  });
+
+  it('places each invoice on the lifecycle', () => {
+    expect(records.map(lifecycleStage)).toEqual(['FUNDED', 'FUNDED', 'PAID', 'SUBMITTED']);
+    expect(lifecycleStage(inv('v', { status: 'APPROVED' }))).toBe('VERIFIED');
+  });
+
+  it('sums cash by month and days to pay', () => {
+    const cash = buildMonthlyCash(records, TODAY, 3);
+    expect(cash.map((m) => m.key)).toEqual(['2026-07', '2026-08', '2026-09']);
+    expect(cash[2]).toMatchObject({ advanced: 900, collected: 1000, fees: 30 });
+    expect(buildDsoTrend(records, TODAY, 1)[0].days).toBe(40);
+    expect(buildKpis(records, TODAY)).toMatchObject({ openBalance: 1400, fundedLast30: 900, collectedLast30: 1000, dsoLast90: 40 });
+  });
+
+  it('builds a calendar that ends today and starts on a Monday', () => {
+    const days = buildDailyVolume(records, TODAY, 2);
+    expect(days.at(-1)!.date).toBe(TODAY);
+    expect(new Date(`${days[0].date}T00:00:00Z`).getUTCDay()).toBe(1);
+    expect(days.find((d) => d.date === '2026-09-20')!.count).toBe(2);
+  });
+
+  it('summarizes a client cash picture', () => {
+    const summary = buildCashSummary(records, TODAY);
+    expect(summary.openBalance).toBe(1400);
+    expect(summary.reserveHeld).toBe(80);
+    expect(summary.pipeline.map((p) => p.count)).toEqual([1, 0, 2, 1]);
+  });
+});

@@ -88,6 +88,18 @@ Required for live FactorCloud comparisons/create:
 
 Interactive FactorCloud staff OTP login should remain disabled for client deployments.
 
+## Demo mode
+
+For sales demos, set `NEXT_PUBLIC_DEMO_MODE=true`. Every page then runs on a synthetic portfolio built in `lib/demo-data.ts`: 20 clients, 60 debtors and about 15 months of invoices. No other settings are needed; FactorCloud credentials, the database and `GEMINI_API_KEY` are all optional.
+
+- Nothing is sent to FactorCloud and nothing is written to the database. Creates, uploads and review decisions are kept in memory until the server restarts.
+- Every screen shows a "Demo data" badge.
+- The factor pages (`/ops`) are open without sign-in. `APP_ACCESS_PASSWORD` still puts the whole site behind a shared password.
+- Without `GEMINI_API_KEY`, document reading returns canned fields for Acme Manufacturing LLC. Files in one packet share the load number in their file names (for example `invoice-LD448213.png`), so a matching packet passes. Give one file a different number to show a mismatch being caught.
+- Planted stories: Acme Manufacturing holds about 42% of the portal client's volume, the portal client had a volume spike this week, it has open invoices past 90 days, Lone Star Haulers holds about 20% of the factor's open A/R, and days to collect improve over the year.
+
+Changing `NEXT_PUBLIC_DEMO_MODE` needs a rebuild, because Next.js inlines `NEXT_PUBLIC_` values into the browser bundle. Keep it off on any deployment that holds real data.
+
 ## Extraction model
 
 The current default is `gemini-3.5-flash-lite` with minimal thinking. The extractor is isolated in `lib/extract.ts`, so the model can be changed with `EXTRACTION_MODEL` if real paperwork shows quality problems.

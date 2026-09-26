@@ -5,6 +5,10 @@ import { ActivityTrendChart, RankBars, StatusDonut, money } from '@/app/componen
 import { DashboardViewSwitcher, type DashboardPreset, type DashboardWidgetOption } from '@/app/components/DashboardViews';
 import { OpsSignOut } from '../components/OpsSignOut';
 import type { ActivityPoint, StatusMixItem } from '@/lib/dashboard';
+import type { AgingSummary, DayVolume, DsoPoint, ExposureItem, MonthlyCash, PortfolioKpis } from '@/lib/analytics';
+import { AgingBars, CalendarHeatmap, CashFlowBars, CountUp, DashboardSkeleton, DsoLine, ExposureTreemap, compactMoney } from '@/app/components/CommandCharts';
+import { RoiPanel } from '@/app/components/RoiPanel';
+import { DemoBadge } from '@/app/components/DemoBadge';
 
 type OpsClientSummary = {
   clientId: string;
@@ -39,11 +43,23 @@ type OpsResponse = {
     recentInvoices: RecentInvoice[];
     reviewSummary: { openCount: number; openAmount: number; oldestCreatedAt: string | null };
   };
+  analytics: {
+    today: string;
+    kpis: PortfolioKpis;
+    aging: AgingSummary;
+    exposure: ExposureItem[];
+    monthlyCash: MonthlyCash[];
+    dso: DsoPoint[];
+    daily: DayVolume[];
+    invoicesLast30: number;
+  };
+  demo?: boolean;
   source: { returnedInvoiceCount: number; complete?: boolean; note: string };
   error?: string;
 };
 
 const FACTOR_PRESETS: DashboardPreset[] = [
+  { id: 'command', label: 'Command center', description: 'Exposure, aging, cash and collections', widgets: ['kpis', 'aging', 'exposure', 'cashflow', 'dso', 'calendar', 'reviews', 'roi'] },
   { id: 'executive', label: 'Executive', description: 'Portfolio health at a glance', widgets: ['metrics', 'volume', 'top-clients', 'status', 'reviews', 'clients'] },
   { id: 'portfolio', label: 'Portfolio', description: 'Client mix and activity concentration', widgets: ['metrics', 'volume', 'top-clients', 'clients'] },
   { id: 'operations', label: 'Operations', description: 'Reviews, status mix and recent work', widgets: ['metrics', 'reviews', 'status', 'recent', 'clients'] },
@@ -51,6 +67,13 @@ const FACTOR_PRESETS: DashboardPreset[] = [
 ];
 
 const FACTOR_WIDGETS: DashboardWidgetOption[] = [
+  { id: 'kpis', label: 'Portfolio KPIs', description: 'Open A/R, funded, collected, fees and days to collect' },
+  { id: 'aging', label: 'A/R aging', description: 'Open balances by age bucket and client' },
+  { id: 'exposure', label: 'Concentration map', description: 'Treemap of open exposure by client, with flags' },
+  { id: 'cashflow', label: 'Cash in vs. out', description: 'Monthly advances against collections' },
+  { id: 'dso', label: 'Days to collect', description: 'Monthly trend of days from invoice to payment' },
+  { id: 'calendar', label: 'Submission calendar', description: 'Daily invoice volume heatmap' },
+  { id: 'roi', label: 'Portal ROI', description: 'Estimated value of the portal from your volume' },
   { id: 'metrics', label: 'Key metrics', description: '30-day activity, clients, reviews and average invoice size' },
   { id: 'volume', label: 'Volume trend', description: 'Twelve weeks of factor-wide invoice activity' },
   { id: 'top-clients', label: 'Top clients', description: 'Clients ranked by invoice activity amount' },
@@ -110,7 +133,7 @@ export default function FactorOperationsPage() {
     <section className="opsContent">
       <header className="opsHeader dashboardHero opsDashboardHero">
         <div>
-          <div className="dashboardHeroMeta"><span className="eyebrow">Factor operations</span><span className="dashLiveBadge"><i />Live FactorCloud data</span></div>
+          <div className="dashboardHeroMeta"><span className="eyebrow">Factor operations</span>{data?.demo ? <DemoBadge /> : <span className="dashLiveBadge"><i />Live FactorCloud data</span>}</div>
           <h1>Portfolio command center</h1>
           <p>See client activity, review workload, and portfolio mix before drilling into the details.</p>
         </div>
@@ -127,7 +150,10 @@ export default function FactorOperationsPage() {
       {error && <div className="attentionSummary fail"><strong>Could not load operations data</strong><span>{error}</span></div>}
       {data?.source.complete === false && <div className="attentionSummary review"><strong>Portfolio totals may be incomplete</strong><span>{data.source.note}</span></div>}
 
+      {loading && !data && <DashboardSkeleton />}
+
       {data && <>
+        {show('kpis') && <KpiRow kpis={data.analytics.kpis} />}
         {show('metrics') && <section className="dashMetricGrid factorMetricGrid">
           <DashMetric icon="$" label="30-day activity" value={money(data.portfolio.last30Amount)} detail={trendCopy(data.portfolio.last30TrendPct, 'vs. prior 30 days')} trend={data.portfolio.last30TrendPct} />
           <DashMetric icon="C" label="Clients with activity" value={data.totals.clientCount} detail={`${data.totals.invoiceCount} invoices in loaded history`} />
@@ -137,6 +163,28 @@ export default function FactorOperationsPage() {
         </section>}
 
         <section className="dashBoard factorDashBoard">
+          {show('aging') && <DashboardCard className="dashSpan7" kicker="Receivables" title="A/R aging by client" action={<span className="dashCardHint">{data.analytics.aging.openCount} open invoices</span>}>
+            <AgingBars aging={data.analytics.aging} />
+          </DashboardCard>}
+
+          {show('exposure') && <DashboardCard className="dashSpan5" kicker="Concentration" title="Where the money is">
+            <ExposureTreemap items={data.analytics.exposure} hrefFor={(id) => `/ops/clients/${encodeURIComponent(id)}`} />
+          </DashboardCard>}
+
+          {show('cashflow') && <DashboardCard className="dashSpan7" kicker="Cash" title="Advanced vs. collected">
+            <div className="dashCardStatline"><strong>{compactMoney(data.analytics.monthlyCash.reduce((s, m) => s + m.fees, 0))}</strong><span>fees earned over twelve months</span></div>
+            <CashFlowBars months={data.analytics.monthlyCash} />
+          </DashboardCard>}
+
+          {show('dso') && <DashboardCard className="dashSpan5" kicker="Collections" title="Days to collect">
+            <div className="dashCardStatline"><strong>{data.analytics.kpis.dsoLast90 == null ? '-' : `${data.analytics.kpis.dsoLast90.toFixed(1)} days`}</strong><span>{dsoCopy(data.analytics.kpis)}</span></div>
+            <DsoLine points={data.analytics.dso} target={40} />
+          </DashboardCard>}
+
+          {show('calendar') && <DashboardCard className="dashSpan8" kicker="Activity" title="Submission calendar">
+            <CalendarHeatmap days={data.analytics.daily} />
+          </DashboardCard>}
+
           {show('volume') && <DashboardCard className="dashSpan8" kicker="Portfolio activity" title="Twelve-week invoice trend">
             <div className="dashCardStatline"><strong>{money(data.portfolio.weeklyActivity.reduce((sum, point) => sum + point.amount, 0))}</strong><span>{data.portfolio.weeklyActivity.reduce((sum, point) => sum + point.count, 0)} invoices across the last twelve calendar weeks</span></div>
             <ActivityTrendChart points={data.portfolio.weeklyActivity} />
@@ -163,6 +211,10 @@ export default function FactorOperationsPage() {
               </div>
               <a className="reviewQueueLink" href="/ops/reviews">Work the review queue <span>›</span></a>
             </div>
+          </DashboardCard>}
+
+          {show('roi') && <DashboardCard className="dashSpan12" kicker="Value" title="What the portal is worth">
+            <RoiPanel invoicesPerMonth={data.analytics.invoicesLast30} avgInvoice={data.portfolio.averageInvoiceAmount} flagRate={0.07} wide />
           </DashboardCard>}
 
           {show('recent') && <DashboardCard className="dashSpan8" kicker="Recent activity" title="Latest invoices across clients">
@@ -203,10 +255,27 @@ export default function FactorOperationsPage() {
           </section>}
         </section>
 
-        <p className="portalDataNote opsPortfolioNote">{data.source.note} Portfolio charts describe invoice activity, not true open A/R, cash position, or credit exposure.</p>
+        <p className="portalDataNote opsPortfolioNote">{data.source.note} Open A/R, aging and cash figures come from FactorCloud's balance, advance, reserve, funded and paid fields; invoices missing those fields drop out of those charts.</p>
       </>}
     </section>
   </main>;
+}
+
+function KpiRow({ kpis }: { kpis: PortfolioKpis }) {
+  const dsoTrend = kpis.dsoLast90 != null && kpis.dsoPrior90 ? ((kpis.dsoLast90 - kpis.dsoPrior90) / kpis.dsoPrior90) * 100 : null;
+  return <section className="dashMetricGrid factorMetricGrid">
+    <DashMetric icon="A/R" label="Open A/R" value={<CountUp value={kpis.openBalance} format={compactMoney} />} detail={`${kpis.openCount} funded invoices outstanding`} />
+    <DashMetric icon="↑" label="Advanced, 30 days" value={<CountUp value={kpis.fundedLast30} format={compactMoney} />} detail="Cash sent to clients" />
+    <DashMetric icon="↓" label="Collected, 30 days" value={<CountUp value={kpis.collectedLast30} format={compactMoney} />} detail="Payments received from debtors" tone="good" />
+    <DashMetric icon="$" label="Fees, 30 days" value={<CountUp value={kpis.feesLast30} format={compactMoney} />} detail="Earned on invoices paid" tone="good" />
+    <DashMetric icon="⏱" label="Days to collect" value={kpis.dsoLast90 == null ? '-' : <CountUp value={kpis.dsoLast90} format={(v) => `${v.toFixed(1)}d`} />} detail="Last 90 days, amount-weighted" trend={dsoTrend == null ? null : -dsoTrend} tone={dsoTrend != null && dsoTrend < 0 ? 'good' : ''} />
+  </section>;
+}
+
+function dsoCopy(kpis: PortfolioKpis): string {
+  if (kpis.dsoLast90 == null || kpis.dsoPrior90 == null) return 'last 90 days';
+  const delta = kpis.dsoLast90 - kpis.dsoPrior90;
+  return `last 90 days · ${Math.abs(delta).toFixed(1)} days ${delta <= 0 ? 'faster' : 'slower'} than the prior 90`;
 }
 
 function DashboardCard({ kicker, title, action, className = '', children }: { kicker: string; title: string; action?: React.ReactNode; className?: string; children: React.ReactNode }) {
@@ -216,7 +285,7 @@ function DashboardCard({ kicker, title, action, className = '', children }: { ki
   </section>;
 }
 
-function DashMetric({ icon, label, value, detail, trend, tone = '' }: { icon: string; label: string; value: string | number; detail: string; trend?: number | null; tone?: string }) {
+function DashMetric({ icon, label, value, detail, trend, tone = '' }: { icon: string; label: string; value: React.ReactNode; detail: string; trend?: number | null; tone?: string }) {
   return <div className={`dashMetric ${tone}`}>
     <div className="dashMetricTop"><span className="dashMetricIcon">{icon}</span>{trend != null && Number.isFinite(trend) && <span className={`dashMetricTrend ${trend >= 0 ? 'up' : 'down'}`}>{trend >= 0 ? '↗' : '↘'} {Math.abs(trend).toFixed(0)}%</span>}</div>
     <span className="dashMetricLabel">{label}</span>

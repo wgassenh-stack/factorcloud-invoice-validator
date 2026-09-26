@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   FC_DOCUMENT_TYPES,
+  allowedDebtorIds,
   attachDocuments,
   createInvoice,
   findExistingInvoice,
@@ -12,6 +13,8 @@ import { apiErrorResponse, publicErrorMessage } from '@/lib/api-errors';
 import { isDefinitiveCreateFailure } from '@/lib/errors';
 import { currentPortalSession, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
+import { demoMode } from '@/lib/demo';
+import { recordDemoSubmission } from '@/lib/demo-store';
 import { persistSubmissionStart, markSubmissionFactorCloudResult, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
 import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
 import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '@/lib/types';
@@ -39,7 +42,7 @@ export async function POST(req: Request) {
   catch { return NextResponse.json({ error: 'Missing payload.' }, { status: 400 }); }
 
   const files = form.getAll('files').filter((f): f is File => f instanceof File && f.size > 0);
-  const allowedDebtors = (process.env.FACTORCLOUD_DEBTOR_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const allowedDebtors = allowedDebtorIds();
   const amount = normalizeMoney(payload.invoiceAmount);
   const invoiceDate = normalizeDate(payload.invoiceDate);
   const problems: string[] = [];
@@ -174,6 +177,15 @@ export async function POST(req: Request) {
     }
   }
 
+  if (demoMode()) {
+    recordDemoSubmission({
+      invoiceId: invoiceId!,
+      clientId,
+      debtorId: payload.debtorId,
+      validation,
+      files: files.map((file, i) => ({ fileName: file.name, documentType: receipt.documents[i].fields.documentType, sizeBytes: file.size })),
+    });
+  }
   return respond(true);
 }
 

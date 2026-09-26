@@ -79,10 +79,11 @@ export function assertReceiptSigningConfigured(): void {
 
 /**
  * Receipts are signed with a dedicated secret only. There is deliberately no fallback to any other
- * setting: a shared or reused value would let anyone who knows it forge a "verified" packet.
+ * setting: a shared or reused value would let anyone who knows it forge a "verified" packet. The
+ * one exception is demo mode, which holds no real data and never reaches FactorCloud.
  */
 function signingSecret(): string {
-  const secret = process.env.PORTAL_SIGNING_SECRET;
+  const secret = process.env.PORTAL_SIGNING_SECRET || (process.env.NEXT_PUBLIC_DEMO_MODE === 'true' ? 'demo-mode-only-signing-secret' : undefined);
   if (!secret) throw new Error('PORTAL_SIGNING_SECRET is not configured.');
   return secret;
 }

@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { apiErrorResponse } from '@/lib/api-errors';
+import { demoMode } from '@/lib/demo';
+import { decideDemoReview } from '@/lib/demo-store';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +17,10 @@ export async function POST(req: Request, context: { params: Promise<{ reviewId: 
   if (!reviewId || !['APPROVE', 'REJECT'].includes(body.decision || '')) return NextResponse.json({ error: 'A valid review decision is required.' }, { status: 400 });
   const note = body.note?.trim() || null;
   if (body.decision === 'REJECT' && !note) return NextResponse.json({ error: 'A rejection reason is required for the audit trail.' }, { status: 400 });
+  if (demoMode()) {
+    const decided = decideDemoReview(reviewId, body.decision as 'APPROVE' | 'REJECT', note);
+    return decided ? NextResponse.json({ ok: true, status: decided.status }) : NextResponse.json({ error: 'Open review item not found.' }, { status: 404 });
+  }
 
   const client = await pool().connect();
   try {

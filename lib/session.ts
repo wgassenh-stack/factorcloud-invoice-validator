@@ -20,6 +20,8 @@ export interface PortalSession {
 export const PORTAL_SESSION_COOKIE = 'fc_portal_session';
 
 export function databaseAuthEnabled(): boolean {
+  // Demo mode never touches the database, whatever PORTAL_AUTH_MODE says.
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === 'true') return false;
   return process.env.PORTAL_AUTH_MODE === 'database';
 }
 

@@ -1,7 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { demoMode } from './lib/demo';
 import { databaseAuthEnabled, PORTAL_SESSION_COOKIE, verifyPortalSession } from './lib/session';
 
 export async function middleware(req: NextRequest) {
+  // Demo mode holds no real data, so client and factor pages are both open (behind the shared
+  // password when one is set).
+  if (demoMode()) return passwordGate(req);
   if (databaseAuthEnabled()) return databaseAuth(req);
   return pilotAuth(req);
 }
@@ -39,6 +43,10 @@ function pilotAuth(req: NextRequest) {
   if (isOpsPath(req.nextUrl.pathname)) {
     return NextResponse.json({ error: 'Factor operations require database authentication.' }, { status: 404 });
   }
+  return passwordGate(req);
+}
+
+function passwordGate(req: NextRequest) {
   const password = process.env.APP_ACCESS_PASSWORD;
   if (!password) {
     if (process.env.NODE_ENV === 'production') return new NextResponse('APP_ACCESS_PASSWORD is not configured.', { status: 503 });

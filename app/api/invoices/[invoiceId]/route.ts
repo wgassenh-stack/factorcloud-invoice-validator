@@ -5,6 +5,8 @@ import { currentPortalSession, resolveConfiguredClientId } from '@/lib/portal-au
 import { collectRiskInvoiceRecords } from '@/lib/risk';
 import { databaseAuthEnabled } from '@/lib/session';
 import { submissionDetailByInvoice } from '@/lib/submission-detail';
+import { demoMode } from '@/lib/demo';
+import { demoSubmissionDetail } from '@/lib/demo-store';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -33,7 +35,8 @@ export async function GET(_req: Request, context: { params: Promise<{ invoiceId:
     }
 
     let workflow = null;
-    if (databaseAuthEnabled()) {
+    if (demoMode()) workflow = demoSubmissionDetail({ invoiceId });
+    else if (databaseAuthEnabled()) {
       const session = await currentPortalSession();
       if (session) workflow = await submissionDetailByInvoice(session.factorId, clientId, invoiceId);
     }

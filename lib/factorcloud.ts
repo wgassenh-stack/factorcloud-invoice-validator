@@ -6,6 +6,8 @@ import { FactorCloudError } from './errors';
 import { collectInvoiceRecords, findToken, unwrapRecord } from './fc-response';
 import { normalizeIdentifier } from './normalize';
 import { scoreDebtor, type DebtorHints } from './matching';
+import { demoMode } from './demo';
+import { addDemoInvoice, demoCompany, demoDebtors, demoInvoice, demoInvoices, nextDemoDocumentId } from './demo-store';
 
 export const TOKEN_COOKIE = 'fc_token';
 export const INTERIM_COOKIE = 'fc_interim';
@@ -42,6 +44,8 @@ const TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
 const RETRY_DELAYS_MS = [350, 900];
 
 export async function fcRequest<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
+  // Demo mode must never reach a real FactorCloud; every caller has a demo branch above this.
+  if (demoMode()) throw new FactorCloudError('FactorCloud is not connected in demo mode.', 503, null);
   const { base, factorId } = config();
   const url = new URL(base + path);
   for (const [k, v] of Object.entries(opts.query ?? {})) url.searchParams.set(k, v);
@@ -118,6 +122,11 @@ export async function completeLogin(interimToken: string, otpCode: string): Prom
 }
 
 export async function getCompany(id: string): Promise<CompanyRecord> {
+  if (demoMode()) {
+    const company = demoCompany(id);
+    if (!company) throw new FactorCloudError(`Company ${id} not found.`, 404, null);
+    return company;
+  }
   const body = await fcRequest(`/companies/${encodeURIComponent(id)}`);
   const record = unwrapRecord(body, ['company']);
   if (!record) throw new FactorCloudError(`Company ${id} response had no record.`, 502, body);
@@ -128,8 +137,14 @@ function idList(value: string | undefined): string[] {
   return (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+/** The debtors this portal may submit invoices against. */
+export function allowedDebtorIds(): string[] {
+  if (demoMode()) return demoDebtors().map((debtor) => debtor.id);
+  return idList(process.env.FACTORCLOUD_DEBTOR_IDS);
+}
+
 export async function findDebtor(hints: DebtorHints): Promise<{ debtor: CompanyRecord; method: string; score: number } | null> {
-  const ids = idList(process.env.FACTORCLOUD_DEBTOR_IDS);
+  const ids = allowedDebtorIds();
   const settled = await Promise.allSettled(ids.map((id) => getCompany(id)));
   const candidates = settled.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
   if (!candidates.length && ids.length) {
@@ -184,6 +199,14 @@ export const MAX_INVOICE_PAGES = 200;
  * to decide whether the result can be trusted as the whole set.
  */
 export async function listInvoices(filter: InvoiceListQuery = {}): Promise<InvoiceListResult> {
+  if (demoMode()) {
+    const q = filter.q?.toLowerCase();
+    const invoices = demoInvoices().filter((invoice) =>
+      (!filter.client || invoice.companyClientId === filter.client)
+      && (!q || invoice.invoiceNumber.toLowerCase().includes(q) || invoice.referenceNumber.toLowerCase().includes(q)),
+    );
+    return { raw: [{ status: 'SUCCESS', code: 200, invoices }], complete: true, pages: 1 };
+  }
   const query: Record<string, string> = {};
   if (filter.client) query.client = filter.client;
   if (filter.q) query.q = filter.q;
@@ -238,6 +261,10 @@ function invoicePageItems(body: unknown): { id: string }[] {
 
 /** GET /invoices/{id}. Returns the raw response body, or null when FactorCloud has no such invoice. */
 export async function getInvoice(invoiceId: string): Promise<unknown | null> {
+  if (demoMode()) {
+    const invoice = demoInvoice(invoiceId);
+    return invoice ? { status: 'SUCCESS', code: 200, invoice } : null;
+  }
   try {
     return await fcRequest(`/invoices/${encodeURIComponent(invoiceId)}`);
   } catch (err) {
@@ -274,6 +301,10 @@ export async function findExistingInvoice(clientId: string, invoiceNumber: strin
 }
 
 export async function createInvoice(invoice: NewInvoice): Promise<{ id: string; raw: unknown }> {
+  if (demoMode()) {
+    const created = addDemoInvoice(invoice);
+    return { id: created.id, raw: { invoice: created } };
+  }
   const body = await fcRequest('/invoices', {
     method: 'POST',
     json: { ...invoice, invoiceDate: `${invoice.invoiceDate}T00:00:00Z`, dueDate: null },
@@ -288,6 +319,7 @@ export const FC_DOCUMENT_TYPES: Record<string, string> = {
 };
 
 export async function uploadDocument(clientId: string, file: File, type: string): Promise<{ id: string; type: string }> {
+  if (demoMode()) return { id: nextDemoDocumentId(), type };
   const attempt = async (t: string) => {
     const form = new FormData();
     form.append('file', file, file.name);
@@ -304,5 +336,6 @@ export async function uploadDocument(clientId: string, file: File, type: string)
 }
 
 export async function attachDocuments(invoiceId: string, documentIds: string[]): Promise<unknown> {
+  if (demoMode()) return { status: 'SUCCESS', invoiceId, documents: documentIds };
   return fcRequest(`/invoices/${encodeURIComponent(invoiceId)}`, { method: 'PUT', json: { documents: documentIds } });
 }

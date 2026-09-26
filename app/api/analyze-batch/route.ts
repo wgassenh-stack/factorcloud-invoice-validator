@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { groupIntoInvoicePackets } from '@/lib/batch';
 import { extractDocument, isSupportedFile } from '@/lib/extract';
-import { FactorCloudError, getCompany } from '@/lib/factorcloud';
+import { FactorCloudError, allowedDebtorIds, getCompany } from '@/lib/factorcloud';
 import { scoreDebtor } from '@/lib/matching';
 import { resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
   let debtorCandidates: CompanyRecord[] = [];
   let factorCloudLookupFailed = false;
   try {
-    const debtorIds = idList(process.env.FACTORCLOUD_DEBTOR_IDS);
+    const debtorIds = allowedDebtorIds();
     [client, debtorCandidates] = await Promise.all([getCompany(clientId), loadDebtorCandidates(debtorIds)]);
   } catch (err) {
     factorCloudLookupFailed = true;
@@ -121,10 +121,6 @@ function matchPacketDebtor(documents: AnalyzedDocument[], candidates: CompanyRec
     }
   }
   return best;
-}
-
-function idList(value: string | undefined): string[] {
-  return (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
 async function loadDebtorCandidates(ids: string[]): Promise<CompanyRecord[]> {
