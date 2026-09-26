@@ -90,7 +90,7 @@ Interactive FactorCloud staff OTP login should remain disabled for client deploy
 
 ## Demo mode
 
-For sales demos, click **Load demo data** in the sidebar. That browser then sees a synthetic portfolio built in `lib/demo-data.ts` (20 clients, 60 debtors, about 15 months of invoices) until you click it again; everyone else keeps seeing the real portal. When it is on, the sidebar also links to the factor view.
+For sales demos, click **Load demo data** in the sidebar. That browser then sees a synthetic portfolio built in `lib/demo-data.ts` (20 clients, 60 debtors, about 15 months of invoices) until you click it again; everyone else keeps seeing the real portal. While it is on, a **Client | Staff** switch at the top of the sidebar moves between the client portal and the factor view. The same switch appears for signed-in factor staff outside demo mode.
 
 - `NEXT_PUBLIC_DEMO_TOGGLE=false` hides the switch and makes the server ignore it. Set this on client-facing sites.
 - `NEXT_PUBLIC_DEMO_MODE=true` puts the whole site in demo mode, for a dedicated demo deployment. FactorCloud credentials, the database and `GEMINI_API_KEY` are then all optional.

@@ -343,3 +343,10 @@ button.reviewApprove:hover:not(:disabled) { background:#086b08; transform:transl
 .demoToggleText small { font-size:9px; color:#8b96a5; }
 .demoToggleLink { color:#f6c98f; font-size:10px; font-weight:800; text-decoration:none; padding-left:4px; }
 .demoToggleLink:hover { color:#fff; }
+
+/* Client | Staff view switch */
+.viewSwitch { display:grid; grid-template-columns:1fr 1fr; gap:3px; padding:3px; margin:14px 0 16px; border-radius:10px; background:#151a23; border:1px solid #252c36; }
+.viewSwitch a { padding:7px 0; border-radius:7px; text-align:center; color:#8b96a5; font-size:11px; font-weight:800; text-decoration:none; letter-spacing:.02em; transition:background .15s, color .15s; }
+.viewSwitch a:hover { color:#fff; }
+.viewSwitch a.active { background:#fff; color:#0b1220; box-shadow:0 1px 3px rgba(0,0,0,.3); }
+.opsRole + .viewSwitch { margin-top:-12px; }

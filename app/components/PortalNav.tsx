@@ -3,6 +3,7 @@
 import { portalConfig } from '@/lib/portal-config';
 import { SessionUser } from './SessionUser';
 import { DemoToggle } from './DemoToggle';
+import { ViewSwitch } from './ViewSwitch';
 
 type NavKey = 'home' | 'invoices' | 'submit' | 'batch' | 'risk';
 
@@ -19,6 +20,8 @@ export function PortalNav({ active }: { active: NavKey }) {
     <a className="portalBrand" href="/" aria-label="FactorCloud client portal home">
       <img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" />
     </a>
+
+    <ViewSwitch current="client" />
 
     <div className="portalNavLinks">
       {links.filter((link) => link.enabled).map((link) => <a key={link.key} className={active === link.key ? 'active' : ''} href={link.href}>

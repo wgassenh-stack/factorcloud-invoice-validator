@@ -9,6 +9,7 @@ import type { AgingSummary, DayVolume, DsoPoint, ExposureItem, MonthlyCash, Port
 import { AgingBars, CalendarHeatmap, CashFlowBars, CountUp, DashboardSkeleton, DsoLine, ExposureTreemap, compactMoney } from '@/app/components/CommandCharts';
 import { RoiPanel } from '@/app/components/RoiPanel';
 import { DemoBadge } from '@/app/components/DemoBadge';
+import { ViewSwitch } from '@/app/components/ViewSwitch';
 
 type OpsClientSummary = {
   clientId: string;
@@ -120,6 +121,7 @@ export default function FactorOperationsPage() {
     <aside className="opsSidebar">
       <a className="opsBrand" href="/ops"><img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" /></a>
       <div className="opsRole">Factor Operations</div>
+      <ViewSwitch current="staff" />
       <nav className="opsNav">
         <a className="active" href="/ops">Overview</a>
         <a href="#clients">Clients</a>

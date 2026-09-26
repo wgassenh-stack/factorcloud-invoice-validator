@@ -27,6 +27,5 @@ export function DemoToggle({ variant = 'nav' }: { variant?: 'nav' | 'ops' }) {
       <span className="demoToggleTrack"><i /></span>
       <span className="demoToggleText"><strong>{busy ? 'Switching…' : on ? 'Demo data on' : 'Load demo data'}</strong><small>{on ? 'Fake portfolio · click to exit' : 'Show a sample portfolio'}</small></span>
     </button>
-    {on && <a className="demoToggleLink" href={variant === 'ops' ? '/' : '/ops'}>{variant === 'ops' ? 'Open client portal view →' : 'Open factor view →'}</a>}
   </div>;
 }
