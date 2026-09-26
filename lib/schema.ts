@@ -37,13 +37,6 @@ export const WORKFLOW_SCHEMA_STATEMENTS = [
   resolved_at timestamptz
 )`,
   `create index if not exists client_tasks_client_open_idx on client_tasks (client_id, status, created_at desc)`,
-  `create table if not exists notification_log (
-  submission_id text not null references submissions(id) on delete cascade,
-  event text not null,
-  recipient text not null,
-  sent_at timestamptz not null default now(),
-  primary key (submission_id, event, recipient)
-)`,
 ];
 
 // Postgres errors raised when two processes create the same object at the same moment.
@@ -69,7 +62,7 @@ export function ensureWorkflowSchema(): Promise<void> {
 }
 
 async function provisionWorkflow(): Promise<void> {
-  const [state] = await query<{ ready: boolean }>(`select to_regclass('client_tasks') is not null and to_regclass('notification_log') is not null as ready`);
+  const [state] = await query<{ ready: boolean }>(`select to_regclass('client_tasks') is not null as ready`);
   if (state?.ready) return;
   await runStatements(WORKFLOW_SCHEMA_STATEMENTS, 'client task');
 }

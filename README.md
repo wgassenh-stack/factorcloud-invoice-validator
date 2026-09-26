@@ -104,16 +104,9 @@ For sales demos, click **Load demo data** in the sidebar. That browser then sees
 
 Changing either `NEXT_PUBLIC_` setting needs a rebuild, because Next.js inlines those values into the browser bundle. The switch itself needs no rebuild.
 
-## Fix requests and email notifications
+## Fix requests
 
-In the review queue, **Request fix…** sends the client a message (for example "Signed POD is missing") instead of rejecting. The client sees it on their dashboard and on the invoice, uploads the corrected paperwork, and it is attached to the same FactorCloud invoice through FactorCloud's add-documents endpoint. The item stays in the queue, marked "Waiting on client" and then "Client responded", until someone approves or rejects it. Fix requests need database sign-in; their tables are created automatically (or by `database/004_client_tasks.sql`).
-
-Emails go through [Resend](https://resend.com) when `RESEND_API_KEY` and `NOTIFY_FROM` are set, and are only logged otherwise:
-
-- to the client who submitted: fix requested, approved or rejected, funded, paid;
-- to `NOTIFY_STAFF_EMAIL`: a client answered a fix request.
-
-FactorCloud has no webhooks, so "funded" and "paid" are noticed when a dashboard loads fresh invoice data and by a daily job (`vercel.json`, protected by `CRON_SECRET`). Each email goes out once. Only events from the last 7 days are announced, so turning email on later doesn't send old history.
+In the review queue, **Request fix…** sends the client a message (for example "Signed POD is missing") instead of rejecting. The client sees it on their dashboard and on the invoice, uploads the corrected paperwork, and it is attached to the same FactorCloud invoice through FactorCloud's add-documents endpoint. The item stays in the queue, marked "Waiting on client" and then "Client responded", until someone approves or rejects it. Fix requests need database sign-in; their tables are created automatically (or by `database/004_client_tasks.sql`). There are no email notifications yet; clients see requests when they open the portal.
 
 ## Debtor credit check
 

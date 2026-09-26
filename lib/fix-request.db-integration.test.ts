@@ -28,14 +28,12 @@ describe.skipIf(!enabled)('request a fix (real SQL)', () => {
     Object.assign(process.env, {
       DATABASE_URL: process.env.TEST_DATABASE_URL, PORTAL_AUTH_MODE: 'database', AUTH_SESSION_SECRET: 'session-secret-for-integration',
       FACTORCLOUD_FACTOR_ID: 'fc-factor-1', FACTORCLOUD_CLIENT_ID: 'fc-client-1', FACTORCLOUD_BEARER_TOKEN: 'token', FACTORCLOUD_API_BASE: 'https://fc.test',
-      RESEND_API_KEY: 'test-key', NOTIFY_FROM: 'portal@factor.test', NOTIFY_STAFF_EMAIL: 'ops@factor.test',
     });
-    // Fake FactorCloud and Resend: record every call, answer like the documented APIs.
+    // Fake FactorCloud: record every call, answer like the documented API.
     vi.stubGlobal('fetch', vi.fn(async (input: URL | string, init?: RequestInit) => {
       const url = String(input);
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
       sent.push({ url, body });
-      if (url.startsWith('https://api.resend.com')) return new Response(JSON.stringify({ id: 'email-1' }), { status: 200 });
       if (url.startsWith('https://fc.test/documents')) return new Response(JSON.stringify({ document: { id: `doc-${sent.length}` } }), { status: 200 });
       if (url.includes('/documents')) return new Response(JSON.stringify({ status: 'SUCCESS' }), { status: 200 });
       if (url.includes('/companies/')) return new Response(JSON.stringify({ company: { id: 'fc-client-1', companyName: 'Client Co' } }), { status: 200 });
@@ -43,7 +41,6 @@ describe.skipIf(!enabled)('request a fix (real SQL)', () => {
     }));
     ({ query, pool } = await import('./db'));
     ({ signPortalSession: sign } = await import('./session'));
-    await query('drop table if exists notification_log');
     await query('drop table if exists client_tasks');
     await query('truncate audit_events, review_items, submission_files, submissions, user_client_access, portal_users, portal_clients, factors cascade');
     await query(`insert into factors (id, factorcloud_factor_id, name) values ('f1','fc-factor-1','F')`);
@@ -63,20 +60,16 @@ describe.skipIf(!enabled)('request a fix (real SQL)', () => {
     [{ id: reviewId }] = await query<{ id: string }>('select id from review_items where submission_id = $1', [submissionId]);
   });
 
-  it('staff request a fix: the review stays open, the client gets a task and an email', async () => {
+  it('staff request a fix: the review stays open and the client gets a task', async () => {
     await asStaff();
     const { POST } = await import('../app/api/ops/reviews/[reviewId]/route');
     const res = await POST(json({ decision: 'REQUEST_FIX', note: 'Signed POD is missing.' }), { params: Promise.resolve({ reviewId }) });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ status: 'FIX_REQUESTED', emailed: 'sent' });
+    expect(await res.json()).toMatchObject({ status: 'FIX_REQUESTED' });
     const [review] = await query<{ status: string }>('select status from review_items where id = $1', [reviewId]);
     const [sub] = await query<{ workflow_status: string }>('select workflow_status from submissions where id = $1', [submissionId]);
     expect(review.status).toBe('OPEN');
     expect(sub.workflow_status).toBe('REVIEW_REQUIRED');
-    const email = sent.find((call) => call.url.startsWith('https://api.resend.com'))!.body as { to: string[]; subject: string; text: string };
-    expect(email.to).toEqual(['client@x.com']);
-    expect(email.subject).toBe('Action needed on invoice INV-77');
-    expect(email.text).toContain('Signed POD is missing.');
   });
 
   it('the client sees the task, and a different client cannot answer it', async () => {
@@ -106,7 +99,6 @@ describe.skipIf(!enabled)('request a fix (real SQL)', () => {
     const calls = sent.slice(before);
     expect(calls.find((c) => c.url.startsWith('https://fc.test/documents'))!.url).toContain('type=POD');
     expect(calls.find((c) => c.url === 'https://fc.test/invoices/fc-inv-77/documents')!.body).toEqual({ documentIds: [expect.stringMatching(/^doc-/)] });
-    expect((calls.find((c) => c.url.startsWith('https://api.resend.com'))!.body as { to: string[] }).to).toEqual(['ops@factor.test']);
 
     const [row] = await query<{ status: string; response_note: string }>('select status, response_note from client_tasks where id = $1', [task.id]);
     expect(row).toEqual({ status: 'DONE', response_note: 'Signed POD attached' });
@@ -129,17 +121,6 @@ describe.skipIf(!enabled)('request a fix (real SQL)', () => {
     const { POST } = await import('../app/api/ops/reviews/[reviewId]/route');
     const res = await POST(json({ decision: 'APPROVE' }), { params: Promise.resolve({ reviewId }) });
     expect(await res.json()).toMatchObject({ status: 'APPROVED' });
-  });
-
-  it('emails "funded" once per invoice', async () => {
-    const { notifyInvoiceProgress } = await import('./progress-notify');
-    const today = new Date().toISOString().slice(0, 10);
-    const record = { id: 'fc-inv-77', invoiceNumber: 'INV-77', companyClientId: 'fc-client-1', companyDebtorId: 'd1', invoiceAmount: 500, invoiceDate: today, status: 'FUNDED', fundedDate: today, advanceAmount: 450 };
-    expect(await notifyInvoiceProgress([record])).toBe(1);
-    expect(await notifyInvoiceProgress([record])).toBe(0);
-    const email = sent.filter((c) => c.url.startsWith('https://api.resend.com')).at(-1)!.body as { subject: string; text: string };
-    expect(email.subject).toBe('Invoice INV-77 was funded');
-    expect(email.text).toContain('$450.00');
   });
 
   afterAll(async () => {

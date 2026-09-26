@@ -6,8 +6,7 @@ import { pool } from '@/lib/db';
 import { demoRequest } from '@/lib/demo-request';
 import { demoSubmitFix } from '@/lib/demo-store';
 import { isSupportedFile } from '@/lib/extract';
-import { addDocumentsToInvoice, FC_DOCUMENT_TYPES, getCompany, uploadDocument } from '@/lib/factorcloud';
-import { emails, sendEmail } from '@/lib/notify';
+import { addDocumentsToInvoice, FC_DOCUMENT_TYPES, uploadDocument } from '@/lib/factorcloud';
 import { requirePortalSession, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { hashFile } from '@/lib/submission-integrity';
 
@@ -86,10 +85,5 @@ export async function POST(req: Request, context: { params: Promise<{ taskId: st
     db.release();
   }
 
-  const staff = process.env.NOTIFY_STAFF_EMAIL;
-  if (staff) {
-    const client = await getCompany(clientId).catch(() => null);
-    await sendEmail(emails.fixSubmitted({ to: staff, invoiceNumber: task.invoiceNumber ?? task.invoiceId, clientName: client?.companyName ?? 'A client', fileCount: files.length, note, submissionId: task.submissionId }));
-  }
   return NextResponse.json({ ok: true, documentIds });
 }

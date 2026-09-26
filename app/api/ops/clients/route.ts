@@ -8,7 +8,6 @@ import { summarizeClients } from '@/lib/ops';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
 import { demoReviews } from '@/lib/demo-store';
-import { notifyInvoiceProgress } from '@/lib/progress-notify';
 import { demoRequest } from '@/lib/demo-request';
 
 export const runtime = 'nodejs';
@@ -37,7 +36,6 @@ export async function GET() {
     }));
     const clientNames = Object.fromEntries(names);
 
-    await notifyInvoiceProgress(records).catch((err) => console.error('[ops-clients] progress emails failed', err));
     const clients = summarizeClients(records, clientNames);
     const totalAmount = clients.reduce((sum, client) => sum + client.invoiceAmount, 0);
     const totalInvoices = clients.reduce((sum, client) => sum + client.invoiceCount, 0);

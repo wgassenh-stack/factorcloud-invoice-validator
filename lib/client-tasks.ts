@@ -84,10 +84,3 @@ export async function latestTasksBySubmission(submissionIds: string[]): Promise<
     order by t.submission_id, t.created_at desc`, [submissionIds]);
   return Object.fromEntries(rows.map((row) => [row.submission_id, toTask(row)]));
 }
-
-/** Email of the portal user who submitted a submission, if known. */
-export async function submitterEmail(submissionId: string): Promise<string | null> {
-  const rows = await query<{ email: string | null }>(`
-    select u.email from submissions s join portal_users u on u.id = s.submitted_by_user_id where s.id = $1`, [submissionId]);
-  return rows[0]?.email ?? null;
-}

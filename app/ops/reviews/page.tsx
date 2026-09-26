@@ -83,7 +83,7 @@ export default function ReviewQueuePage() {
       const label = record.invoiceNumber || record.id.slice(0, 8);
       if (decision === 'REQUEST_FIX') {
         // The item stays in the queue, now marked as waiting on the client.
-        setToast({ tone: 'pass', text: `Fix requested on ${label}${body.emailed === 'sent' ? ' · client emailed' : ''}` });
+        setToast({ tone: 'pass', text: `Fix requested on ${label}` });
         setTimeout(() => setToast(null), 3200);
         await load();
         return;

@@ -6,8 +6,6 @@ import { apiErrorResponse } from '@/lib/api-errors';
 import { decideDemoReview, demoRequestFix } from '@/lib/demo-store';
 import { demoRequest } from '@/lib/demo-request';
 import { ensureWorkflowSchema } from '@/lib/schema';
-import { submitterEmail } from '@/lib/client-tasks';
-import { emails, sendEmail } from '@/lib/notify';
 
 export const runtime = 'nodejs';
 
@@ -28,7 +26,7 @@ export async function POST(req: Request, context: { params: Promise<{ reviewId: 
 
   if (await demoRequest()) {
     const done = decision === 'REQUEST_FIX' ? demoRequestFix(reviewId, note!) : decideDemoReview(reviewId, decision, note);
-    return done ? NextResponse.json({ ok: true, status: decision === 'REQUEST_FIX' ? 'FIX_REQUESTED' : done.status, emailed: 'demo' }) : NextResponse.json({ error: 'Open review item not found.' }, { status: 404 });
+    return done ? NextResponse.json({ ok: true, status: decision === 'REQUEST_FIX' ? 'FIX_REQUESTED' : done.status }) : NextResponse.json({ error: 'Open review item not found.' }, { status: 404 });
   }
 
   try { await ensureWorkflowSchema(); }
@@ -82,18 +80,5 @@ export async function POST(req: Request, context: { params: Promise<{ reviewId: 
     client.release();
   }
 
-  // Tell the client. The decision is already saved, so an email problem only gets logged.
-  let emailed: string = 'skipped';
-  try {
-    const to = await submitterEmail(found.submission_id);
-    if (to) {
-      const invoiceNumber = found.invoice_number_submitted ?? 'your invoice';
-      emailed = await sendEmail(decision === 'REQUEST_FIX'
-        ? emails.fixRequested({ to, invoiceNumber, message: note!, invoiceId: found.factorcloud_invoice_id })
-        : emails.reviewDecided({ to, invoiceNumber, approved: decision === 'APPROVE', note, invoiceId: found.factorcloud_invoice_id }));
-    }
-  } catch (err) {
-    console.error('[ops-review-decision] notification failed', err);
-  }
-  return NextResponse.json({ ok: true, status: decision === 'REQUEST_FIX' ? 'FIX_REQUESTED' : decision === 'APPROVE' ? 'APPROVED' : 'REJECTED', emailed });
+  return NextResponse.json({ ok: true, status: decision === 'REQUEST_FIX' ? 'FIX_REQUESTED' : decision === 'APPROVE' ? 'APPROVED' : 'REJECTED' });
 }

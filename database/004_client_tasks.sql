@@ -1,4 +1,4 @@
--- Client tasks ("request a fix") and a notification log. Idempotent, like the other migration files.
+-- Client tasks ("request a fix"). Idempotent, like the other migration files.
 -- The app also creates these objects itself on first use (lib/schema.ts), so running this file is
 -- optional. Keep the two in sync; lib/security-hardening.test.ts checks that they match.
 
@@ -20,12 +20,3 @@ create table if not exists client_tasks (
 );
 
 create index if not exists client_tasks_client_open_idx on client_tasks (client_id, status, created_at desc);
-
--- One row per email sent for a submission event, so progress emails (funded, paid) go out once.
-create table if not exists notification_log (
-  submission_id text not null references submissions(id) on delete cascade,
-  event text not null,
-  recipient text not null,
-  sent_at timestamptz not null default now(),
-  primary key (submission_id, event, recipient)
-);
