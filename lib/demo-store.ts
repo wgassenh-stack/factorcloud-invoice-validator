@@ -92,7 +92,7 @@ export function addDemoInvoice(input: { invoiceNumber: string; referenceNumber: 
     paidDate: null,
     dueDate: new Date(Date.parse(`${input.invoiceDate}T00:00:00Z`) + 30 * 86_400_000).toISOString(),
     status: 'PENDING',
-    verificationStatus: 'PENDING',
+    verificationStatus: 'NOT_VERIFIED',
     paymentStatus: 'OPEN',
     disputed: false,
     notes: input.notes,

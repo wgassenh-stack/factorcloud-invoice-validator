@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAging, buildCashSummary, buildDailyVolume, buildDsoTrend, buildExposure, buildKpis, buildMonthlyCash, lifecycleStage } from './analytics';
+import { buildAging, buildCashSummary, buildDailyVolume, buildDsoTrend, buildExposure, buildKpis, buildMonthlyCash, isPaid, lifecycleStage, openBalance } from './analytics';
 import type { RiskInvoiceRecord } from './risk';
 
 const TODAY = '2026-09-25';
@@ -53,5 +53,18 @@ describe('portfolio analytics', () => {
     expect(summary.openBalance).toBe(1400);
     expect(summary.reserveHeld).toBe(80);
     expect(summary.pipeline.map((p) => p.count)).toEqual([1, 0, 2, 1]);
+  });
+
+  it('reads FactorCloud status values whole, not as substrings', () => {
+    expect(lifecycleStage(inv('nv', { status: 'PENDING', verificationStatus: 'NOT_VERIFIED' }))).toBe('SUBMITTED');
+    expect(lifecycleStage(inv('need', { status: 'NEED_VERIFIED', verificationStatus: 'PENDING' }))).toBe('SUBMITTED');
+    expect(lifecycleStage(inv('denied', { status: 'HELD', verificationStatus: 'DENIED' }))).toBe('SUBMITTED');
+    expect(lifecycleStage(inv('ver', { status: 'PENDING', verificationStatus: 'VERIFIED' }))).toBe('VERIFIED');
+    expect(lifecycleStage(inv('purch', { status: 'PURCHASED' }))).toBe('FUNDED');
+    expect(isPaid(inv('unpaid', { status: 'FUNDED', paymentStatus: 'Unpaid' }))).toBe(false);
+    expect(isPaid(inv('open', { status: 'FUNDED', paymentStatus: 'Open' }))).toBe(false);
+    expect(isPaid(inv('paid', { status: 'FUNDED', paymentStatus: 'Paid' }))).toBe(true);
+    expect(openBalance(inv('rej', { status: 'REJECTED' }))).toBe(0);
+    expect(buildCashSummary([inv('rej', { status: 'REJECTED' }), inv('can', { status: 'CANCELED' })], TODAY).pipeline.every((p) => p.count === 0)).toBe(true);
   });
 });

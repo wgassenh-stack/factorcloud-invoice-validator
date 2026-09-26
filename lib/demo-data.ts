@@ -26,7 +26,7 @@ export interface DemoInvoice {
   paidDate: string | null;
   dueDate: string;
   status: 'PENDING' | 'APPROVED' | 'FUNDED' | 'PAID';
-  verificationStatus: 'PENDING' | 'VERIFIED';
+  verificationStatus: 'NOT_VERIFIED' | 'VERIFIED';
   paymentStatus: 'OPEN' | 'PARTIAL' | 'PAID';
   disputed: boolean;
   notes: string | null;
@@ -206,7 +206,7 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
       paidDate: paid ? `${iso(daysAgo - lag)}T00:00:00Z` : null,
       dueDate: `${iso(daysAgo - (spec.kind === 'staffing' ? 45 : 30))}T00:00:00Z`,
       status: paid ? 'PAID' : status,
-      verificationStatus: status === 'PENDING' ? 'PENDING' : 'VERIFIED',
+      verificationStatus: status === 'PENDING' ? 'NOT_VERIFIED' : 'VERIFIED',
       paymentStatus: paid ? 'PAID' : partial ? 'PARTIAL' : 'OPEN',
       disputed: Boolean(opts.disputed) || (funded && !paid && daysAgo > 30 && rng() < 0.04),
       notes: null,
