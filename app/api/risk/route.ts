@@ -5,9 +5,9 @@ import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { resolveConfiguredClientId } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
 import { buildAging, buildCashSummary, buildDsoTrend } from '@/lib/analytics';
-import { demoMode } from '@/lib/demo';
 import { demoReviews } from '@/lib/demo-store';
 import { databaseAuthEnabled } from '@/lib/session';
+import { demoRequest } from '@/lib/demo-request';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -50,7 +50,7 @@ export async function GET() {
     const summary = summarizeRisk(records, debtorNames, today, thresholds);
     const portalWorkflows: Record<string, { workflowStatus: string; validationStatus: string; updatedAt: string }> = {};
 
-    if (demoMode()) {
+    if (await demoRequest()) {
       for (const review of demoReviews()) {
         if (review.clientId !== clientId) continue;
         portalWorkflows[review.invoiceId] = { workflowStatus: review.status === 'OPEN' ? 'REVIEW_REQUIRED' : review.status, validationStatus: 'REVIEW', updatedAt: review.decidedAt ?? review.createdAt };
@@ -87,7 +87,7 @@ export async function GET() {
       debtorAging: buildAging(records, debtorNames, today, 'debtor', 5),
       dso: buildDsoTrend(records, today, 6),
       debtorNames,
-      demo: demoMode(),
+      demo: (await demoRequest()),
       source: {
         clientId,
         clientName: client.companyName || client.compCode || 'FactorCloud client',

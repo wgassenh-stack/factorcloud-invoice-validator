@@ -1,13 +1,13 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { TOKEN_COOKIE } from '@/lib/factorcloud';
-import { demoMode } from '@/lib/demo';
+import { demoRequest } from '@/lib/demo-request';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  if (demoMode()) {
+  if (await demoRequest()) {
     return NextResponse.json({
       demo: true,
       factorCloud: { signedIn: true, source: 'demo', canSignIn: false, factorId: true, clientId: true, debtorCount: 60 },

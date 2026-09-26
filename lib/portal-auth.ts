@@ -3,9 +3,10 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { query } from './db';
 import { PublicError } from './errors';
-import { DEMO_CLIENT_ID, demoMode } from './demo';
+import { DEMO_CLIENT_ID } from './demo';
 import { DEMO_SESSION } from './demo-store';
 import { databaseAuthEnabled, PORTAL_SESSION_COOKIE, sessionMismatch, verifyPortalSession, type PortalRole, type PortalSession, type SessionAccountState } from './session';
+import { demoRequest } from './demo-request';
 
 type UserRow = {
   id: string;
@@ -35,7 +36,7 @@ export async function currentPortalSession(): Promise<PortalSession | null> {
  * their next request instead of when the 8-hour session cookie expires.
  */
 export async function requirePortalSession(): Promise<PortalSession> {
-  if (demoMode()) return DEMO_SESSION;
+  if (await demoRequest()) return DEMO_SESSION;
   const session = await currentPortalSession();
   if (!session) throw new PortalAccessError('Portal authentication required.', 401);
   const mismatch = sessionMismatch(session, await loadAccountState(session.userId));
@@ -69,7 +70,7 @@ async function loadAccountState(userId: string): Promise<SessionAccountState | n
 
 /** Factor staff only. Fails closed: without database authentication there are no roles, so no access. */
 export async function requireFactorSession(): Promise<PortalSession> {
-  if (demoMode()) return DEMO_SESSION;
+  if (await demoRequest()) return DEMO_SESSION;
   if (!databaseAuthEnabled()) throw new PortalAccessError('Factor operations require database authentication.', 404);
   const session = await requirePortalSession();
   if (session.role === 'CLIENT_USER') throw new PortalAccessError('Factor access required.', 403);
@@ -77,7 +78,7 @@ export async function requireFactorSession(): Promise<PortalSession> {
 }
 
 export async function resolveConfiguredClientId(): Promise<string> {
-  if (demoMode()) return DEMO_CLIENT_ID;
+  if (await demoRequest()) return DEMO_CLIENT_ID;
   const configured = process.env.FACTORCLOUD_CLIENT_ID;
   if (!databaseAuthEnabled()) {
     if (!configured) throw new PortalAccessError('FACTORCLOUD_CLIENT_ID is not configured.', 500);

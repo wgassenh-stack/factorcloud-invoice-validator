@@ -62,7 +62,7 @@ export async function POST(req: Request) {
   let debtorCandidates: CompanyRecord[] = [];
   let factorCloudLookupFailed = false;
   try {
-    const debtorIds = allowedDebtorIds();
+    const debtorIds = await allowedDebtorIds();
     [client, debtorCandidates] = await Promise.all([getCompany(clientId), loadDebtorCandidates(debtorIds)]);
   } catch (err) {
     factorCloudLookupFailed = true;

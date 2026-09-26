@@ -90,15 +90,19 @@ Interactive FactorCloud staff OTP login should remain disabled for client deploy
 
 ## Demo mode
 
-For sales demos, set `NEXT_PUBLIC_DEMO_MODE=true`. Every page then runs on a synthetic portfolio built in `lib/demo-data.ts`: 20 clients, 60 debtors and about 15 months of invoices. No other settings are needed; FactorCloud credentials, the database and `GEMINI_API_KEY` are all optional.
+For sales demos, click **Load demo data** in the sidebar. That browser then sees a synthetic portfolio built in `lib/demo-data.ts` (20 clients, 60 debtors, about 15 months of invoices) until you click it again; everyone else keeps seeing the real portal. When it is on, the sidebar also links to the factor view.
+
+- `NEXT_PUBLIC_DEMO_TOGGLE=false` hides the switch and makes the server ignore it. Set this on client-facing sites.
+- `NEXT_PUBLIC_DEMO_MODE=true` puts the whole site in demo mode, for a dedicated demo deployment. FactorCloud credentials, the database and `GEMINI_API_KEY` are then all optional.
+- The switch is a browser cookie that only swaps real data for fake data. It never signs anyone in: with database sign-in you still sign in first, and with the shared password the password still applies. Without database sign-in the factor pages open only while demo data is on.
 
 - Nothing is sent to FactorCloud and nothing is written to the database. Creates, uploads and review decisions are kept in memory until the server restarts.
 - Every screen shows a "Demo data" badge.
-- The factor pages (`/ops`) are open without sign-in. `APP_ACCESS_PASSWORD` still puts the whole site behind a shared password.
+- With `NEXT_PUBLIC_DEMO_MODE=true`, the factor pages (`/ops`) are open without sign-in. `APP_ACCESS_PASSWORD` still puts the whole site behind a shared password.
 - Without `GEMINI_API_KEY`, document reading returns canned fields for Acme Manufacturing LLC. Files in one packet share the load number in their file names (for example `invoice-LD448213.png`), so a matching packet passes. Give one file a different number to show a mismatch being caught.
 - Planted stories: Acme Manufacturing holds about 42% of the portal client's volume, the portal client had a volume spike this week, it has open invoices past 90 days, Lone Star Haulers holds about 20% of the factor's open A/R, and days to collect improve over the year.
 
-Changing `NEXT_PUBLIC_DEMO_MODE` needs a rebuild, because Next.js inlines `NEXT_PUBLIC_` values into the browser bundle. Keep it off on any deployment that holds real data.
+Changing either `NEXT_PUBLIC_` setting needs a rebuild, because Next.js inlines those values into the browser bundle. The switch itself needs no rebuild.
 
 ## Extraction model
 

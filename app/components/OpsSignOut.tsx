@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { DemoToggle } from './DemoToggle';
 
 export function OpsSignOut() {
   const [signingOut, setSigningOut] = useState(false);
@@ -14,7 +15,10 @@ export function OpsSignOut() {
     }
   }
 
-  return <button type="button" className="opsSignOut" onClick={() => void logout()} disabled={signingOut}>
-    {signingOut ? 'Signing out...' : 'Sign out'}
-  </button>;
+  return <>
+    <DemoToggle variant="ops" />
+    <button type="button" className="opsSignOut" onClick={() => void logout()} disabled={signingOut}>
+      {signingOut ? 'Signing out...' : 'Sign out'}
+    </button>
+  </>;
 }

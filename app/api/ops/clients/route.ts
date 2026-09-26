@@ -7,8 +7,8 @@ import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { summarizeClients } from '@/lib/ops';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
-import { demoMode } from '@/lib/demo';
 import { demoReviews } from '@/lib/demo-store';
+import { demoRequest } from '@/lib/demo-request';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -45,7 +45,7 @@ export async function GET() {
     const topClient = [...clients].sort((a, b) => b.invoiceAmount - a.invoiceAmount)[0];
 
     let reviewSummary = { openCount: 0, openAmount: 0, oldestCreatedAt: null as string | null };
-    if (demoMode()) {
+    if (await demoRequest()) {
       const open = demoReviews().filter((review) => review.status === 'OPEN');
       reviewSummary = {
         openCount: open.length,
@@ -109,7 +109,7 @@ export async function GET() {
         daily: buildDailyVolume(records, today),
         invoicesLast30: periodCount(records, 30),
       },
-      demo: demoMode(),
+      demo: (await demoRequest()),
       source: {
         returnedInvoiceCount: records.length,
         complete: list.complete,
