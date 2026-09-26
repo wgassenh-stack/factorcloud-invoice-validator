@@ -7,7 +7,6 @@ import { OpsSignOut } from '../components/OpsSignOut';
 import type { ActivityPoint, StatusMixItem } from '@/lib/dashboard';
 import type { AgingSummary, DayVolume, DsoPoint, ExposureItem, MonthlyCash, PortfolioKpis } from '@/lib/analytics';
 import { AgingBars, CalendarHeatmap, CashFlowBars, CountUp, DashboardSkeleton, DsoLine, ExposureTreemap, compactMoney } from '@/app/components/CommandCharts';
-import { RoiPanel } from '@/app/components/RoiPanel';
 import { DemoBadge } from '@/app/components/DemoBadge';
 import { ViewSwitch } from '@/app/components/ViewSwitch';
 
@@ -52,7 +51,6 @@ type OpsResponse = {
     monthlyCash: MonthlyCash[];
     dso: DsoPoint[];
     daily: DayVolume[];
-    invoicesLast30: number;
   };
   demo?: boolean;
   source: { returnedInvoiceCount: number; complete?: boolean; note: string };
@@ -60,7 +58,7 @@ type OpsResponse = {
 };
 
 const FACTOR_PRESETS: DashboardPreset[] = [
-  { id: 'command', label: 'Command center', description: 'Exposure, aging, cash and collections', widgets: ['kpis', 'aging', 'exposure', 'cashflow', 'dso', 'calendar', 'reviews', 'roi'] },
+  { id: 'command', label: 'Command center', description: 'Exposure, aging, cash and collections', widgets: ['kpis', 'aging', 'exposure', 'cashflow', 'dso', 'calendar', 'reviews'] },
   { id: 'executive', label: 'Executive', description: 'Portfolio health at a glance', widgets: ['metrics', 'volume', 'top-clients', 'status', 'reviews', 'clients'] },
   { id: 'portfolio', label: 'Portfolio', description: 'Client mix and activity concentration', widgets: ['metrics', 'volume', 'top-clients', 'clients'] },
   { id: 'operations', label: 'Operations', description: 'Reviews, status mix and recent work', widgets: ['metrics', 'reviews', 'status', 'recent', 'clients'] },
@@ -74,7 +72,6 @@ const FACTOR_WIDGETS: DashboardWidgetOption[] = [
   { id: 'cashflow', label: 'Cash in vs. out', description: 'Monthly advances against collections' },
   { id: 'dso', label: 'Days to collect', description: 'Monthly trend of days from invoice to payment' },
   { id: 'calendar', label: 'Submission calendar', description: 'Daily invoice volume heatmap' },
-  { id: 'roi', label: 'Portal ROI', description: 'Estimated value of the portal from your volume' },
   { id: 'metrics', label: 'Key metrics', description: '30-day activity, clients, reviews and average invoice size' },
   { id: 'volume', label: 'Volume trend', description: 'Twelve weeks of factor-wide invoice activity' },
   { id: 'top-clients', label: 'Top clients', description: 'Clients ranked by invoice activity amount' },
@@ -213,10 +210,6 @@ export default function FactorOperationsPage() {
               </div>
               <a className="reviewQueueLink" href="/ops/reviews">Work the review queue <span>›</span></a>
             </div>
-          </DashboardCard>}
-
-          {show('roi') && <DashboardCard className="dashSpan12" kicker="Value" title="What the portal is worth">
-            <RoiPanel invoicesPerMonth={data.analytics.invoicesLast30} avgInvoice={data.portfolio.averageInvoiceAmount} flagRate={0.07} wide />
           </DashboardCard>}
 
           {show('recent') && <DashboardCard className="dashSpan8" kicker="Recent activity" title="Latest invoices across clients">
