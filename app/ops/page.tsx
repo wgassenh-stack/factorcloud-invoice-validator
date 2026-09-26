@@ -122,9 +122,9 @@ export default function FactorOperationsPage() {
       <nav className="opsNav">
         <a className="active" href="/ops">Overview</a>
         <a href="#clients">Clients</a>
+        <a href="/ops/debtors">Debtors</a>
         <a href="/ops/reviews">Review queue</a>
-        <span>Alerts</span>
-        <span>Configuration</span>
+        <a href="/connection">Connection check</a>
       </nav>
       <div className="opsSidebarFooter"><strong>Internal view</strong><span>Factor-wide access</span><OpsSignOut /></div>
     </aside>

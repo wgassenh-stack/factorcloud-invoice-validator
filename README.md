@@ -112,6 +112,27 @@ In the review queue, **Request fix…** sends the client a message (for example 
 
 When a packet is verified, the portal reads the client–debtor credit terms from FactorCloud (`GET /clients/{client}/debtors/{debtor}`: `creditLimit`, `creditLimitApproved`) and adds up what that debtor still owes on the client's unpaid invoices. The submit page shows how much of the limit is in use and where this invoice lands. The invoice goes to review, not blocked, when it would pass the limit, when the limit isn't approved, or when FactorCloud marks the debtor as not approved for purchase. The check runs again with fresh balances at submit time. If FactorCloud can't be reached, the check is skipped rather than blocking.
 
+## Connection check
+
+`/connection` runs a read-only tour of every FactorCloud call the portal uses. It covers:
+
+- sign-in and the client record;
+- the invoice list (every page) and one invoice in detail;
+- credit terms for the busiest debtor;
+- the matchable debtors.
+
+It also shows how much of the invoice data comes back filled in, and which statuses FactorCloud actually sends. **Copy report** gives a plain-text summary that contains no secrets. Nothing is created or changed. Creating invoices and attaching documents are deliberately not exercised; submit one test invoice to confirm those. With database sign-in it is for factor staff; with the shared password, the link sits at the bottom of the client sidebar.
+
+## Debtors view
+
+`/ops/debtors` ranks debtors across all clients by open balance. Each debtor shows:
+
+- how old its open balance is;
+- how much is past 90 days;
+- its amount-weighted days to pay over the last 180 days;
+- how many clients it owes;
+- flags for concentration, 90+ day balances, slow payers and disputes.
+
 ## Extraction model
 
 The current default is `gemini-3.5-flash-lite` with minimal thinking. The extractor is isolated in `lib/extract.ts`, so the model can be changed with `EXTRACTION_MODEL` if real paperwork shows quality problems.
