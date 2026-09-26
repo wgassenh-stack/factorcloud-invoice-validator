@@ -20,7 +20,6 @@ export const SECURITY_SCHEMA_STATEMENTS = [
   `create index if not exists auth_throttle_updated_idx on auth_throttle (updated_at)`,
 ];
 
-// Postgres errors raised when two processes create the same object at the same moment.
 export const WORKFLOW_SCHEMA_STATEMENTS = [
   `create table if not exists client_tasks (
   id text primary key,
@@ -47,6 +46,7 @@ export const WORKFLOW_SCHEMA_STATEMENTS = [
 )`,
 ];
 
+// Postgres errors raised when two processes create the same object at the same moment.
 const ALREADY_EXISTS = new Set(['42P07', '42701', '23505']);
 
 let ensured: Promise<void> | null = null;
