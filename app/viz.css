@@ -156,40 +156,12 @@
   .vizLine { stroke-dashoffset:0; }
 }
 
-/* ROI */
-.roiPanel { display:grid; gap:16px; }
-.roiHero { display:grid; gap:3px; padding:18px; border-radius:14px; background:linear-gradient(135deg,#0d366b 0%,#1c5cab 55%,#2a78d6 100%); color:#fff; position:relative; overflow:hidden; }
-.roiHero::after { content:''; position:absolute; right:-40px; top:-60px; width:200px; height:200px; border-radius:50%; background:radial-gradient(circle,rgba(255,255,255,.18),transparent 70%); }
-.roiHero>span { font-size:10px; text-transform:uppercase; letter-spacing:.08em; font-weight:800; opacity:.85; }
-.roiPanel .roiHero>strong { font-size:34px; letter-spacing:-.03em; line-height:1.1; }
-.roiHero small { font-size:11px; opacity:.85; }
-.roiStats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
-.roiStats div { display:grid; gap:2px; padding:10px; border:1px solid #eef0f2; border-radius:11px; background:#fbfbfa; }
-.roiPanel .roiStats strong { font-size:20px; letter-spacing:-.02em; }
-.roiPanel .roiStats div>span { font-size:10px; color:var(--viz-muted); line-height:1.3; }
-.roiInputs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px 16px; }
-.roiSlider { display:grid; gap:6px; }
-.roiSlider>span { display:flex; justify-content:space-between; gap:8px; font-size:11px; }
-.roiSlider em { font-style:normal; color:var(--viz-secondary); font-weight:650; }
-.roiSlider b { font-variant-numeric:tabular-nums; }
-.roiSlider input[type=range] { -webkit-appearance:none; appearance:none; width:100%; height:6px; margin:0; padding:0; border:0; border-radius:6px; background:linear-gradient(90deg,#2a78d6 var(--pct),#e6e8eb var(--pct)); }
-.roiSlider input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:#fff; border:2px solid #2a78d6; box-shadow:0 2px 6px rgba(0,0,0,.15); cursor:pointer; }
-.roiSlider input[type=range]::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:#fff; border:2px solid #2a78d6; cursor:pointer; }
-.roiNote { margin:0; color:var(--viz-muted); font-size:10px; }
-@media (max-width: 760px) { .roiInputs, .roiStats { grid-template-columns:1fr; } }
 
 .dashSpan5 { grid-column:span 5; }
 .dashSpan7 { grid-column:span 7; }
 .dashCardHint { color:var(--viz-muted); font-size:10px; font-weight:700; }
 @media (max-width: 1100px) { .dashSpan5, .dashSpan7 { grid-column:1/-1; } }
 
-.roiPanel.wide { grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) minmax(0,1.3fr); align-items:start; }
-.roiPanel.wide .roiNote { grid-column:1/-1; }
-.roiPanel.wide .roiStats { grid-template-columns:1fr; }
-.roiPanel.wide .roiStats div { grid-template-columns:auto 1fr; align-items:center; gap:10px; }
-.roiPanel.wide .roiInputs { grid-template-columns:1fr; }
-@media (max-width: 1100px) { .roiPanel.wide { grid-template-columns:1fr; } .roiPanel.wide .roiStats { grid-template-columns:repeat(3,minmax(0,1fr)); } .roiPanel.wide .roiStats div { grid-template-columns:1fr; } }
-@media (max-width: 760px) { .roiPanel.wide .roiStats { grid-template-columns:1fr; } }
 
 /* Client cash panel & stages */
 .cashPanel { display:grid; gap:14px; }

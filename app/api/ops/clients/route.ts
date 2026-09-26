@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { buildAging, buildDailyVolume, buildDsoTrend, buildExposure, buildKpis, buildMonthlyCash } from '@/lib/analytics';
-import { averageInvoiceAmount, buildStatusMix, buildWeeklyActivity, periodAmount, periodCount, trendPercent } from '@/lib/dashboard';
+import { averageInvoiceAmount, buildStatusMix, buildWeeklyActivity, periodAmount, trendPercent } from '@/lib/dashboard';
 import { query } from '@/lib/db';
 import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { summarizeClients } from '@/lib/ops';
@@ -109,7 +109,6 @@ export async function GET() {
         monthlyCash: buildMonthlyCash(records, today),
         dso: buildDsoTrend(records, today),
         daily: buildDailyVolume(records, today),
-        invoicesLast30: periodCount(records, 30),
       },
       demo: (await demoRequest()),
       source: {
