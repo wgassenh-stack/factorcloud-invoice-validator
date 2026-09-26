@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PortalNav } from '@/app/components/PortalNav';
 import { ProcessingTheater, type TheaterPhase } from '@/app/components/ProcessingTheater';
+import { CameraCapture } from '@/app/components/CameraCapture';
 import { validate } from '@/lib/rules';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
 import type { AnalyzeResponse, CreateResponse, ExtractedFields, ValidationReport } from '@/lib/types';
@@ -50,6 +51,13 @@ export default function SubmitInvoicePage() {
       }, ...base.checks],
     };
   }, [analysis, clientCorrections]);
+
+  function chooseFiles(next: File[]) {
+    setFiles(next);
+    setAnalysis(null);
+    setOriginalPrimary(null);
+    setCreateResult(null);
+  }
 
   async function analyze() {
     setBusy('Analyzing documents');
@@ -189,16 +197,19 @@ export default function SubmitInvoicePage() {
               multiple
               accept="application/pdf,image/png,image/jpeg,image/gif,image/webp"
               disabled={submitted}
-              onChange={(event) => {
-                setFiles(Array.from(event.target.files ?? []));
-                setAnalysis(null);
-                setOriginalPrimary(null);
-                setCreateResult(null);
-              }}
+              onChange={(event) => chooseFiles(Array.from(event.target.files ?? []))}
             />
             <strong>{files.length ? `${files.length} file${files.length === 1 ? '' : 's'} selected` : 'Drop documents here'}</strong>
             <span>{files.length ? files.map((file) => file.name).join(', ') : 'PDF, PNG, JPEG, GIF, or WebP'}</span>
           </label>
+          <CameraCapture count={files.filter((file) => file.name.startsWith('photo-')).length} disabled={submitted || Boolean(busy)} onCapture={(photo) => chooseFiles([...files, photo])} />
+          {files.length > 0 && !submitted && <ul className="fileChips">
+            {files.map((file, index) => <li key={`${file.name}-${index}`}>
+              <span title={file.name}>{file.name}</span>
+              <small>{file.size >= 1024 * 1024 ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`}</small>
+              <button type="button" aria-label={`Remove ${file.name}`} disabled={Boolean(busy)} onClick={() => chooseFiles(files.filter((_, i) => i !== index))}>×</button>
+            </li>)}
+          </ul>}
           <button onClick={analyze} disabled={!files.length || Boolean(busy) || submitted}>
             {busy === 'Analyzing documents' ? 'Verifying...' : submitted ? 'Submitted' : 'Verify documents'}
           </button>
