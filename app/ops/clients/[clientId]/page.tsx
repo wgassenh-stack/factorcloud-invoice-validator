@@ -80,7 +80,10 @@ export default function FactorClientDetailPage() {
           <h1>{data?.client.name || 'Client'}</h1>
           <p>{data ? [data.client.code, data.client.city, data.client.state].filter(Boolean).join(' · ') || data.client.id : 'Loading FactorCloud client data...'}</p>
         </div>
-        <button className="small opsRefresh" onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
+        <div className="opsHeaderActions">
+          <a className="secondaryLink" href={`/statements?client=${encodeURIComponent(clientId)}`}>Statement</a>
+          <button className="small opsRefresh" onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
+        </div>
       </header>
 
       {error && <div className="attentionSummary fail"><strong>Could not load client</strong><span>{error}</span></div>}

@@ -363,3 +363,35 @@ button.reviewApprove:hover:not(:disabled) { background:#086b08; transform:transl
 .fileChips small { color:var(--viz-muted); font-size:10px; }
 .fileChips button { width:26px; height:26px; margin:0; padding:0; border-radius:7px; background:#fff; border:1px solid #e3e7ec; color:#6b7280; font-size:15px; line-height:1; }
 .fileChips button:hover:not(:disabled) { color:var(--viz-critical); border-color:#f1b5b5; }
+
+/* Statements */
+.statementHero .portalWelcomeActions { align-items:flex-end; flex-wrap:wrap; }
+.statementHero button.primaryLink, .statementHero button.secondaryLink { width:auto; margin:0; cursor:pointer; font:inherit; font-weight:800; }
+.statementMonth { display:grid; gap:4px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--viz-muted); }
+.statementMonth select { min-width:170px; padding:10px 12px; border:1px solid #d5dce5; border-radius:10px; background:#fff; font:inherit; font-size:14px; font-weight:700; color:var(--viz-ink); text-transform:none; letter-spacing:0; }
+.statementSummary { display:grid; grid-template-columns:1.4fr repeat(5,minmax(0,1fr)); gap:10px; margin:0 0 16px; }
+.statementTotal { display:grid; gap:3px; padding:16px; border-radius:14px; background:linear-gradient(135deg,#0d366b,#2a78d6); color:#fff; }
+.statementTotal>span { font-size:10px; text-transform:uppercase; letter-spacing:.08em; font-weight:800; opacity:.85; }
+.statementTotal>strong { font-size:26px; letter-spacing:-.02em; }
+.statementTotal>small { font-size:10px; opacity:.85; }
+.statementCell { display:grid; gap:3px; align-content:start; padding:14px; border:1px solid #e5e9ef; border-radius:14px; background:#fff; }
+.statementCell span { font-size:10px; text-transform:uppercase; letter-spacing:.06em; font-weight:800; color:var(--viz-muted); }
+.statementCell strong { font-size:17px; font-variant-numeric:tabular-nums; }
+.statementCell small { font-size:10px; color:var(--viz-secondary); }
+.statementTable .num { text-align:right; font-variant-numeric:tabular-nums; }
+.statementTable tfoot td { border-top:2px solid #d9dde3; font-weight:800; }
+.statementTable a { color:#1779ba; font-weight:700; text-decoration:none; }
+.statementKind { display:inline-flex; padding:3px 8px; border-radius:999px; font-size:10px; font-weight:800; }
+.statementKind.funded { background:#eaf2fc; color:#1c5cab; }
+.statementKind.paid { background:#fdf0ea; color:#9a4214; }
+.opsHeaderActions { display:flex; align-items:center; gap:8px; }
+@media (max-width: 1100px) { .statementSummary { grid-template-columns:repeat(3,minmax(0,1fr)); } .statementTotal { grid-column:1/-1; } }
+@media (max-width: 600px) { .statementSummary { grid-template-columns:1fr 1fr; } }
+@media print {
+  .portalNav, .noPrint, .demoRibbon, .portalWelcomeActions, .vizTable summary { display:none !important; }
+  body, .portalShell { background:#fff !important; }
+  .portalShell { padding:0 !important; margin:0 !important; }
+  .statementPage .dashCard, .statementCell { box-shadow:none !important; animation:none !important; break-inside:avoid; }
+  .statementTotal { background:#fff !important; color:#000 !important; border:2px solid #000; }
+  .statementSummary { grid-template-columns:repeat(3,1fr); }
+}
