@@ -327,3 +327,19 @@ button.reviewApprove:hover:not(:disabled) { background:#086b08; transform:transl
 .reviewToast b { width:22px; height:22px; border-radius:50%; display:grid; place-items:center; background:#0a8a0a; }
 .reviewToast.fail b { background:var(--viz-critical); }
 @media (max-width: 760px) { .reviewCard { grid-template-columns:1fr; } .reviewCardSide { justify-items:stretch; } .reviewQueueHeader { flex-direction:column; align-items:stretch; } }
+
+/* Demo switch */
+.demoToggle { display:grid; gap:6px; margin:8px 0; }
+.demoToggle button { width:100%; margin:0; display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:10px; border:1px solid #252c36; background:#10151d; color:#c9d1db; text-align:left; cursor:pointer; transition:background .15s, border-color .15s; }
+.demoToggle button:hover:not(:disabled) { background:#161c26; border-color:#3a4350; }
+.demoToggle button:disabled { cursor:default; opacity:.85; }
+.demoToggle.on button { border-color:#7a4a1c; background:#1d1610; }
+.demoToggleTrack { position:relative; width:30px; height:17px; flex:none; border-radius:999px; background:#3a4350; transition:background .2s; }
+.demoToggleTrack i { position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%; background:#fff; transition:transform .2s var(--viz-ease); }
+.demoToggle.on .demoToggleTrack { background:var(--viz-orange); }
+.demoToggle.on .demoToggleTrack i { transform:translateX(13px); }
+.demoToggleText { display:grid; gap:1px; min-width:0; }
+.demoToggleText strong { font-size:11px; color:#f3f5f7; }
+.demoToggleText small { font-size:9px; color:#8b96a5; }
+.demoToggleLink { color:#f6c98f; font-size:10px; font-weight:800; text-decoration:none; padding-left:4px; }
+.demoToggleLink:hover { color:#fff; }

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { demoMode } from './lib/demo';
+import { DEMO_COOKIE, demoFromCookie, demoMode } from './lib/demo';
 import { databaseAuthEnabled, PORTAL_SESSION_COOKIE, verifyPortalSession } from './lib/session';
 
 export async function middleware(req: NextRequest) {
@@ -7,7 +7,7 @@ export async function middleware(req: NextRequest) {
   // password when one is set).
   if (demoMode()) return passwordGate(req);
   if (databaseAuthEnabled()) return databaseAuth(req);
-  return pilotAuth(req);
+  return pilotAuth(req, demoFromCookie(req.cookies.get(DEMO_COOKIE)?.value));
 }
 
 async function databaseAuth(req: NextRequest) {
@@ -37,10 +37,11 @@ async function databaseAuth(req: NextRequest) {
   return NextResponse.next();
 }
 
-function pilotAuth(req: NextRequest) {
+function pilotAuth(req: NextRequest, demo: boolean) {
   // Factor operations show every client's data, so they need per-user roles. Without database
   // authentication they are switched off entirely rather than left open to the shared password.
-  if (isOpsPath(req.nextUrl.pathname)) {
+  // A browser in demo mode may open them: every ops API answers demo requests with fake data only.
+  if (isOpsPath(req.nextUrl.pathname) && !demo) {
     return NextResponse.json({ error: 'Factor operations require database authentication.' }, { status: 404 });
   }
   return passwordGate(req);

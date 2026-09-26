@@ -2,13 +2,14 @@ import { NextResponse } from 'next/server';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { currentValidPortalSession } from '@/lib/portal-auth';
 import { databaseAuthEnabled } from '@/lib/session';
-import { demoMode } from '@/lib/demo';
 import { DEMO_SESSION } from '@/lib/demo-store';
+import { demoRequest } from '@/lib/demo-request';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
-  if (demoMode()) {
+  // With real sign-in the signed-in user stays shown (and can sign out) while demo data is on.
+  if (!databaseAuthEnabled() && await demoRequest()) {
     return NextResponse.json({ mode: 'demo', authenticated: true, user: { email: DEMO_SESSION.email, displayName: DEMO_SESSION.displayName, role: DEMO_SESSION.role, clients: DEMO_SESSION.clients } });
   }
   if (!databaseAuthEnabled()) return NextResponse.json({ mode: 'pilot', authenticated: false });

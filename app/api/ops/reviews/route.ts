@@ -3,8 +3,8 @@ import { query } from '@/lib/db';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { getCompany } from '@/lib/factorcloud';
 import { requireFactorSession } from '@/lib/portal-auth';
-import { demoMode } from '@/lib/demo';
 import { demoCompany, demoReviews } from '@/lib/demo-store';
+import { demoRequest } from '@/lib/demo-request';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -29,7 +29,7 @@ type DbReviewRow = {
 export async function GET() {
   try {
     const session = await requireFactorSession();
-    if (demoMode()) return NextResponse.json(demoReviewList());
+    if (await demoRequest()) return NextResponse.json(demoReviewList());
     const rows = await query<DbReviewRow>(`
       select r.id as review_id, r.submission_id, s.factorcloud_invoice_id, s.invoice_number_submitted,
         s.debtor_factorcloud_id, s.invoice_amount_submitted, s.invoice_date_submitted, s.workflow_status,

@@ -4,10 +4,10 @@ import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { z } from 'zod';
 import type { ExtractedFields, ExtractionUsage } from './types';
 import { normalizeDate, normalizeMoney } from './normalize';
-import { demoMode } from './demo';
 import { demoExtraction } from './demo-data';
 import { demoHeadlineDebtor, demoToday } from './demo-store';
 import { portalConfig } from './portal-config';
+import { demoRequest } from './demo-request';
 
 const PRIMARY_MODEL = process.env.EXTRACTION_MODEL || 'gemini-3.5-flash-lite';
 const THINKING = process.env.EXTRACTION_THINKING || 'minimal';
@@ -127,7 +127,7 @@ function pricingFor(model: string): { input: number; output: number } | null {
 
 export async function extractDocument(file: File): Promise<{ fields: ExtractedFields; usage: ExtractionUsage }> {
   // Demo mode without an extraction key: canned fields, with a pause so the processing view plays.
-  if (demoMode() && !(process.env.GEMINI_API_KEY || process.env.AI_API_KEY)) {
+  if ((await demoRequest()) && !(process.env.GEMINI_API_KEY || process.env.AI_API_KEY)) {
     await new Promise((resolve) => setTimeout(resolve, 1400 + Math.random() * 900));
     return demoExtraction(file.name, demoToday(), portalConfig.clientName, demoHeadlineDebtor());
   }

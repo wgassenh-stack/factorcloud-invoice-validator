@@ -13,11 +13,11 @@ import { apiErrorResponse, publicErrorMessage } from '@/lib/api-errors';
 import { isDefinitiveCreateFailure } from '@/lib/errors';
 import { currentPortalSession, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
-import { demoMode } from '@/lib/demo';
 import { recordDemoSubmission } from '@/lib/demo-store';
 import { persistSubmissionStart, markSubmissionFactorCloudResult, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
 import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
 import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '@/lib/types';
+import { demoRequest } from '@/lib/demo-request';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
   catch { return NextResponse.json({ error: 'Missing payload.' }, { status: 400 }); }
 
   const files = form.getAll('files').filter((f): f is File => f instanceof File && f.size > 0);
-  const allowedDebtors = allowedDebtorIds();
+  const allowedDebtors = await allowedDebtorIds();
   const amount = normalizeMoney(payload.invoiceAmount);
   const invoiceDate = normalizeDate(payload.invoiceDate);
   const problems: string[] = [];
@@ -96,9 +96,11 @@ export async function POST(req: Request) {
   // Could not read FactorCloud's invoice list to the end: submit, but flag for a person to confirm.
   if (!duplicateCheckComplete) validation = addDuplicateCheckReview(validation);
 
-  const session = await currentPortalSession();
+  // Demo submissions stay in memory: nothing is written to the portal database.
+  const demo = await demoRequest();
+  const session = demo ? null : await currentPortalSession();
   let storedSubmission: StoredSubmission | null = null;
-  try {
+  if (!demo) try {
     storedSubmission = await persistSubmissionStart({
       session,
       factorCloudClientId: clientId,
@@ -177,7 +179,7 @@ export async function POST(req: Request) {
     }
   }
 
-  if (demoMode()) {
+  if (demo) {
     recordDemoSubmission({
       invoiceId: invoiceId!,
       clientId,

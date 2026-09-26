@@ -2,6 +2,7 @@
 
 import { portalConfig } from '@/lib/portal-config';
 import { SessionUser } from './SessionUser';
+import { DemoToggle } from './DemoToggle';
 
 type NavKey = 'home' | 'invoices' | 'submit' | 'batch' | 'risk';
 
@@ -28,6 +29,7 @@ export function PortalNav({ active }: { active: NavKey }) {
 
     <div className="portalNavFooter">
       <div className="portalClientBadge"><span className="portalClientInitial">{portalConfig.clientShortName.charAt(0).toUpperCase()}</span><div><strong>{portalConfig.clientShortName}</strong><small>{portalConfig.environmentLabel}</small></div></div>
+      <DemoToggle />
       <SessionUser />
       <div className="portalPowered">Powered by FactorCloud</div>
     </div>
