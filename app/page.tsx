@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityTrendChart, RankBars, StatusDonut, money } from '@/app/components/DashboardCharts';
 import { DashboardViewSwitcher, type DashboardPreset, type DashboardWidgetOption } from '@/app/components/DashboardViews';
 import { PortalNav } from '@/app/components/PortalNav';
-import { averageInvoiceAmount, buildStatusMix, buildWeeklyActivity, periodAmount, trendPercent } from '@/lib/dashboard';
+import { buildStatusMix, buildWeeklyActivity, periodAmount, trendPercent } from '@/lib/dashboard';
 import { portalConfig } from '@/lib/portal-config';
 import { lifecycleStage, type AgingSummary, type CashSummary, type DsoPoint } from '@/lib/analytics';
 import type { RiskInvoiceRecord } from '@/lib/risk';
@@ -61,7 +61,7 @@ type PortalData = {
 };
 
 const CLIENT_PRESETS: DashboardPreset[] = [
-  { id: 'overview', label: 'Overview', description: 'The full client picture', widgets: ['metrics', 'pipeline', 'cash', 'trend', 'status', 'recent', 'alerts', 'concentration', 'quick-actions'] },
+  { id: 'overview', label: 'Overview', description: 'Your money and what needs you', widgets: ['metrics', 'pipeline', 'cash', 'debtor-aging', 'attention', 'recent', 'quick-actions'] },
   { id: 'cash', label: 'Cash', description: 'Funding, reserves and collections', widgets: ['metrics', 'pipeline', 'cash', 'debtor-aging', 'dso'] },
   { id: 'activity', label: 'Activity', description: 'Invoice pace and statuses', widgets: ['metrics', 'trend', 'status', 'recent'] },
   { id: 'debtors', label: 'Debtors', description: 'Concentration and exceptions', widgets: ['metrics', 'concentration', 'alerts', 'status'] },
@@ -70,10 +70,11 @@ const CLIENT_PRESETS: DashboardPreset[] = [
 
 const CLIENT_WIDGETS: DashboardWidgetOption[] = [
   { id: 'pipeline', label: 'Invoice pipeline', description: 'Submitted, verified, funded and paid at a glance' },
-  { id: 'cash', label: 'Cash panel', description: 'Advances, reserve held and expected releases' },
+  { id: 'cash', label: 'Where your money is', description: 'Paid to you, the fee and the reserve coming back' },
+  { id: 'attention', label: 'Needs attention', description: 'Late payers, slow approvals and rejected invoices' },
   { id: 'debtor-aging', label: 'Debtor aging', description: 'Open balances by debtor and age' },
   { id: 'dso', label: 'Days to pay', description: 'How fast your debtors pay, month by month' },
-  { id: 'metrics', label: 'Key metrics', description: '30-day activity, average size, reviews and concentration' },
+  { id: 'metrics', label: 'Key metrics', description: 'Billed, paid to you, waiting on the factor, reserve and late invoices' },
   { id: 'trend', label: 'Activity trend', description: 'Eight weeks of invoice amount and volume' },
   { id: 'status', label: 'Status mix', description: 'How invoices are distributed across FactorCloud statuses' },
   { id: 'recent', label: 'Recent invoices', description: 'Latest invoice activity with review context' },
@@ -112,7 +113,6 @@ export default function ClientPortalHome() {
 
   const trend = useMemo(() => buildWeeklyActivity(data?.records ?? [], 8), [data]);
   const statusMix = useMemo(() => buildStatusMix(data?.records ?? []), [data]);
-  const averageInvoice = useMemo(() => averageInvoiceAmount(data?.records ?? []), [data]);
   const last30Amount = useMemo(() => periodAmount(data?.records ?? [], 30), [data]);
   const prior30Amount = useMemo(() => periodAmount(data?.records ?? [], 30, new Date(), 30), [data]);
   const thirtyDayTrend = trendPercent(last30Amount, prior30Amount);
@@ -126,7 +126,10 @@ export default function ClientPortalHome() {
   }, [data]);
 
   const debtorNames = useMemo(() => Object.fromEntries((data?.concentrations ?? []).map((row) => [row.debtorId, row.debtorName])), [data]);
-  const topConcentration = data?.concentrations[0];
+  const rejectedLast30 = useMemo(() => {
+    const since = Date.now() - 30 * 86_400_000;
+    return (data?.records ?? []).filter((r) => (r.status ?? '').toUpperCase() === 'REJECTED' && Date.parse(r.invoiceDate ?? '') >= since);
+  }, [data]);
   const openReviews = workflowCounts.get('REVIEW_REQUIRED') ?? 0;
   const show = (widget: string) => visibleWidgets.includes(widget);
 
@@ -138,7 +141,7 @@ export default function ClientPortalHome() {
         <div>
           <div className="dashboardHeroMeta"><span className="eyebrow">FactorCloud Client Portal</span>{data?.demo ? <DemoBadge /> : <span className="dashLiveBadge"><i />Live account data</span>}</div>
           <h1>{loading && !data ? 'Loading your account...' : `Good to see you, ${data?.source.clientName ? shortName(data.source.clientName) : portalConfig.clientShortName}`}</h1>
-          <p>Track invoice activity, review exceptions, and debtor concentration without digging through separate screens.</p>
+          <p>See what you've billed, what's been paid to you, and what still needs you, all in one place.</p>
         </div>
         <div className="portalWelcomeActions">
           <a className="primaryLink" href="/submit">+ Submit invoice</a>
@@ -162,11 +165,11 @@ export default function ClientPortalHome() {
 
       {data && <>
         {show('metrics') && <section className="dashMetricGrid">
-          <DashMetric icon="$" label="30-day activity" value={<CountUp value={last30Amount} format={(v) => money(v)} />} detail={trendCopy(thirtyDayTrend, 'vs. prior 30 days')} trend={thirtyDayTrend} />
-          <DashMetric icon="7" label="Last 7 days" value={<CountUp value={data.last7Amount} format={(v) => money(v)} />} detail={data.volumeRatio == null ? 'Building a weekly baseline' : `${data.volumeRatio.toFixed(1)}x prior weekly pace`} trend={data.volumeRatio == null ? null : (data.volumeRatio - 1) * 100} />
-          <DashMetric icon="Ø" label="Average invoice" value={money(averageInvoice)} detail={`${data.invoiceCount} invoice${data.invoiceCount === 1 ? '' : 's'} in loaded history`} />
-          <DashMetric icon="!" label="Portal reviews" value={openReviews} detail={openReviews ? 'Waiting on factor review' : 'Nothing waiting for review'} tone={openReviews ? 'review' : 'good'} />
-          <DashMetric icon="%" label="Top debtor share" value={topConcentration ? `${Math.round(topConcentration.share * 100)}%` : '-'} detail={topConcentration?.debtorName || 'No concentration data yet'} tone={topConcentration?.level === 'HIGH' ? 'bad' : topConcentration?.level === 'REVIEW' ? 'review' : 'good'} />
+          <DashMetric icon="$" label="Billed, 30 days" value={<CountUp value={last30Amount} format={(v) => money(v)} />} detail={trendCopy(thirtyDayTrend, 'vs. prior 30 days')} trend={thirtyDayTrend} />
+          <DashMetric icon="↓" label="Paid to you, 30 days" value={<CountUp value={data.cash.last30.advanced + data.cash.last30.reserveReleased} format={(v) => money(v)} />} detail={`${compactMoney(data.cash.last30.advanced)} advances + ${compactMoney(data.cash.last30.reserveReleased)} reserve back`} tone="good" />
+          <DashMetric icon="⏳" label="Waiting on the factor" value={<CountUp value={data.cash.waitingOnFactor.amount} format={(v) => money(v)} />} detail={data.cash.waitingOnFactor.count ? `${data.cash.waitingOnFactor.count} not funded yet · oldest ${data.cash.waitingOnFactor.oldestDays ?? 0}d` : 'Everything sent in is funded'} tone={(data.cash.waitingOnFactor.oldestDays ?? 0) > SLOW_APPROVAL_DAYS ? 'review' : 'good'} />
+          <DashMetric icon="↺" label="Reserve coming back" value={<CountUp value={data.cash.withDebtors.reserveBack} format={(v) => money(v)} />} detail="Paid to you as debtors pay" />
+          <DashMetric icon="!" label="Unpaid 60+ days" value={money(data.cash.over60.amount)} detail={data.cash.over60.count ? `${data.cash.over60.count} invoice${data.cash.over60.count === 1 ? '' : 's'} · chase or expect a charge-back` : 'No late debtor payments'} tone={data.cash.over60.count ? 'bad' : 'good'} />
         </section>}
 
         <section className="dashBoard">
@@ -175,12 +178,17 @@ export default function ClientPortalHome() {
             <p className="dashCardFootnote">Paid shows the last 30 days.</p>
           </DashboardCard>}
 
-          {show('cash') && <DashboardCard className="dashSpan4" kicker="Your cash" title="Money in motion">
+          {show('cash') && <DashboardCard className="dashSpan4" kicker="Your money" title="Where your money is">
             <CashPanel cash={data.cash} />
           </DashboardCard>}
 
-          {show('debtor-aging') && <DashboardCard className="dashSpan8" kicker="Receivables" title="Open balance by debtor">
+          {show('debtor-aging') && <DashboardCard className="dashSpan8" kicker="Who owes you" title="Unpaid funded invoices by debtor">
             <AgingBars aging={data.debtorAging} />
+            <p className="dashCardFootnote">Darker means older. Your reserve on these comes back only when the debtor pays, and invoices left unpaid too long are usually charged back to you.</p>
+          </DashboardCard>}
+
+          {show('attention') && <DashboardCard className="dashSpan4" kicker="Attention" title="Needs attention" action={<a href="/invoices">Track invoices</a>}>
+            <ClientAttention cash={data.cash} rejected={rejectedLast30.length} inReview={openReviews} />
           </DashboardCard>}
 
           {show('dso') && <DashboardCard className="dashSpan4" kicker="Collections" title="Days for debtors to pay">
@@ -254,15 +262,57 @@ export default function ClientPortalHome() {
   );
 }
 
+const SLOW_APPROVAL_DAYS = 3;
+const SPLIT = { advanced: '#2a78d6', fees: '#c3c2b7', reserveBack: '#eb6834', notBrokenOut: '#ecebe5' };
+
 function CashPanel({ cash }: { cash: CashSummary }) {
+  const d = cash.withDebtors;
+  const parts = [
+    { key: 'advanced', label: 'Already paid to you', value: d.advanced, color: SPLIT.advanced },
+    { key: 'fees', label: "Factor's fee", value: d.fees, color: SPLIT.fees },
+    { key: 'reserveBack', label: 'Comes back to you when paid', value: d.reserveBack, color: SPLIT.reserveBack },
+    { key: 'notBrokenOut', label: 'Not broken out in FactorCloud', value: d.notBrokenOut, color: SPLIT.notBrokenOut },
+  ].filter((part) => part.key !== 'notBrokenOut' || part.value > 0)
+    .map((part) => ({ ...part, value: Math.round(part.value) }));
+  // Rounded to whole dollars, the biggest part (the advance) absorbs the rounding so the rows add up
+  // exactly on screen and the reserve matches the "Reserve coming back" tile.
+  const biggest = parts.reduce((a, b) => (b.value > a.value ? b : a));
+  biggest.value = Math.round(d.amount) - parts.filter((part) => part !== biggest).reduce((sum, part) => sum + part.value, 0);
+  const recent = cash.last30.advanced + cash.last30.reserveReleased;
+
   return <div className="cashPanel">
-    <div className="cashHero"><span>Open with debtors</span><strong><CountUp value={cash.openBalance} format={(v) => money(v)} /></strong><small>{cash.avgDaysToPay == null ? 'Payment pace builds as invoices are paid' : `Debtors pay in about ${Math.round(cash.avgDaysToPay)} days`}</small></div>
-    <div className="cashRows">
-      <div><i style={{ background: '#2a78d6' }} /><span>Advanced to you, 30 days</span><strong>{compactMoney(cash.advancedLast30)}</strong></div>
-      <div><i style={{ background: '#86b6ef' }} /><span>Reserve held</span><strong>{compactMoney(cash.reserveHeld)}</strong></div>
-      <div><i style={{ background: '#eb6834' }} /><span>Reserve expected back, next 30 days</span><strong>{compactMoney(cash.expectedRelease30)}</strong></div>
-      <div><i style={{ background: '#c3c2b7' }} /><span>Fees, 30 days</span><strong>{compactMoney(cash.feesLast30)}</strong></div>
+    <div className="cashHero">
+      <span>Funded, waiting on debtors</span>
+      <strong><CountUp value={d.amount} format={(v) => money(v)} /></strong>
+      <small>{d.count} invoice{d.count === 1 ? '' : 's'}{cash.avgDaysToPay == null ? '' : ` · debtors pay in about ${Math.round(cash.avgDaysToPay)} days`}</small>
     </div>
+    {d.amount > 0 && <div className="cashSplitBar" role="img" aria-label={parts.map((p) => `${p.label} ${money(p.value)}`).join(', ')}>
+      {parts.map((part) => part.value > 0 && <i key={part.key} style={{ flexGrow: part.value, background: part.color }} title={`${part.label}: ${money(part.value)}`} />)}
+    </div>}
+    <div className="cashRows">
+      {parts.map((part) => <div key={part.key}><i style={{ background: part.color }} /><span>{part.label}</span><strong>{money(part.value)}</strong></div>)}
+      <div className="cashTotal"><i /><span>Adds up to</span><strong>{money(d.amount)}</strong></div>
+    </div>
+    <div className="cashFoot">
+      {d.amount - d.stillOwed >= 1 && <p><strong>Paid off so far:</strong> debtors have already paid {money(d.amount - d.stillOwed)} of this, so they still owe {money(d.stillOwed)}.</p>}
+      <p><strong>Waiting on the factor:</strong> {cash.waitingOnFactor.count ? `${money(cash.waitingOnFactor.amount)} on ${cash.waitingOnFactor.count} invoice${cash.waitingOnFactor.count === 1 ? '' : 's'} not funded yet.` : 'nothing, every invoice you sent is funded.'}</p>
+      <p><strong>Last 30 days:</strong> {money(recent)} paid to you ({money(cash.last30.advanced)} advances + {money(cash.last30.reserveReleased)} reserve back). Fees on invoices paid: {money(cash.last30.fees)}.</p>
+    </div>
+  </div>;
+}
+
+function ClientAttention({ cash, rejected, inReview }: { cash: CashSummary; rejected: number; inReview: number }) {
+  const items: { tone: 'high' | 'review'; title: string; detail: string }[] = [];
+  if (cash.over60.count) items.push({ tone: 'high', title: `${money(cash.over60.amount)} unpaid 60+ days`, detail: `${cash.over60.count} funded invoice${cash.over60.count === 1 ? ' is' : 's are'} late. Unpaid invoices are usually charged back to you (often at 90 days), so chase these debtors.` });
+  if ((cash.waitingOnFactor.oldestDays ?? 0) > SLOW_APPROVAL_DAYS) items.push({ tone: 'review', title: `Waiting on the factor for ${cash.waitingOnFactor.oldestDays} days`, detail: `${cash.waitingOnFactor.count} invoice${cash.waitingOnFactor.count === 1 ? ' is' : 's are'} not funded yet (${money(cash.waitingOnFactor.amount)}). Ask your factor if something is missing.` });
+  if (rejected) items.push({ tone: 'high', title: `${rejected} rejected in the last 30 days`, detail: 'Fix the paperwork and send them in again to get paid.' });
+  if (inReview) items.push({ tone: 'review', title: `${inReview} in factor review`, detail: 'The factor is checking these before funding. You will get a request here if they need anything.' });
+  if (!items.length) return <div className="dashAllClear"><span>✓</span><div><strong>Nothing needs you</strong><small>No late payers, slow approvals or rejected invoices.</small></div></div>;
+  return <div className="dashAlertStack">
+    {items.map((item) => <div className={`dashAlertItem ${item.tone}`} key={item.title}>
+      <span className="dashAlertIcon">!</span>
+      <div><strong>{item.title}</strong><span>{item.detail}</span></div>
+    </div>)}
   </div>;
 }
 

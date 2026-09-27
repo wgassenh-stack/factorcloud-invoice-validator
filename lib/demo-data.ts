@@ -162,7 +162,7 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
   const drafts: Draft[] = [];
   const counters = new Map<string, number>();
 
-  const makeInvoice = (clientIndex: number, debtorIndex: number, daysAgo: number, amount: number, opts: { forceOpen?: boolean; disputed?: boolean } = {}): Draft => {
+  const makeInvoice = (clientIndex: number, debtorIndex: number, daysAgo: number, amount: number, opts: { forceOpen?: boolean; disputed?: boolean; status?: 'PENDING' | 'APPROVED' } = {}): Draft => {
     const spec = CLIENT_SPECS[clientIndex];
     const client = clients[clientIndex];
     const debtor = debtors[debtorIndex];
@@ -180,6 +180,7 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
     if (daysAgo === 0) status = roll < 0.7 ? 'PENDING' : 'APPROVED';
     else if (daysAgo === 1) status = roll < 0.3 ? 'PENDING' : roll < 0.6 ? 'APPROVED' : 'FUNDED';
     else status = 'FUNDED';
+    if (opts.status) status = opts.status;
     const funded = status === 'FUNDED';
     const fundedOffset = Math.min(daysAgo, 1 + (rng() < 0.3 ? 1 : 0));
     const paid = funded && !opts.forceOpen && lag <= daysAgo;
@@ -239,6 +240,10 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
   // Planted: a 90+ day and a 70+ day invoice on the portal client, both still open.
   drafts.push(makeInvoice(0, 1, 97, 6840, { forceOpen: true }));
   drafts.push(makeInvoice(0, 1, 74, 4215.5, { forceOpen: true, disputed: true }));
+  // Planted: sent in but not funded yet, one of them waiting long enough to flag.
+  drafts.push(makeInvoice(0, 3, 5, 2875, { status: 'PENDING' }));
+  drafts.push(makeInvoice(0, 0, 1, 3410, { status: 'APPROVED' }));
+  drafts.push(makeInvoice(0, 2, 1, 1985.25, { status: 'PENDING' }));
 
   drafts.sort((a, b) => a.createdOn.localeCompare(b.createdOn));
   const invoices = drafts.map((draft, i) => ({ id: `demo-inv-${String(i + 1).padStart(5, '0')}`, ...draft }));

@@ -50,9 +50,22 @@ describe('portfolio analytics', () => {
 
   it('summarizes a client cash picture', () => {
     const summary = buildCashSummary(records, TODAY);
-    expect(summary.openBalance).toBe(1400);
-    expect(summary.reserveHeld).toBe(80);
+    expect(summary.waitingOnFactor).toEqual({ count: 1, amount: 1000, oldestDays: 5 });
+    expect(summary.withDebtors).toEqual({ count: 2, amount: 2000, advanced: 900, fees: 20, reserveBack: 80, notBrokenOut: 1000, stillOwed: 1400 });
+    expect(summary.over60).toEqual({ count: 1, amount: 400 });
+    expect(summary.last30).toEqual({ advanced: 900, reserveReleased: 0, fees: 30 });
     expect(summary.pipeline.map((p) => p.count)).toEqual([1, 0, 2, 1]);
+  });
+
+  it('splits money on funded invoices into parts that always add up', () => {
+    const { withDebtors, last30 } = buildCashSummary([
+      inv('a', { invoiceAmount: 1000, fundedDate: '2026-09-21', advanceAmount: 900, purchaseFeeAmount: 25, escrowReserveAmount: 100 }),
+      inv('b', { invoiceAmount: 500, fundedDate: '2026-09-21', advanceAmount: 480, purchaseFeeAmount: 60 }),
+      inv('p', { invoiceDate: '2026-08-20', fundedDate: '2026-08-21', paidDate: '2026-09-15', status: 'PAID', advanceAmount: 900, purchaseFeeAmount: 30, escrowReserveAmount: 100 }),
+    ], TODAY);
+    expect(withDebtors.advanced + withDebtors.fees + withDebtors.reserveBack + withDebtors.notBrokenOut).toBe(withDebtors.amount);
+    expect(withDebtors).toMatchObject({ amount: 1500, advanced: 1380, fees: 45, reserveBack: 75 });
+    expect(last30).toEqual({ advanced: 1380, reserveReleased: 70, fees: 30 });
   });
 
   it('reads FactorCloud status values whole, not as substrings', () => {
