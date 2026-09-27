@@ -6,7 +6,6 @@ export const portalConfig = {
     invoices: process.env.NEXT_PUBLIC_FEATURE_INVOICES !== 'false',
     submit: process.env.NEXT_PUBLIC_FEATURE_SUBMIT !== 'false',
     batch: process.env.NEXT_PUBLIC_FEATURE_BATCH !== 'false',
-    alerts: process.env.NEXT_PUBLIC_FEATURE_ALERTS !== 'false',
     statements: process.env.NEXT_PUBLIC_FEATURE_STATEMENTS !== 'false',
   },
 } as const;

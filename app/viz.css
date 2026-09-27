@@ -487,3 +487,11 @@ body:has(.connectionPage) { background:var(--fc-canvas, #f6f8fa); }
 @media (max-width: 900px) { .debtorMetrics { grid-template-columns:1fr 1fr; } }
 .connectionLink { display:flex; align-items:center; gap:8px; padding:7px 10px; margin:2px 0 6px; border-radius:9px; color:#98a6b7; font-size:11px; font-weight:750; text-decoration:none; }
 .connectionLink:hover { background:#151a23; color:#fff; }
+.cashSplitBar { display:flex; gap:2px; height:14px; }
+.cashSplitBar i { min-width:4px; border-radius:4px; }
+.cashRows .cashTotal { border-top:1px solid var(--viz-grid); border-bottom:0; }
+.cashRows .cashTotal i { background:transparent; }
+.cashRows .cashTotal span { color:var(--viz-ink); font-weight:700; }
+.cashFoot { display:grid; gap:6px; padding-top:4px; }
+.cashFoot p { margin:0; font-size:12px; line-height:1.45; color:var(--viz-secondary); }
+.cashFoot strong { color:var(--viz-ink); }

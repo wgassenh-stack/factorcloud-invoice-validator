@@ -62,11 +62,18 @@ export const LIFECYCLE_STAGES: { key: LifecycleStage; label: string }[] = [
 ];
 
 export interface CashSummary {
-  openBalance: number;
-  advancedLast30: number;
-  reserveHeld: number;
-  expectedRelease30: number;
-  feesLast30: number;
+  /** Sent in but not funded yet: the factor still has to approve and pay these. */
+  waitingOnFactor: { count: number; amount: number; oldestDays: number | null };
+  /**
+   * Funded invoices the debtors have not paid yet, split so the parts add up to the total:
+   * advanced to the client + the factor's fee + reserve the client gets back once the debtor pays.
+   * `notBrokenOut` is invoice value FactorCloud sent no advance amount for.
+   */
+  withDebtors: { count: number; amount: number; advanced: number; fees: number; reserveBack: number; notBrokenOut: number; stillOwed: number };
+  /** Money that reached the client in the last 30 days: advances plus reserve released on paid invoices. */
+  last30: { advanced: number; reserveReleased: number; fees: number };
+  /** Balance still owed on funded invoices more than 60 days after the invoice date (matches the aging chart). */
+  over60: { count: number; amount: number };
   avgDaysToPay: number | null;
   pipeline: { stage: LifecycleStage; label: string; count: number; amount: number }[];
 }
@@ -319,40 +326,63 @@ export function buildKpis(records: RiskInvoiceRecord[], today: string): Portfoli
   };
 }
 
-/** A client's money picture: what is out, what is held back and what should come back soon. */
+/** A client's money picture: what the factor still owes them a decision on, where the money on funded invoices went, and what arrived lately. */
 export function buildCashSummary(records: RiskInvoiceRecord[], today: string): CashSummary {
   const todayMs = dayMs(today);
   const since30 = todayMs - 29 * DAY_MS;
-  const avgDaysToPay = weightedDaysToPay(records, todayMs - 179 * DAY_MS, todayMs);
-  const expectedLag = avgDaysToPay ?? 35;
   const pipeline = LIFECYCLE_STAGES.map((stage) => ({ stage: stage.key, label: stage.label, count: 0, amount: 0 }));
-  let open = 0;
-  let advancedLast30 = 0;
-  let reserveHeld = 0;
-  let expectedRelease30 = 0;
-  let feesLast30 = 0;
+  const waitingOnFactor = { count: 0, amount: 0, oldestDays: null as number | null };
+  const withDebtors = { count: 0, amount: 0, advanced: 0, fees: 0, reserveBack: 0, notBrokenOut: 0, stillOwed: 0 };
+  const last30 = { advanced: 0, reserveReleased: 0, fees: 0 };
+  const over60 = { count: 0, amount: 0 };
 
   for (const record of records) {
     if (isClosedOut(record)) continue;
     const stage = lifecycleStage(record);
+    const amount = record.invoiceAmount ?? 0;
     const bucket = pipeline.find((p) => p.stage === stage)!;
     // Paid invoices only count toward the pipeline for the last 30 days, so the bar stays readable.
     const paidMs = dayMs(record.paidDate);
     if (stage !== 'PAID' || paidMs >= since30) {
       bucket.count += 1;
-      bucket.amount += record.invoiceAmount ?? 0;
+      bucket.amount += amount;
     }
     const funded = dayMs(record.fundedDate);
-    if (funded >= since30 && funded <= todayMs) advancedLast30 += record.advanceAmount ?? 0;
-    if (paidMs >= since30 && paidMs <= todayMs) feesLast30 += record.purchaseFeeAmount ?? 0;
-    if (stage === 'FUNDED') {
-      const balance = openBalance(record);
-      open += balance;
-      const reserve = Math.max(0, (record.escrowReserveAmount ?? 0) - (record.purchaseFeeAmount ?? 0));
-      reserveHeld += reserve;
-      const expectedPay = dayMs(record.invoiceDate) + expectedLag * DAY_MS;
-      if (expectedPay <= todayMs + 30 * DAY_MS) expectedRelease30 += reserve;
+    if (funded >= since30 && funded <= todayMs) last30.advanced += record.advanceAmount ?? 0;
+    if (paidMs >= since30 && paidMs <= todayMs) {
+      last30.fees += record.purchaseFeeAmount ?? 0;
+      last30.reserveReleased += Math.max(0, (record.escrowReserveAmount ?? 0) - (record.purchaseFeeAmount ?? 0));
+    }
+
+    if (stage === 'SUBMITTED' || stage === 'VERIFIED') {
+      waitingOnFactor.count += 1;
+      waitingOnFactor.amount += amount;
+      const sent = dayMs(record.createdOn ?? record.invoiceDate);
+      if (Number.isFinite(sent)) {
+        const days = Math.max(0, Math.floor((todayMs - sent) / DAY_MS));
+        waitingOnFactor.oldestDays = Math.max(waitingOnFactor.oldestDays ?? 0, days);
+      }
+    } else if (stage === 'FUNDED') {
+      withDebtors.count += 1;
+      withDebtors.amount += amount;
+      const owed = openBalance(record);
+      withDebtors.stillOwed += owed;
+      if (record.advanceAmount == null) {
+        withDebtors.notBrokenOut += amount;
+      } else {
+        // The reserve back is whatever is left, so the three parts always add up to the invoice.
+        const advanced = Math.min(amount, record.advanceAmount);
+        const fee = Math.min(amount - advanced, Math.max(0, record.purchaseFeeAmount ?? 0));
+        withDebtors.advanced += advanced;
+        withDebtors.fees += fee;
+        withDebtors.reserveBack += amount - advanced - fee;
+      }
+      const issued = dayMs(record.invoiceDate);
+      if (owed > 0 && Number.isFinite(issued) && todayMs - issued > 60 * DAY_MS) {
+        over60.count += 1;
+        over60.amount += owed;
+      }
     }
   }
-  return { openBalance: open, advancedLast30, reserveHeld, expectedRelease30, feesLast30, avgDaysToPay, pipeline };
+  return { waitingOnFactor, withDebtors, last30, over60, avgDaysToPay: weightedDaysToPay(records, todayMs - 179 * DAY_MS, todayMs), pipeline };
 }
