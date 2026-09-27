@@ -1,24 +1,35 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { portalConfig } from '@/lib/portal-config';
+import { DEMO_DRIVER, demoInBrowser, demoViewInBrowser } from '@/lib/demo';
 import { SessionUser } from './SessionUser';
 import { DemoToggle } from './DemoToggle';
 import { ViewSwitch } from './ViewSwitch';
 import { ConnectionLink } from './ConnectionLink';
 
-type NavKey = 'home' | 'invoices' | 'submit' | 'batch' | 'statements';
+type NavKey = 'home' | 'invoices' | 'submit' | 'batch' | 'statements' | 'driver';
 
 export function PortalNav({ active }: { active: NavKey }) {
-  const links = [
+  // Demo only: the Driver view trims the menu to sending paperwork and the driver's own invoices.
+  const [driver, setDriver] = useState(false);
+  useEffect(() => { setDriver(active === 'driver' || (demoInBrowser() && demoViewInBrowser() === 'driver')); }, [active]);
+
+  const managerLinks = [
     { key: 'home', href: '/', label: 'Dashboard', enabled: true, icon: 'home' },
     { key: 'invoices', href: '/invoices', label: 'Invoices', enabled: portalConfig.features.invoices, icon: 'invoice' },
     { key: 'submit', href: '/submit', label: 'Submit invoice', enabled: portalConfig.features.submit, icon: 'upload' },
     { key: 'batch', href: '/batch', label: 'Batch upload', enabled: portalConfig.features.batch, icon: 'batch' },
     { key: 'statements', href: '/statements', label: 'Statements', enabled: portalConfig.features.statements, icon: 'statement' },
   ] as const;
+  const driverLinks = [
+    { key: 'driver', href: '/driver', label: 'My invoices', enabled: true, icon: 'invoice' },
+    { key: 'submit', href: '/submit', label: 'Send in paperwork', enabled: portalConfig.features.submit, icon: 'upload' },
+  ] as const;
+  const links = driver ? driverLinks : managerLinks;
 
   return <nav className="portalNav">
-    <a className="portalBrand" href="/" aria-label="FactorCloud client portal home">
+    <a className="portalBrand" href={driver ? '/driver' : '/'} aria-label="FactorCloud client portal home">
       <img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" />
     </a>
 
@@ -32,9 +43,11 @@ export function PortalNav({ active }: { active: NavKey }) {
     </div>
 
     <div className="portalNavFooter">
-      <div className="portalClientBadge"><span className="portalClientInitial">{portalConfig.clientShortName.charAt(0).toUpperCase()}</span><div><strong>{portalConfig.clientShortName}</strong><small>{portalConfig.environmentLabel}</small></div></div>
+      {driver
+        ? <div className="portalClientBadge"><span className="portalClientInitial">{DEMO_DRIVER.charAt(0)}</span><div><strong>{DEMO_DRIVER}</strong><small>Driver · {portalConfig.clientShortName}</small></div></div>
+        : <div className="portalClientBadge"><span className="portalClientInitial">{portalConfig.clientShortName.charAt(0).toUpperCase()}</span><div><strong>{portalConfig.clientShortName}</strong><small>{portalConfig.environmentLabel}</small></div></div>}
       <DemoToggle />
-      <ConnectionLink />
+      {!driver && <ConnectionLink />}
       <SessionUser />
       <div className="portalPowered">Powered by FactorCloud</div>
     </div>

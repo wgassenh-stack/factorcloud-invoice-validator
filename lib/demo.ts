@@ -38,3 +38,26 @@ export function demoInBrowser(): boolean {
 /** The FactorCloud client this portal belongs to, in demo mode. */
 export const DEMO_CLIENT_ID = 'demo-client-01';
 export const DEMO_FACTOR_ID = 'demo-factor';
+
+// Demo only: the client side can be viewed as the company's manager or as one of its drivers.
+// Like the demo cookie, this only changes what is shown; it grants nothing.
+export const DEMO_VIEW_COOKIE = 'fc_view';
+export type DemoClientView = 'manager' | 'driver';
+/** The driver the demo's Driver view shows. */
+export const DEMO_DRIVER = 'Marcus Reed';
+/** Everyone who sends in paperwork for the demo client. */
+export const DEMO_DRIVERS = [DEMO_DRIVER, 'Dana Ortiz', 'Tyrell Banks', 'Ann Kowalski'] as const;
+
+export function demoViewFromCookie(value: string | undefined | null): DemoClientView {
+  return value === 'driver' ? 'driver' : 'manager';
+}
+
+/** Browser only: which client view this browser is on. */
+export function demoViewInBrowser(): DemoClientView {
+  if (typeof document === 'undefined') return 'manager';
+  return demoViewFromCookie(document.cookie.split('; ').find((part) => part.startsWith(`${DEMO_VIEW_COOKIE}=`))?.split('=')[1]);
+}
+
+export function setDemoViewInBrowser(view: DemoClientView): void {
+  document.cookie = `${DEMO_VIEW_COOKIE}=${view}; path=/; max-age=${60 * 60 * 24 * 30}; samesite=lax`;
+}

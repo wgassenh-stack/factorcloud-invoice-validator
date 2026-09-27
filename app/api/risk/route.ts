@@ -5,7 +5,7 @@ import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { resolveConfiguredClientId } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords, summarizeRisk, type RiskThresholds } from '@/lib/risk';
 import { buildAging, buildCashSummary, buildDsoTrend } from '@/lib/analytics';
-import { demoReviews } from '@/lib/demo-store';
+import { demoDriverSummary, demoReviews, demoSubmitters } from '@/lib/demo-store';
 import { databaseAuthEnabled } from '@/lib/session';
 import { demoRequest } from '@/lib/demo-request';
 
@@ -88,6 +88,8 @@ export async function GET() {
       dso: buildDsoTrend(records, today, 6),
       debtorNames,
       demo: (await demoRequest()),
+      // Demo only for now: who sent in each invoice, and how each driver's paperwork is doing.
+      ...((await demoRequest()) ? { submitters: demoSubmitters(), drivers: demoDriverSummary() } : {}),
       source: {
         clientId,
         clientName: client.companyName || client.compCode || 'FactorCloud client',

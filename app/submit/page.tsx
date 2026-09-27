@@ -10,6 +10,7 @@ import { applyCreditCheck, withInvoiceAmount } from '@/lib/credit';
 import { CreditMeter } from '@/app/components/CreditMeter';
 import { SubmitAnywayBox } from '@/app/components/SubmitAnyway';
 import { explanationProblem, flaggedChecks, hardBlocks } from '@/lib/override';
+import { demoInBrowser, demoViewInBrowser } from '@/lib/demo';
 import type { AnalyzeResponse, CreateResponse, ExtractedFields, ValidationReport } from '@/lib/types';
 
 type StatusResponse = {
@@ -26,6 +27,9 @@ export default function SubmitInvoicePage() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [createResult, setCreateResult] = useState<CreateResponse | null>(null);
   const [explanation, setExplanation] = useState('');
+  const [asDriver, setAsDriver] = useState(false);
+
+  useEffect(() => { setAsDriver(demoInBrowser() && demoViewInBrowser() === 'driver'); }, []);
 
   useEffect(() => {
     void fetch('/api/status', { cache: 'no-store' }).then(async (res) => {
@@ -178,8 +182,8 @@ export default function SubmitInvoicePage() {
       <section className="hero portalSubHero">
         <div>
           <span className="eyebrow">FactorCloud Client Portal</span>
-          <h1>Submit an Invoice</h1>
-          <p>Upload your invoice and freight paperwork. We will read it, verify the key details, and flag anything that needs attention before it enters FactorCloud.</p>
+          <h1>{asDriver ? 'Send in paperwork' : 'Submit an Invoice'}</h1>
+          <p>{asDriver ? 'Take photos of the invoice, BOL and signed POD, or upload the files. We check them before they go to your factor.' : 'Upload your invoice and freight paperwork. We will read it, verify the key details, and flag anything that needs attention before it enters FactorCloud.'}</p>
         </div>
         <div className="badges">
           <span className="prototype">Automated verification</span>
@@ -314,8 +318,10 @@ export default function SubmitInvoicePage() {
                 {submittedForReview && <span>You do not need to submit it again. The factor review decision will appear in the invoice history.</span>}
               </div>
               <div className="portalWelcomeActions">
-                <a className="primaryLink" href={`/invoices/${encodeURIComponent(createResult!.invoiceId!)}`}>View submitted invoice</a>
-                <a className="secondaryLink" href="/submit">Submit another invoice</a>
+                {asDriver
+                  ? <a className="primaryLink" href="/driver">Back to my invoices</a>
+                  : <a className="primaryLink" href={`/invoices/${encodeURIComponent(createResult!.invoiceId!)}`}>View submitted invoice</a>}
+                <a className="secondaryLink" href="/submit">{asDriver ? 'Send another' : 'Submit another invoice'}</a>
               </div>
             </>
           ) : (

@@ -11,6 +11,8 @@ FactorCloud remains the system of record for factoring/accounting records. The p
 
 - Dashboard: two views. Overview shows the client's money (billed, paid to them, waiting on the factor, reserve coming back, late invoices), who owes them, and what needs attention. Trends shows volume, days to pay, status mix and debtor concentration.
 - Invoices: searchable invoice history from FactorCloud.
+- Submitting with a note: anything that doesn't pass every check can still be submitted if the client writes why (the server requires it). It goes to the factor's review queue with the note and the failed checks. A No Buy or missing debtor can never be submitted.
+- Driver view (demo only for now): the sidebar switch offers Manager, Driver and Factor. The Driver view shows only "Send in paperwork" and the driver's own invoices, with fix requests and rejections at the top; the Manager view shows who sent in each invoice and a "Paperwork by driver" card. Real driver logins, enforced on the server, come later with database sign-in.
 - Submit invoice: AI extraction plus deterministic validation before creating the invoice in FactorCloud.
 - Batch upload: cautious grouping of mixed invoice/support-document stacks.
 - Factor operations: Command center (exposure, aging, cash, collections) and Operations (volume, reviews, latest work) views, client drill-down, debtors, and the review queue.

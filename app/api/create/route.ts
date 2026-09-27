@@ -19,7 +19,8 @@ import { recordDemoSubmission } from '@/lib/demo-store';
 import { persistSubmissionStart, markSubmissionFactorCloudResult, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
 import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
 import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '@/lib/types';
-import { demoRequest } from '@/lib/demo-request';
+import { demoClientView, demoRequest } from '@/lib/demo-request';
+import { DEMO_DRIVER } from '@/lib/demo';
 import { explanationProblem, hardBlocks, needsExplanation, withClientExplanation } from '@/lib/override';
 
 export const runtime = 'nodejs';
@@ -194,6 +195,7 @@ export async function POST(req: Request) {
 
   if (demo) {
     recordDemoSubmission({
+      submittedBy: (await demoClientView()) === 'driver' ? DEMO_DRIVER : 'Office',
       invoiceId: invoiceId!,
       clientId,
       debtorId: payload.debtorId,

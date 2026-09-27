@@ -495,3 +495,15 @@ body:has(.connectionPage) { background:var(--fc-canvas, #f6f8fa); }
 .cashFoot { display:grid; gap:6px; padding-top:4px; }
 .cashFoot p { margin:0; font-size:12px; line-height:1.45; color:var(--viz-secondary); }
 .cashFoot strong { color:var(--viz-ink); }
+.viewSwitch.three { grid-template-columns:repeat(3,1fr); }
+.driverTable { display:grid; gap:2px; }
+.driverTableRow { display:grid; grid-template-columns:30px minmax(0,1fr); gap:4px 10px; align-items:center; padding:9px 0; border-bottom:1px solid #f0f1f3; }
+.driverTableInitial { width:30px; height:30px; display:grid; place-items:center; border-radius:50%; background:#eef4ff; color:#1f4fa3; font-weight:800; font-size:12px; }
+.driverTableRow strong { display:block; font-size:13px; color:var(--viz-ink); }
+.driverTableRow small { color:var(--viz-muted); font-size:11px; }
+.driverTableFlags { grid-column:2; display:flex; flex-wrap:wrap; gap:5px; }
+.driverTableFlags span { padding:2px 8px; border-radius:999px; font-size:10px; font-weight:800; }
+.driverTableFlags .fix { background:#fff1c2; color:#7a5500; }
+.driverTableFlags .rejected { background:#fde2e2; color:#a31d1d; }
+.driverTableFlags .checking { background:#eef4ff; color:#1f4fa3; }
+.driverTableFlags .ok { background:#e3f6e8; color:#1f7a3a; }

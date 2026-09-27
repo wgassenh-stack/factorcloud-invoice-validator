@@ -5,7 +5,7 @@
 // 90+ day invoice, a factor-level concentration in one client and DSO improving over the year.
 
 import type { CheckResult, CompanyRecord, ExtractedFields, ExtractionUsage, ValidationReport } from './types';
-import { DEMO_CLIENT_ID } from './demo';
+import { DEMO_CLIENT_ID, DEMO_DRIVER, DEMO_DRIVERS } from './demo';
 
 export interface DemoInvoice {
   id: string;
@@ -25,10 +25,12 @@ export interface DemoInvoice {
   fundedDate: string | null;
   paidDate: string | null;
   dueDate: string;
-  status: 'PENDING' | 'APPROVED' | 'FUNDED' | 'PAID';
+  status: 'PENDING' | 'APPROVED' | 'FUNDED' | 'PAID' | 'REJECTED';
   verificationStatus: 'NOT_VERIFIED' | 'VERIFIED';
   paymentStatus: 'OPEN' | 'PARTIAL' | 'PAID';
   disputed: boolean;
+  /** Demo client only: the driver who sent it in. */
+  submittedBy?: string;
   notes: string | null;
 }
 
@@ -162,7 +164,7 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
   const drafts: Draft[] = [];
   const counters = new Map<string, number>();
 
-  const makeInvoice = (clientIndex: number, debtorIndex: number, daysAgo: number, amount: number, opts: { forceOpen?: boolean; disputed?: boolean; status?: 'PENDING' | 'APPROVED' } = {}): Draft => {
+  const makeInvoice = (clientIndex: number, debtorIndex: number, daysAgo: number, amount: number, opts: { forceOpen?: boolean; disputed?: boolean; status?: 'PENDING' | 'APPROVED' | 'REJECTED'; submittedBy?: string; notes?: string } = {}): Draft => {
     const spec = CLIENT_SPECS[clientIndex];
     const client = clients[clientIndex];
     const debtor = debtors[debtorIndex];
@@ -207,10 +209,12 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
       paidDate: paid ? `${iso(daysAgo - lag)}T00:00:00Z` : null,
       dueDate: `${iso(daysAgo - (spec.kind === 'staffing' ? 45 : 30))}T00:00:00Z`,
       status: paid ? 'PAID' : status,
-      verificationStatus: status === 'PENDING' ? 'NOT_VERIFIED' : 'VERIFIED',
+      verificationStatus: status === 'PENDING' || status === 'REJECTED' ? 'NOT_VERIFIED' : 'VERIFIED',
       paymentStatus: paid ? 'PAID' : partial ? 'PARTIAL' : 'OPEN',
       disputed: Boolean(opts.disputed) || (funded && !paid && daysAgo > 30 && rng() < 0.04),
-      notes: null,
+      notes: opts.notes ?? null,
+      // Drivers take turns on the portal client's loads; planted invoices name theirs.
+      ...(clientIndex === 0 ? { submittedBy: opts.submittedBy ?? DEMO_DRIVERS[n % DEMO_DRIVERS.length] } : {}),
     };
   };
 
@@ -241,9 +245,11 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
   drafts.push(makeInvoice(0, 1, 97, 6840, { forceOpen: true }));
   drafts.push(makeInvoice(0, 1, 74, 4215.5, { forceOpen: true, disputed: true }));
   // Planted: sent in but not funded yet, one of them waiting long enough to flag.
-  drafts.push(makeInvoice(0, 3, 5, 2875, { status: 'PENDING' }));
-  drafts.push(makeInvoice(0, 0, 1, 3410, { status: 'APPROVED' }));
-  drafts.push(makeInvoice(0, 2, 1, 1985.25, { status: 'PENDING' }));
+  drafts.push(makeInvoice(0, 3, 5, 2875, { status: 'PENDING', submittedBy: DEMO_DRIVER }));
+  drafts.push(makeInvoice(0, 0, 1, 3410, { status: 'APPROVED', submittedBy: DEMO_DRIVER }));
+  drafts.push(makeInvoice(0, 2, 1, 1985.25, { status: 'PENDING', submittedBy: DEMO_DRIVER }));
+  // Planted: one of the demo driver's invoices the factor rejected, so the Driver view has one to resend.
+  drafts.push(makeInvoice(0, 4, 6, 2240, { status: 'REJECTED', submittedBy: DEMO_DRIVER, notes: 'The rate confirmation is for a different load (LD447902). Send it again with the rate con for this load.' }));
 
   drafts.sort((a, b) => a.createdOn.localeCompare(b.createdOn));
   const invoices = drafts.map((draft, i) => ({ id: `demo-inv-${String(i + 1).padStart(5, '0')}`, ...draft }));
