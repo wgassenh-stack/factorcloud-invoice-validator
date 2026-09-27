@@ -4,13 +4,11 @@ import { FactorCloudError, allowedDebtorIds, getCompany } from './factorcloud';
 import { scoreDebtor } from './matching';
 import { validate } from './rules';
 import { applyFactorCloudAvailability } from './validation-availability';
-import { applyCreditCheck } from './credit';
-import { loadDebtorCredit } from './debtor-credit';
 import { signAnalysisReceipt } from './submission-integrity';
 import type { AnalyzeResponse, AnalyzedDocument, CompanyRecord } from './types';
 
-// Checks each group of an upload as its own invoice: match the debtor, run the checks and the
-// credit check, and sign a receipt the create step verifies. Used when the paperwork is first read
+// Checks each group of an upload as its own invoice: match the debtor, run the checks, and sign a
+// receipt the create step verifies. Used when the paperwork is first read
 // and again whenever someone moves a document to a different group (no re-reading needed).
 
 /** One group of documents, checked as one invoice. Same shape the invoice create step expects. */
@@ -55,8 +53,9 @@ export async function checkCards(clientId: string, documents: AnalyzedDocument[]
     const primaryIndex = 0;
     const match = lookupFailed ? null : matchDebtor(docs, candidates);
     const debtor = match?.debtor ?? null;
-    const credit = debtor ? await loadDebtorCredit(clientId, debtor, docs[primaryIndex].fields.invoiceAmount) : null;
-    const validation = applyCreditCheck(applyFactorCloudAvailability(validate({ documents: docs, primaryIndex, debtor, client }), lookupFailed), credit);
+    // No credit check here: credit limits are the factor's business. It runs when the invoice is
+    // sent, and only the approver sees the result.
+    const validation = applyFactorCloudAvailability(validate({ documents: docs, primaryIndex, debtor, client }), lookupFailed);
     const cardWarnings = docs[primaryIndex].fields.documentType === 'invoice' ? [] : ['No invoice in this group. Add the invoice, or move these documents to the group they belong to.'];
     const card: PaperworkCard = {
       id: group.id,
@@ -69,7 +68,7 @@ export async function checkCards(clientId: string, documents: AnalyzedDocument[]
       factorCloudLookupFailed: lookupFailed,
       validation,
       warnings: cardWarnings,
-      credit,
+      credit: null,
       analysisReceipt: signAnalysisReceipt({ version: 1, clientId, debtorId: debtor?.id ?? null, primaryIndex, documents: docs }),
     };
     return card;

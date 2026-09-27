@@ -4,11 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { PortalNav } from '@/app/components/PortalNav';
 import { ProcessingTheater, type TheaterPhase } from '@/app/components/ProcessingTheater';
 import { CameraCapture } from '@/app/components/CameraCapture';
-import { CreditMeter } from '@/app/components/CreditMeter';
 import { SubmitAnywayBox } from '@/app/components/SubmitAnyway';
 import { validate } from '@/lib/rules';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
-import { applyCreditCheck, withInvoiceAmount } from '@/lib/credit';
 import { explanationProblem, flaggedChecks, hardBlocks } from '@/lib/override';
 import { demoInBrowser, demoViewInBrowser } from '@/lib/demo';
 import type { PaperworkCard, PaperworkResponse } from '@/lib/paperwork';
@@ -20,7 +18,7 @@ import type { AnalyzedDocument, CreateResponse, ValidationReport } from '@/lib/t
 
 type Edits = { invoiceNumber: string; referenceNumber: string; invoiceAmount: string; invoiceDate: string };
 type Sent = { state: 'sending' | 'sent' | 'error'; message: string; invoiceId?: string; review?: boolean };
-type Card = PaperworkCard & { edits: Edits; note: string; sent?: Sent };
+type Card = PaperworkCard & { edits: Edits; note: string; sent?: Sent; serverFlags?: ValidationReport };
 
 const DOC_LABEL: Record<string, string> = { invoice: 'Invoice', bol: 'BOL', pod: 'POD', rate_confirmation: 'Rate con', lumper_receipt: 'Lumper receipt', other: 'Other' };
 
@@ -145,7 +143,13 @@ export default function SendPaperworkPage() {
       // Files go in the card's order: the server matches each one to what was read.
       card.documentIndexes.forEach((i) => form.append('files', files[upload!.documents[i].sourceIndex ?? i]));
       const res = await fetch('/api/create', { method: 'POST', body: form });
-      const body = await res.json() as CreateResponse;
+      const body = await res.json() as CreateResponse & { needsExplanation?: boolean };
+      if (body.needsExplanation && body.validation) {
+        // The server found something the page couldn't check (for example a possible duplicate).
+        // Show its reasons and ask for a note instead of just failing.
+        setCards((current) => current.map((c) => (c.id === card.id ? { ...c, serverFlags: body.validation, sent: undefined } : c)));
+        return false;
+      }
       if (!res.ok || !body.ok) throw new Error(body.error || 'Sending failed.');
       const review = body.validation?.status === 'REVIEW';
       setSent({ state: 'sent', message: review ? 'Sent for review with your note' : 'Sent', invoiceId: body.invoiceId ?? undefined, review });
@@ -291,7 +295,7 @@ function InvoiceCard({ card, documents, targets, busy, onMove, onChange, onSend,
       : state === 'ready' && <p className="sendClear">✓ All checks clear</p>)}
 
     {!sent && <details className="sendDetails">
-      <summary>Invoice details{asDriver ? '' : ' and credit'}</summary>
+      <summary>Invoice details</summary>
       <div className="editGrid">
         <Field label="Invoice #" value={card.edits.invoiceNumber} onChange={(v) => onChange({ edits: { ...card.edits, invoiceNumber: v } })} />
         <Field label="Load #" value={card.edits.referenceNumber} onChange={(v) => onChange({ edits: { ...card.edits, referenceNumber: v } })} />
@@ -299,7 +303,6 @@ function InvoiceCard({ card, documents, targets, busy, onMove, onChange, onSend,
         <Field label="Invoice date" type="date" value={card.edits.invoiceDate} onChange={(v) => onChange({ edits: { ...card.edits, invoiceDate: v } })} />
       </div>
       {card.debtor && <p className="match">Debtor: <strong>{card.debtor.companyName}</strong>{card.debtorMatch ? ` (matched by ${card.debtorMatch.method})` : ''}</p>}
-      {!asDriver && card.credit && <CreditMeter credit={withInvoiceAmount(card.credit, Number(card.edits.invoiceAmount) || null)} />}
     </details>}
 
     {!sent && !blocked.length && flagged.length > 0 && card.debtor && <SubmitAnywayBox compact flagged={flagged} blocked={[]} value={card.note} onChange={(note) => onChange({ note })} />}
@@ -359,16 +362,26 @@ function liveValidation(card: Card): ValidationReport {
   const amount = card.edits.invoiceAmount === '' ? null : Number(card.edits.invoiceAmount);
   const fields = { ...original, invoiceNumber: card.edits.invoiceNumber || null, referenceNumber: card.edits.referenceNumber || null, invoiceAmount: amount, invoiceDate: card.edits.invoiceDate || null };
   const documents = card.documents.map((doc, i) => (i === card.primaryIndex ? { ...doc, fields } : doc));
-  const base = applyCreditCheck(applyFactorCloudAvailability(validate({ documents, primaryIndex: card.primaryIndex, debtor: card.debtor, client: card.client }), card.factorCloudLookupFailed), card.credit ? withInvoiceAmount(card.credit, amount) : null);
+  const base = applyFactorCloudAvailability(validate({ documents, primaryIndex: card.primaryIndex, debtor: card.debtor, client: card.client }), card.factorCloudLookupFailed);
   const changed = [
     (original.invoiceNumber ?? '') !== card.edits.invoiceNumber && 'invoice number',
     (original.referenceNumber ?? '') !== card.edits.referenceNumber && 'load number',
     (original.invoiceAmount == null ? '' : String(original.invoiceAmount)) !== card.edits.invoiceAmount && 'amount',
     (original.invoiceDate ?? '') !== card.edits.invoiceDate && 'invoice date',
   ].filter(Boolean) as string[];
-  if (!changed.length) return base;
+  const merged = mergeServerFlags(base, card.serverFlags);
+  if (!changed.length) return merged;
   const note = { id: 'client-corrections', label: 'Changed after reading', status: 'REVIEW' as const, message: `You changed the ${changed.join(', ')}. Your factor will review it.` };
-  return { status: base.status === 'FAIL' ? 'FAIL' : 'REVIEW', checks: [note, ...base.checks] };
+  return { status: merged.status === 'FAIL' ? 'FAIL' : 'REVIEW', checks: [note, ...merged.checks] };
+}
+
+/** Adds checks the server flagged on a send attempt that the page's own checks don't cover. */
+function mergeServerFlags(base: ValidationReport, server: ValidationReport | undefined): ValidationReport {
+  if (!server) return base;
+  const extra = server.checks.filter((c) => (c.status === 'REVIEW' || c.status === 'FAIL') && c.id !== 'client-corrections' && !base.checks.some((b) => b.id === c.id && b.status === c.status));
+  if (!extra.length) return base;
+  const checks = [...extra, ...base.checks.filter((b) => !extra.some((e) => e.id === b.id))];
+  return { status: checks.some((c) => c.status === 'FAIL') ? 'FAIL' : 'REVIEW', checks };
 }
 
 function cardState(card: Card): 'ready' | 'needs-note' | 'blocked' | 'sent' {

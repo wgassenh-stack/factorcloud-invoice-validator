@@ -31,3 +31,14 @@ describe('debtor credit check', () => {
     expect(twice.status).toBe('PASS');
   });
 });
+
+describe('what the client may see', () => {
+  it('drops the credit check and works the status out without it', async () => {
+    const { withoutCreditCheck } = await import('./credit');
+    const pass = { id: 'x', label: 'x', status: 'PASS' as const, message: '' };
+    const credit = { id: 'debtor-credit', label: 'Credit limit (factor only)', status: 'REVIEW' as const, message: 'Warning: over the limit' };
+    expect(withoutCreditCheck({ status: 'REVIEW', checks: [pass, credit] })).toEqual({ status: 'PASS', checks: [pass] });
+    const other = { ...pass, id: 'y', status: 'REVIEW' as const };
+    expect(withoutCreditCheck({ status: 'REVIEW', checks: [other, credit] }).status).toBe('REVIEW');
+  });
+});

@@ -13,7 +13,7 @@ import { apiErrorResponse, publicErrorMessage } from '@/lib/api-errors';
 import { isDefinitiveCreateFailure } from '@/lib/errors';
 import { currentPortalSession, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
-import { applyCreditCheck } from '@/lib/credit';
+import { applyCreditCheck, withoutCreditCheck } from '@/lib/credit';
 import { loadDebtorCredit } from '@/lib/debtor-credit';
 import { recordDemoSubmission } from '@/lib/demo-store';
 import { persistSubmissionStart, markSubmissionFactorCloudResult, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
@@ -85,8 +85,7 @@ export async function POST(req: Request) {
   const originalPrimary = receipt.documents[receipt.primaryIndex].fields;
   const corrections = collectClientCorrections(originalPrimary, payload);
   const rawValidation = validate({ documents: receipt.documents, primaryIndex: receipt.primaryIndex, debtor, client });
-  // Credit is re-checked with fresh balances and the amount actually being submitted.
-  let validation = applyCreditCheck(addCorrectionReview(rawValidation, corrections), await loadDebtorCredit(clientId, debtor, amount));
+  let validation = addCorrectionReview(rawValidation, corrections);
   const blocked = hardBlocks(validation);
   if (blocked.length) return NextResponse.json({ error: `This invoice cannot be submitted: ${blocked.map((check) => check.message).join(' ')}`, validation }, { status: 409 });
   if (needsExplanation(validation)) {
@@ -94,17 +93,21 @@ export async function POST(req: Request) {
     if (problem) return NextResponse.json({ error: `Some checks did not pass. ${problem}`, validation, needsExplanation: true }, { status: 409 });
     validation = withClientExplanation(validation, payload.explanation!);
   }
+  // The credit check runs last, with fresh balances and the amount actually being sent. It never
+  // needs a note from the client and is never shown to them: if the invoice would go over the
+  // limit, it goes to the factor's review queue with a warning for the approver.
+  validation = applyCreditCheck(validation, await loadDebtorCredit(clientId, debtor, amount));
 
   let duplicateCheckComplete = true;
   try {
     const duplicateNumbers = [...new Set([originalPrimary.invoiceNumber?.trim(), payload.invoiceNumber.trim()].filter((value): value is string => Boolean(value)))];
     for (const invoiceNumber of duplicateNumbers) {
       const { existing, complete } = await findExistingInvoice(clientId, invoiceNumber);
-      if (existing) return NextResponse.json({ error: `Invoice ${invoiceNumber} already exists in FactorCloud as ${existing.id}${existing.status ? ` (${existing.status})` : ''}.`, validation }, { status: 409 });
+      if (existing) return NextResponse.json({ error: `Invoice ${invoiceNumber} already exists in FactorCloud as ${existing.id}${existing.status ? ` (${existing.status})` : ''}.`, validation: withoutCreditCheck(validation) }, { status: 409 });
       duplicateCheckComplete &&= complete;
     }
   } catch (err) {
-    return NextResponse.json({ error: `Duplicate check failed, so submission was blocked: ${publicErrorMessage(err, 'create')}`, validation }, { status: 502 });
+    return NextResponse.json({ error: `Duplicate check failed, so submission was blocked: ${publicErrorMessage(err, 'create')}`, validation: withoutCreditCheck(validation) }, { status: 502 });
   }
   // Could not read FactorCloud's invoice list to the end: submit, but flag for a person to confirm.
   if (!duplicateCheckComplete) validation = addDuplicateCheckReview(validation);
@@ -127,13 +130,13 @@ export async function POST(req: Request) {
       files,
     });
   } catch (err) {
-    return apiErrorResponse(err, 'create', 500, { validation });
+    return apiErrorResponse(err, 'create', 500, { validation: withoutCreditCheck(validation) });
   }
 
   const steps: CreateStep[] = [];
   const documentIds: string[] = [];
   let invoiceId: string | null = null;
-  const respond = (ok: boolean, error?: string) => NextResponse.json({ ok, invoiceId, documentIds, steps, validation, error } satisfies CreateResponse, { status: ok ? 200 : 502 });
+  const respond = (ok: boolean, error?: string) => NextResponse.json({ ok, invoiceId, documentIds, steps, validation: withoutCreditCheck(validation), error } satisfies CreateResponse, { status: ok ? 200 : 502 });
 
   try {
     const noteParts = [
