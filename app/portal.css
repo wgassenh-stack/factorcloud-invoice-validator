@@ -160,3 +160,57 @@
   .driverRowStatus { grid-column:1; grid-row:2; justify-items:start; grid-auto-flow:column; align-items:center; }
   .driverAmount { grid-column:2; grid-row:1; }
 }
+
+/* One upload page: cards per invoice */
+.sendShell { max-width:1100px; }
+.sendUpload { display:grid; gap:10px; }
+.sendCameraRow { display:flex; gap:8px; align-items:stretch; }
+.sendCameraRow .cameraButton { flex:1; }
+.nextLoadButton { display:none; margin:10px 0 0; padding:13px 16px; border-radius:12px; border:1.5px solid #0b1220; background:#fff; color:#0b1220; font-weight:800; font-size:15px; }
+@media (pointer:coarse) { .nextLoadButton { display:block; } }
+.sendStartOver { justify-self:start; }
+.sendSummary { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin:16px 0 12px; padding:14px 18px; border-radius:14px; background:#0b1220; color:#fff; }
+.sendSummary>div { display:grid; gap:2px; }
+.sendSummary strong { font-size:17px; }
+.sendSummary span { color:#b8c2d0; font-size:13px; }
+.sendSummary button { background:#fff; color:#0b1220; }
+.sendSummary button:disabled { opacity:.5; }
+.sendChecking { color:#fbd38d !important; font-weight:700; }
+.sendTray { border:1.5px dashed #e6c56c; background:#fffdf5; }
+.sendTray h2 { margin:0 0 4px; }
+.sendTray p { margin:0 0 10px; color:#6b5a1e; font-size:13px; }
+.sendCards { display:grid; gap:12px; }
+.sendCard { display:grid; gap:10px; border-left:4px solid #d0d5dd; }
+.sendCard.ready { border-left-color:#12b76a; }
+.sendCard.needs-note { border-left-color:#f5b400; }
+.sendCard.blocked { border-left-color:#f04438; }
+.sendCard.sent { border-left-color:#2a78d6; opacity:.85; }
+.sendCardHead { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+.sendCardHead>div:first-child { display:grid; gap:2px; min-width:0; }
+.sendCardHead strong { font-size:16px; }
+.sendCardHead span { color:#667085; font-size:12px; }
+.sendCardRight { display:grid; justify-items:end; gap:4px; }
+.sendCardRight b { font-size:17px; font-variant-numeric:tabular-nums; }
+.sendDocs { display:grid; gap:6px; }
+.sendDoc { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:10px; padding:7px 8px 7px 10px; border:1px solid #eaecf0; border-radius:10px; background:#fafbfc; }
+.sendDocName { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:650; }
+.sendDocName small { color:#667085; font-weight:500; }
+.sendDoc select { padding:6px 8px; border:1px solid #d0d5dd; border-radius:8px; background:#fff; font:inherit; font-size:12px; }
+.docType { padding:3px 8px; border-radius:6px; font-size:11px; font-weight:800; background:#eef4ff; color:#1f4fa3; white-space:nowrap; }
+.docType.invoice { background:#0b1220; color:#fff; }
+.docType.pod, .docType.bol { background:#e3f6e8; color:#1f7a3a; }
+.docType.rate_confirmation { background:#f4ebff; color:#6941c6; }
+.sendChecks { margin:0; padding-left:18px; display:grid; gap:3px; font-size:13px; }
+.sendChecks li.fail b { color:#a93842; }
+.sendChecks li.review b { color:#8a6d1c; }
+.sendClear { margin:0; color:#1f7a3a; font-weight:700; font-size:13px; }
+.sendDetails summary { cursor:pointer; color:#1779ba; font-size:13px; font-weight:750; }
+.sendDetails .editGrid { margin-top:10px; }
+.sendCardFoot { display:flex; justify-content:flex-end; align-items:center; gap:12px; flex-wrap:wrap; }
+.sendLeft { display:grid; gap:8px; margin-top:12px; opacity:.8; }
+.sendAfter { margin-top:18px; }
+@media (max-width:640px) {
+  .sendDoc { grid-template-columns:auto minmax(0,1fr); }
+  .sendDoc select { grid-column:1 / -1; }
+  .sendSummary button { width:100%; }
+}
