@@ -92,3 +92,22 @@
 .riskId { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px!important; }
 @media (max-width:900px) { .portalMetricGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.portalDashboardGrid{grid-template-columns:1fr}.portalWelcome{align-items:flex-start}.portalInvoiceRow{grid-template-columns:40px minmax(0,1fr) auto}.invoiceAmount{grid-column:2/4;text-align:left}.portalNav{height:auto;padding:16px 0;align-items:flex-start;flex-wrap:wrap}.portalNavLinks{order:3;width:100%;overflow:auto}.portalAccount{margin-left:auto} }
 @media (max-width:600px) { .portalShell{padding:0 16px 60px}.portalWelcome{flex-direction:column}.portalWelcomeActions{width:100%}.primaryLink,.secondaryLink{flex:1}.portalMetricGrid{grid-template-columns:1fr 1fr}.portalMetric>strong{font-size:23px}.concentrationRow{grid-template-columns:1fr 44px}.concentrationTrack{grid-column:1/-1;order:3}.portalStatus{display:none}.portalInvoiceRow{grid-template-columns:36px minmax(0,1fr) auto}.invoiceAmount{grid-column:auto;text-align:right}.portalNavLinks a{font-size:12px;padding:8px 9px}.portalBrand strong{font-size:14px}.statusStrip{grid-template-columns:repeat(2,1fr)}.statusStrip>div:nth-child(2){border-right:0}.statusStrip>div:nth-child(-n+2){border-bottom:1px solid #eef1f5} }
+
+/* Submit anyway with a note */
+.submitAnyway { display:grid; gap:7px; margin:12px 0; padding:14px 16px; border:1px solid #f5d98f; border-radius:12px; background:#fffaeb; color:#3d2e05; font-size:13px; line-height:1.45; }
+.submitAnyway>strong { font-size:14px; }
+.submitAnyway ul { margin:0; padding-left:18px; display:grid; gap:3px; }
+.submitAnyway li.fail b { color:#a93842; }
+.submitAnyway label { display:grid; gap:5px; font-weight:700; }
+.submitAnyway textarea { width:100%; box-sizing:border-box; padding:9px 11px; border:1px solid #e6c56c; border-radius:9px; font:inherit; font-weight:400; background:#fff; resize:vertical; }
+.submitAnyway small { color:#8a6d1c; font-size:12px; }
+.submitAnyway small.ok { color:#1f7a3a; }
+.submitAnyway.compact { margin:8px 0 0; padding:10px 12px; }
+.submitAnyway.blocked { border-color:#f1b5b5; background:#fdecec; color:#5c1a1f; }
+.batchAnywayRow td { background:#fffdf5; padding:4px 14px 14px !important; }
+.batchAnywayRow .submitAnyway { margin-bottom:10px; }
+.batchTypedFields { display:flex; flex-wrap:wrap; align-items:end; gap:10px; margin:0 0 10px; font-size:13px; }
+.batchTypedFields>span { flex-basis:100%; color:#3d2e05; }
+.batchTypedFields label { display:grid; gap:4px; font-size:12px; font-weight:700; }
+.batchTypedFields input { padding:7px 9px; border:1px solid #d0d5dd; border-radius:8px; font:inherit; }
+.tinyButton.warnButton { background:#fff6dd; color:#7a5500; border:1px solid #f0cf7a; }

@@ -4,6 +4,7 @@
 import { buildDemoPortfolio, buildDemoReviews, type DemoInvoice, type DemoPortfolio, type DemoReview, type DemoSubmission } from './demo-data';
 import { DEMO_CLIENT_ID, DEMO_FACTOR_ID } from './demo';
 import { portalConfig } from './portal-config';
+import { flaggedChecks } from './override';
 import type { PortalSession } from './session';
 import type { PortalSubmissionDetail } from './submission-detail';
 import type { CompanyRecord, ValidationReport } from './types';
@@ -157,7 +158,7 @@ export function recordDemoSubmission(input: { invoiceId: string; clientId: strin
         referenceNumber: invoice.referenceNumber,
         invoiceAmount: invoice.invoiceAmount,
         invoiceDate: invoice.invoiceDate.slice(0, 10),
-        reason: input.validation.checks.filter((c) => c.status === 'REVIEW').map((c) => c.label).join(', ') || 'Portal review required.',
+        reason: flaggedChecks(input.validation.checks).map((c) => c.label).join(', ') || 'Portal review required.',
         checks: input.validation.checks.filter((c) => c.status === 'REVIEW' || c.status === 'FAIL'),
         createdAt: submission.createdAt,
         status: 'OPEN',

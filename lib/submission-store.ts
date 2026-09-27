@@ -94,7 +94,7 @@ export async function persistSubmissionStart(args: {
 
     let reviewId: string | null = null;
     if (args.validation.status === 'REVIEW') {
-      const reasons = args.validation.checks.filter((check) => check.status === 'REVIEW').map((check) => `${check.label}: ${check.message}`);
+      const reasons = args.validation.checks.filter((check) => check.status === 'REVIEW' || check.status === 'FAIL').map((check) => `${check.label}: ${check.message}`);
       reviewId = `review_${randomUUID()}`;
       await client.query(`insert into review_items (id, submission_id, reason) values ($1,$2,$3)`, [
         reviewId,

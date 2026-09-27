@@ -265,9 +265,11 @@ export function buildDemoReviews(portfolio: DemoPortfolio, now: number): DemoRev
       { id: 'debtor-phone', label: 'Debtor phone matches FactorCloud', status: 'REVIEW', message: 'Phone on the invoice differs from the debtor record.', comparisons: [{ label: 'Phone', document: '(214) 555-0199', other: '(334) 377-0535' }] },
     ] },
     { reason: 'Proof of delivery is not signed.', hoursAgo: 3.2, checks: [
+      { id: 'client-explanation', label: "Client's note", status: 'REVIEW', message: 'Receiver signed on their tablet, not on paper. I asked them to email the signed copy.' },
       { id: 'signed-pod', label: 'Signed proof of delivery', status: 'REVIEW', message: 'The POD in this packet has no visible receiver signature.' },
     ] },
     { reason: 'Amount differs between the rate confirmation and the invoice.', hoursAgo: 5.6, checks: [
+      { id: 'client-explanation', label: "Client's note", status: 'REVIEW', message: 'Receiver charged a $150 lumper fee at delivery. The lumper receipt is in the packet.' },
       { id: 'amount-across-docs', label: 'Amount matches across documents', status: 'REVIEW', message: 'Rate confirmation and invoice totals differ by $150.00 (lumper fee?).', comparisons: [{ label: 'Invoice', document: '$2,950.00', other: 'Rate con $2,800.00' }] },
     ] },
     { reason: 'Duplicate check could not be completed.', hoursAgo: 9.1, checks: [
@@ -277,6 +279,7 @@ export function buildDemoReviews(portfolio: DemoPortfolio, now: number): DemoRev
       { id: 'invoice-age', label: 'Invoice age', status: 'REVIEW', message: 'Invoice date is 52 days ago; the purchase window is 45 days.' },
     ] },
     { reason: 'Reference number on the BOL does not match the invoice.', hoursAgo: 28, checks: [
+      { id: 'client-explanation', label: "Client's note", status: 'REVIEW', message: 'BOL scan is blurry. It is LD448210, the same load as the invoice.' },
       { id: 'reference-across-docs', label: 'Reference matches across documents', status: 'REVIEW', message: 'BOL shows LD448120, invoice shows LD448210.', comparisons: [{ label: 'Reference', document: 'LD448210', other: 'BOL LD448120' }] },
       { id: 'uncertain-fields', label: 'Extraction confidence', status: 'REVIEW', message: 'Reference number was hard to read on the BOL scan.' },
     ] },
