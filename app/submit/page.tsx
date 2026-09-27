@@ -8,6 +8,9 @@ import { validate } from '@/lib/rules';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
 import { applyCreditCheck, withInvoiceAmount } from '@/lib/credit';
 import { CreditMeter } from '@/app/components/CreditMeter';
+import { SubmitAnywayBox } from '@/app/components/SubmitAnyway';
+import { explanationProblem, flaggedChecks, hardBlocks } from '@/lib/override';
+import { demoInBrowser, demoViewInBrowser } from '@/lib/demo';
 import type { AnalyzeResponse, CreateResponse, ExtractedFields, ValidationReport } from '@/lib/types';
 
 type StatusResponse = {
@@ -23,6 +26,10 @@ export default function SubmitInvoicePage() {
   const [message, setMessage] = useState('');
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [createResult, setCreateResult] = useState<CreateResponse | null>(null);
+  const [explanation, setExplanation] = useState('');
+  const [asDriver, setAsDriver] = useState(false);
+
+  useEffect(() => { setAsDriver(demoInBrowser() && demoViewInBrowser() === 'driver'); }, []);
 
   useEffect(() => {
     void fetch('/api/status', { cache: 'no-store' }).then(async (res) => {
@@ -57,6 +64,7 @@ export default function SubmitInvoicePage() {
   function chooseFiles(next: File[]) {
     setFiles(next);
     setAnalysis(null);
+    setExplanation('');
     setOriginalPrimary(null);
     setCreateResult(null);
   }
@@ -104,7 +112,7 @@ export default function SubmitInvoicePage() {
     try {
       const form = new FormData();
       const fields = primary.fields;
-      const needsReview = liveValidation.status === 'REVIEW';
+      const needsReview = liveValidation.status !== 'PASS';
       form.append('payload', JSON.stringify({
         invoiceNumber: fields.invoiceNumber,
         referenceNumber: fields.referenceNumber,
@@ -112,6 +120,7 @@ export default function SubmitInvoicePage() {
         invoiceDate: fields.invoiceDate,
         debtorId: analysis.debtor.id,
         analysisReceipt: analysis.analysisReceipt,
+        explanation: needsReview ? explanation.trim() : null,
       }));
       analysis.documents.forEach((document) => {
         const source = document.sourceIndex == null ? undefined : files[document.sourceIndex];
@@ -143,6 +152,9 @@ export default function SubmitInvoicePage() {
   const attentionChecks = liveValidation?.checks.filter((check) => check.status === 'FAIL' || check.status === 'REVIEW') ?? [];
   const submitted = Boolean(createResult?.ok && createResult.invoiceId);
   const submittedForReview = submitted && (createResult?.validation?.status === 'REVIEW' || liveValidation?.status === 'REVIEW');
+  const flagged = flaggedChecks(liveValidation?.checks);
+  const blocked = liveValidation ? hardBlocks(liveValidation) : [];
+  const explained = !flagged.length || !explanationProblem(explanation);
   const canSubmit = Boolean(
     analysis
     && analysis.analysisReceipt
@@ -151,16 +163,17 @@ export default function SubmitInvoicePage() {
     && primary?.fields.invoiceNumber
     && primary?.fields.invoiceAmount
     && primary?.fields.invoiceDate
-    && liveValidation?.status !== 'FAIL'
+    && !blocked.length
+    && explained
     && !submitted,
   );
   const submitLabel = !analysis
     ? 'Verify documents first'
-    : liveValidation?.status === 'REVIEW'
-      ? 'Submit for manual review'
+    : blocked.length
+      ? 'Cannot be submitted'
       : liveValidation?.status === 'PASS'
         ? 'Submit invoice to FactorCloud'
-        : 'Fix issues before submitting';
+        : explained ? 'Submit with my note for review' : 'Add a note to submit anyway';
 
   return (
     <main className="shell portalToolShell">
@@ -169,8 +182,8 @@ export default function SubmitInvoicePage() {
       <section className="hero portalSubHero">
         <div>
           <span className="eyebrow">FactorCloud Client Portal</span>
-          <h1>Submit an Invoice</h1>
-          <p>Upload your invoice and freight paperwork. We will read it, verify the key details, and flag anything that needs attention before it enters FactorCloud.</p>
+          <h1>{asDriver ? 'Send in paperwork' : 'Submit an Invoice'}</h1>
+          <p>{asDriver ? 'Take photos of the invoice, BOL and signed POD, or upload the files. We check them before they go to your factor.' : 'Upload your invoice and freight paperwork. We will read it, verify the key details, and flag anything that needs attention before it enters FactorCloud.'}</p>
         </div>
         <div className="badges">
           <span className="prototype">Automated verification</span>
@@ -305,16 +318,18 @@ export default function SubmitInvoicePage() {
                 {submittedForReview && <span>You do not need to submit it again. The factor review decision will appear in the invoice history.</span>}
               </div>
               <div className="portalWelcomeActions">
-                <a className="primaryLink" href={`/invoices/${encodeURIComponent(createResult!.invoiceId!)}`}>View submitted invoice</a>
-                <a className="secondaryLink" href="/submit">Submit another invoice</a>
+                {asDriver
+                  ? <a className="primaryLink" href="/driver">Back to my invoices</a>
+                  : <a className="primaryLink" href={`/invoices/${encodeURIComponent(createResult!.invoiceId!)}`}>View submitted invoice</a>}
+                <a className="secondaryLink" href="/submit">{asDriver ? 'Send another' : 'Submit another invoice'}</a>
               </div>
             </>
           ) : (
             <>
               <h2>Submit to FactorCloud</h2>
-              <p>{!analysis ? 'Complete verification before submitting.' : liveValidation?.status === 'REVIEW' ? 'You can submit this invoice, but it will be clearly marked for manual review.' : 'Clean submissions are created in FactorCloud with the source documents attached.'}</p>
+              <p>{!analysis ? 'Complete verification before submitting.' : liveValidation?.status !== 'PASS' ? 'Something did not match. You can fix it and verify again, or submit it with a note for your factor to review.' : 'Clean submissions are created in FactorCloud with the source documents attached.'}</p>
               {analysis?.factorCloudLookupFailed && <div className="warning">FactorCloud could not be reached during analysis. Re-run verification before submitting.</div>}
-              {liveValidation?.status === 'REVIEW' && !analysis?.factorCloudLookupFailed && <div className="warning">This packet has a warning. Submitting it will create the FactorCloud invoice with a clear manual-review marker in its notes.</div>}
+              {analysis && !analysis.factorCloudLookupFailed && <SubmitAnywayBox flagged={flagged} blocked={blocked} value={explanation} onChange={setExplanation} />}
               <button className="secondary" onClick={submitInvoice} disabled={!canSubmit || Boolean(busy)}>
                 {busy === 'Submitting invoice' ? 'Submitting...' : submitLabel}
               </button>

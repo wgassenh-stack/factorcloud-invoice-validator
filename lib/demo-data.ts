@@ -5,7 +5,7 @@
 // 90+ day invoice, a factor-level concentration in one client and DSO improving over the year.
 
 import type { CheckResult, CompanyRecord, ExtractedFields, ExtractionUsage, ValidationReport } from './types';
-import { DEMO_CLIENT_ID } from './demo';
+import { DEMO_CLIENT_ID, DEMO_DRIVER, DEMO_DRIVERS } from './demo';
 
 export interface DemoInvoice {
   id: string;
@@ -25,10 +25,12 @@ export interface DemoInvoice {
   fundedDate: string | null;
   paidDate: string | null;
   dueDate: string;
-  status: 'PENDING' | 'APPROVED' | 'FUNDED' | 'PAID';
+  status: 'PENDING' | 'APPROVED' | 'FUNDED' | 'PAID' | 'REJECTED';
   verificationStatus: 'NOT_VERIFIED' | 'VERIFIED';
   paymentStatus: 'OPEN' | 'PARTIAL' | 'PAID';
   disputed: boolean;
+  /** Demo client only: the driver who sent it in. */
+  submittedBy?: string;
   notes: string | null;
 }
 
@@ -162,7 +164,7 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
   const drafts: Draft[] = [];
   const counters = new Map<string, number>();
 
-  const makeInvoice = (clientIndex: number, debtorIndex: number, daysAgo: number, amount: number, opts: { forceOpen?: boolean; disputed?: boolean; status?: 'PENDING' | 'APPROVED' } = {}): Draft => {
+  const makeInvoice = (clientIndex: number, debtorIndex: number, daysAgo: number, amount: number, opts: { forceOpen?: boolean; disputed?: boolean; status?: 'PENDING' | 'APPROVED' | 'REJECTED'; submittedBy?: string; notes?: string } = {}): Draft => {
     const spec = CLIENT_SPECS[clientIndex];
     const client = clients[clientIndex];
     const debtor = debtors[debtorIndex];
@@ -207,10 +209,12 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
       paidDate: paid ? `${iso(daysAgo - lag)}T00:00:00Z` : null,
       dueDate: `${iso(daysAgo - (spec.kind === 'staffing' ? 45 : 30))}T00:00:00Z`,
       status: paid ? 'PAID' : status,
-      verificationStatus: status === 'PENDING' ? 'NOT_VERIFIED' : 'VERIFIED',
+      verificationStatus: status === 'PENDING' || status === 'REJECTED' ? 'NOT_VERIFIED' : 'VERIFIED',
       paymentStatus: paid ? 'PAID' : partial ? 'PARTIAL' : 'OPEN',
       disputed: Boolean(opts.disputed) || (funded && !paid && daysAgo > 30 && rng() < 0.04),
-      notes: null,
+      notes: opts.notes ?? null,
+      // Drivers take turns on the portal client's loads; planted invoices name theirs.
+      ...(clientIndex === 0 ? { submittedBy: opts.submittedBy ?? DEMO_DRIVERS[n % DEMO_DRIVERS.length] } : {}),
     };
   };
 
@@ -241,9 +245,11 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
   drafts.push(makeInvoice(0, 1, 97, 6840, { forceOpen: true }));
   drafts.push(makeInvoice(0, 1, 74, 4215.5, { forceOpen: true, disputed: true }));
   // Planted: sent in but not funded yet, one of them waiting long enough to flag.
-  drafts.push(makeInvoice(0, 3, 5, 2875, { status: 'PENDING' }));
-  drafts.push(makeInvoice(0, 0, 1, 3410, { status: 'APPROVED' }));
-  drafts.push(makeInvoice(0, 2, 1, 1985.25, { status: 'PENDING' }));
+  drafts.push(makeInvoice(0, 3, 5, 2875, { status: 'PENDING', submittedBy: DEMO_DRIVER }));
+  drafts.push(makeInvoice(0, 0, 1, 3410, { status: 'APPROVED', submittedBy: DEMO_DRIVER }));
+  drafts.push(makeInvoice(0, 2, 1, 1985.25, { status: 'PENDING', submittedBy: DEMO_DRIVER }));
+  // Planted: one of the demo driver's invoices the factor rejected, so the Driver view has one to resend.
+  drafts.push(makeInvoice(0, 4, 6, 2240, { status: 'REJECTED', submittedBy: DEMO_DRIVER, notes: 'The rate confirmation is for a different load (LD447902). Send it again with the rate con for this load.' }));
 
   drafts.sort((a, b) => a.createdOn.localeCompare(b.createdOn));
   const invoices = drafts.map((draft, i) => ({ id: `demo-inv-${String(i + 1).padStart(5, '0')}`, ...draft }));
@@ -265,9 +271,11 @@ export function buildDemoReviews(portfolio: DemoPortfolio, now: number): DemoRev
       { id: 'debtor-phone', label: 'Debtor phone matches FactorCloud', status: 'REVIEW', message: 'Phone on the invoice differs from the debtor record.', comparisons: [{ label: 'Phone', document: '(214) 555-0199', other: '(334) 377-0535' }] },
     ] },
     { reason: 'Proof of delivery is not signed.', hoursAgo: 3.2, checks: [
+      { id: 'client-explanation', label: "Client's note", status: 'REVIEW', message: 'Receiver signed on their tablet, not on paper. I asked them to email the signed copy.' },
       { id: 'signed-pod', label: 'Signed proof of delivery', status: 'REVIEW', message: 'The POD in this packet has no visible receiver signature.' },
     ] },
     { reason: 'Amount differs between the rate confirmation and the invoice.', hoursAgo: 5.6, checks: [
+      { id: 'client-explanation', label: "Client's note", status: 'REVIEW', message: 'Receiver charged a $150 lumper fee at delivery. The lumper receipt is in the packet.' },
       { id: 'amount-across-docs', label: 'Amount matches across documents', status: 'REVIEW', message: 'Rate confirmation and invoice totals differ by $150.00 (lumper fee?).', comparisons: [{ label: 'Invoice', document: '$2,950.00', other: 'Rate con $2,800.00' }] },
     ] },
     { reason: 'Duplicate check could not be completed.', hoursAgo: 9.1, checks: [
@@ -277,6 +285,7 @@ export function buildDemoReviews(portfolio: DemoPortfolio, now: number): DemoRev
       { id: 'invoice-age', label: 'Invoice age', status: 'REVIEW', message: 'Invoice date is 52 days ago; the purchase window is 45 days.' },
     ] },
     { reason: 'Reference number on the BOL does not match the invoice.', hoursAgo: 28, checks: [
+      { id: 'client-explanation', label: "Client's note", status: 'REVIEW', message: 'BOL scan is blurry. It is LD448210, the same load as the invoice.' },
       { id: 'reference-across-docs', label: 'Reference matches across documents', status: 'REVIEW', message: 'BOL shows LD448120, invoice shows LD448210.', comparisons: [{ label: 'Reference', document: 'LD448210', other: 'BOL LD448120' }] },
       { id: 'uncertain-fields', label: 'Extraction confidence', status: 'REVIEW', message: 'Reference number was hard to read on the BOL scan.' },
     ] },

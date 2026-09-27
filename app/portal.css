@@ -92,3 +92,71 @@
 .riskId { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px!important; }
 @media (max-width:900px) { .portalMetricGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.portalDashboardGrid{grid-template-columns:1fr}.portalWelcome{align-items:flex-start}.portalInvoiceRow{grid-template-columns:40px minmax(0,1fr) auto}.invoiceAmount{grid-column:2/4;text-align:left}.portalNav{height:auto;padding:16px 0;align-items:flex-start;flex-wrap:wrap}.portalNavLinks{order:3;width:100%;overflow:auto}.portalAccount{margin-left:auto} }
 @media (max-width:600px) { .portalShell{padding:0 16px 60px}.portalWelcome{flex-direction:column}.portalWelcomeActions{width:100%}.primaryLink,.secondaryLink{flex:1}.portalMetricGrid{grid-template-columns:1fr 1fr}.portalMetric>strong{font-size:23px}.concentrationRow{grid-template-columns:1fr 44px}.concentrationTrack{grid-column:1/-1;order:3}.portalStatus{display:none}.portalInvoiceRow{grid-template-columns:36px minmax(0,1fr) auto}.invoiceAmount{grid-column:auto;text-align:right}.portalNavLinks a{font-size:12px;padding:8px 9px}.portalBrand strong{font-size:14px}.statusStrip{grid-template-columns:repeat(2,1fr)}.statusStrip>div:nth-child(2){border-right:0}.statusStrip>div:nth-child(-n+2){border-bottom:1px solid #eef1f5} }
+
+/* Submit anyway with a note */
+.submitAnyway { display:grid; gap:7px; margin:12px 0; padding:14px 16px; border:1px solid #f5d98f; border-radius:12px; background:#fffaeb; color:#3d2e05; font-size:13px; line-height:1.45; }
+.submitAnyway>strong { font-size:14px; }
+.submitAnyway ul { margin:0; padding-left:18px; display:grid; gap:3px; }
+.submitAnyway li.fail b { color:#a93842; }
+.submitAnyway label { display:grid; gap:5px; font-weight:700; }
+.submitAnyway textarea { width:100%; box-sizing:border-box; padding:9px 11px; border:1px solid #e6c56c; border-radius:9px; font:inherit; font-weight:400; background:#fff; resize:vertical; }
+.submitAnyway small { color:#8a6d1c; font-size:12px; }
+.submitAnyway small.ok { color:#1f7a3a; }
+.submitAnyway.compact { margin:8px 0 0; padding:10px 12px; }
+.submitAnyway.blocked { border-color:#f1b5b5; background:#fdecec; color:#5c1a1f; }
+.batchAnywayRow td { background:#fffdf5; padding:4px 14px 14px !important; }
+.batchAnywayRow .submitAnyway { margin-bottom:10px; }
+.batchTypedFields { display:flex; flex-wrap:wrap; align-items:end; gap:10px; margin:0 0 10px; font-size:13px; }
+.batchTypedFields>span { flex-basis:100%; color:#3d2e05; }
+.batchTypedFields label { display:grid; gap:4px; font-size:12px; font-weight:700; }
+.batchTypedFields input { padding:7px 9px; border:1px solid #d0d5dd; border-radius:8px; font:inherit; }
+.tinyButton.warnButton { background:#fff6dd; color:#7a5500; border:1px solid #f0cf7a; }
+
+/* Driver view (demo) */
+.driverPage { max-width:980px; }
+.driverHero { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:18px; margin:6px 0 18px; }
+.driverHeroMeta { display:flex; align-items:center; gap:10px; }
+.driverHero h1 { margin:6px 0 4px; font-size:clamp(30px,5vw,44px); letter-spacing:-.03em; }
+.driverHero p { margin:0; color:#667085; max-width:520px; }
+.driverSendButton { display:inline-flex; align-items:center; gap:10px; padding:16px 26px; border-radius:14px; background:#0b1220; color:#fff; font-weight:800; font-size:17px; text-decoration:none; box-shadow:0 10px 24px rgba(11,18,32,.18); }
+.driverSendButton span { font-size:20px; }
+.driverCounts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:22px; }
+.driverCounts div { display:grid; gap:2px; padding:14px 16px; border:1px solid #e7ebf0; border-radius:14px; background:#fff; }
+.driverCounts strong { font-size:28px; letter-spacing:-.02em; }
+.driverCounts span { color:#667085; font-size:12px; font-weight:700; }
+.driverCounts .bad strong { color:#b42318; }
+.driverCounts .good strong { color:#067647; }
+.driverSection { margin-bottom:24px; }
+.driverSection h2 { margin:0 0 8px; font-size:18px; }
+.driverHint { margin:-4px 0 10px; color:#667085; font-size:13px; }
+.driverList { display:grid; gap:8px; }
+.driverCard { padding:13px 16px; border:1px solid #e7ebf0; border-radius:14px; background:#fff; }
+.driverCard.fix { border-color:#f5d98f; background:#fffdf5; }
+.driverCard.rejected { border-color:#f1b5b5; background:#fff8f8; }
+.driverCard .fixPanel { margin:12px 0 0; }
+.driverRowHead { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:14px; }
+.driverRowId { display:grid; gap:2px; min-width:0; }
+.driverRowId strong { font-size:15px; }
+.driverRowId span { color:#667085; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.driverRowStatus { display:grid; justify-items:end; gap:5px; }
+.driverPill { padding:4px 10px; border-radius:999px; font-size:12px; font-weight:800; background:#eef4ff; color:#1f4fa3; }
+.driverPill.fix { background:#fff1c2; color:#7a5500; }
+.driverPill.rejected { background:#fde2e2; color:#a31d1d; }
+.driverPill.approved, .driverPill.funded { background:#e3f6e8; color:#1f7a3a; }
+.driverPill.paid { background:#0d366b; color:#fff; }
+.driverPill.canceled { background:#eceef1; color:#667085; }
+.driverSteps { display:flex; gap:3px; }
+.driverSteps i { width:14px; height:4px; border-radius:2px; background:#e4e7ec; }
+.driverSteps i.on { background:#2a78d6; }
+.driverAmount { font-size:15px; font-variant-numeric:tabular-nums; }
+.driverDetail { margin:6px 0 0; color:#667085; font-size:12px; }
+.driverRejected { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; }
+.driverRejected p { margin:0; font-size:13px; color:#5c1a1f; }
+.driverResend { padding:9px 16px; border-radius:10px; background:#0b1220; color:#fff; font-weight:800; font-size:13px; text-decoration:none; }
+@media (max-width:640px) {
+  .driverSendButton { width:100%; justify-content:center; }
+  .driverCounts strong { font-size:22px; }
+  .driverRowHead { grid-template-columns:minmax(0,1fr) auto; }
+  .driverRowStatus { grid-column:1; grid-row:2; justify-items:start; grid-auto-flow:column; align-items:center; }
+  .driverAmount { grid-column:2; grid-row:1; }
+}

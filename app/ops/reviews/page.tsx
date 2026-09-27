@@ -1,5 +1,6 @@
 'use client';
 
+import { clientExplanation, flaggedChecks } from '@/lib/override';
 import { useEffect, useMemo, useState } from 'react';
 import { OpsSignOut } from '../../components/OpsSignOut';
 import { CountUp, Skeleton, StatusFlag, VizEmpty } from '@/app/components/CommandCharts';
@@ -180,7 +181,8 @@ function ReviewCard({ record, index, now, clientName, debtorName, busy, disabled
   const [note, setNote] = useState('');
   const hours = record.createdAt ? (now - Date.parse(record.createdAt)) / 3_600_000 : null;
   const sla = hours == null ? null : hours < 4 ? 'GOOD' : hours < 24 ? 'REVIEW' : 'HIGH';
-  const flagged = (record.checks ?? []).filter((check) => check.status === 'REVIEW' || check.status === 'FAIL');
+  const flagged = flaggedChecks(record.checks);
+  const clientNote = clientExplanation(record.checks);
 
   return <article className={`reviewCard ${leaving ? 'leaving' : ''}`} style={{ animationDelay: `${index * 50}ms` }}>
     <div className="reviewCardMain">
@@ -195,7 +197,8 @@ function ReviewCard({ record, index, now, clientName, debtorName, busy, disabled
         <span>→ {debtorName}</span>
         <span>{record.invoiceDate || 'No date'}</span>
       </div>
-      <p className="reviewCardReason">{record.reason || pretty(record.status || 'Review required')}</p>
+      <p className="reviewCardReason">{flagged.length ? flagged.map((check) => check.label).join(', ') : record.reason || pretty(record.status || 'Review required')}</p>
+      {clientNote && <div className="clientNote"><b>Submitted anyway. Client's note</b><span>“{clientNote}”</span></div>}
       {record.fix && <div className={`fixThread ${record.fix.status === 'DONE' ? 'answered' : ''}`}>
         <div><b>You asked</b><span>{record.fix.message}</span></div>
         {record.fix.status === 'DONE' && <div><b>Client</b><span>{record.fix.responseNote || 'Uploaded the requested files.'}{record.submissionId && <> · <a href={`/ops/submissions/${encodeURIComponent(record.submissionId)}`}>see files</a></>}</span></div>}

@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { DEMO_COOKIE, demoFromCookie, demoMode } from './demo';
+import { DEMO_COOKIE, DEMO_VIEW_COOKIE, demoFromCookie, demoMode, demoViewFromCookie, type DemoClientView } from './demo';
 
 /**
  * Whether the current server request is in demo mode: the deployment setting, or this browser's
@@ -12,5 +12,15 @@ export async function demoRequest(): Promise<boolean> {
     return demoFromCookie(jar.get(DEMO_COOKIE)?.value);
   } catch {
     return false;
+  }
+}
+
+/** Demo only: whether this browser is on the Manager or the Driver view of the client side. */
+export async function demoClientView(): Promise<DemoClientView> {
+  try {
+    const jar = await cookies();
+    return demoViewFromCookie(jar.get(DEMO_VIEW_COOKIE)?.value);
+  } catch {
+    return 'manager';
   }
 }

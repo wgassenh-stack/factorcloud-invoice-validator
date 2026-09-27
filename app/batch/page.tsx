@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { PortalNav } from '@/app/components/PortalNav';
+import { SubmitAnywayBox } from '@/app/components/SubmitAnyway';
+import { explanationProblem, flaggedChecks, hardBlocks } from '@/lib/override';
 import type { BatchAnalyzeResponse, BatchPacketAnalysis, CreateResponse } from '@/lib/types';
 
 type StatusResponse = {
@@ -9,6 +11,7 @@ type StatusResponse = {
   ai: { configured: boolean; model: string; thinking: string };
 };
 
+type TypedFields = { invoiceNumber: string; invoiceAmount: string; invoiceDate: string };
 type RowResult = { state: 'creating' | 'created' | 'error'; message: string; invoiceId?: string };
 
 export default function BatchPage() {
@@ -18,6 +21,9 @@ export default function BatchPage() {
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
   const [results, setResults] = useState<Record<string, RowResult>>({});
+  const [openRow, setOpenRow] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [typed, setTyped] = useState<Record<string, Partial<TypedFields>>>({});
 
   useEffect(() => {
     void fetch('/api/status', { cache: 'no-store' }).then(async (res) => {
@@ -53,21 +59,24 @@ export default function BatchPage() {
     }
   }
 
-  async function createOne(packet: BatchPacketAnalysis): Promise<boolean> {
+  async function createOne(packet: BatchPacketAnalysis, explanation: string | null = null): Promise<boolean> {
     const key = packet.packetId;
-    if (packet.validation.status !== 'PASS' || !packet.debtor || packet.factorCloudLookupFailed || !packet.analysisReceipt) return false;
+    if (!packet.debtor || packet.factorCloudLookupFailed || !packet.analysisReceipt || hardBlocks(packet.validation).length) return false;
+    if (packet.validation.status !== 'PASS' && explanationProblem(explanation)) return false;
     setResults((current) => ({ ...current, [key]: { state: 'creating', message: 'Submitting...' } }));
     try {
       const primary = packet.documents[packet.primaryIndex];
       const f = primary.fields;
       const form = new FormData();
+      const own = typed[key] ?? {};
       form.append('payload', JSON.stringify({
-        invoiceNumber: f.invoiceNumber,
+        invoiceNumber: own.invoiceNumber?.trim() || f.invoiceNumber,
         referenceNumber: f.referenceNumber,
-        invoiceAmount: f.invoiceAmount,
-        invoiceDate: f.invoiceDate,
+        invoiceAmount: own.invoiceAmount?.trim() || f.invoiceAmount,
+        invoiceDate: own.invoiceDate?.trim() || f.invoiceDate,
         debtorId: packet.debtor.id,
         analysisReceipt: packet.analysisReceipt,
+        explanation: packet.validation.status === 'PASS' ? null : explanation?.trim(),
       }));
       for (const doc of packet.documents) {
         const original = doc.sourceIndex == null ? undefined : files[doc.sourceIndex];
@@ -76,7 +85,8 @@ export default function BatchPage() {
       const res = await fetch('/api/create', { method: 'POST', body: form });
       const body = await res.json() as CreateResponse;
       if (!res.ok) throw new Error(body.error || 'Submission failed.');
-      setResults((current) => ({ ...current, [key]: { state: 'created', message: 'Submitted', invoiceId: body.invoiceId ?? undefined } }));
+      setResults((current) => ({ ...current, [key]: { state: 'created', message: packet.validation.status === 'PASS' ? 'Submitted' : 'Sent for review', invoiceId: body.invoiceId ?? undefined } }));
+      if (openRow === key) setOpenRow(null);
       return true;
     } catch (err) {
       setResults((current) => ({ ...current, [key]: { state: 'error', message: err instanceof Error ? err.message : String(err) } }));
@@ -134,7 +144,7 @@ export default function BatchPage() {
           <Stat label="Invoice packets" value={analysis.packets.length} />
           <Stat label="Ready" value={counts.pass} tone="pass" />
           <Stat label="Needs review" value={counts.review} tone="review" />
-          <Stat label="Blocked" value={counts.fail} tone="fail" />
+          <Stat label="Failed checks" value={counts.fail} tone="fail" />
           <Stat label="Unassigned docs" value={analysis.unassignedDocuments.length} />
         </section>
 
@@ -142,7 +152,7 @@ export default function BatchPage() {
 
         <section className="card batchTableCard">
           <div className="batchTableHeader">
-            <div><h2>Invoice packets</h2><p>Ready invoices can be submitted together. Anything needing review stays out of the bulk queue.</p></div>
+            <div><h2>Invoice packets</h2><p>Ready invoices can be submitted together. Anything that didn't pass can still be sent one at a time, with a note for your factor to review.</p></div>
             <button className="small batchCreateButton" onClick={createAllPass} disabled={!eligiblePass || Boolean(busy)}>{busy === 'Submitting PASS invoices' ? 'Submitting...' : `Submit ready invoices (${eligiblePass})`}</button>
           </div>
           <div className="batchTableWrap">
@@ -153,7 +163,17 @@ export default function BatchPage() {
                   const primary = packet.documents[packet.primaryIndex]?.fields;
                   const attention = packet.validation.checks.filter((c) => c.status === 'FAIL' || c.status === 'REVIEW');
                   const result = results[packet.packetId];
-                  return <tr key={packet.packetId}>
+                  const flagged = flaggedChecks(packet.validation.checks);
+                  const blocked = hardBlocks(packet.validation);
+                  const submittable = Boolean(packet.debtor && packet.analysisReceipt && !packet.factorCloudLookupFailed && !blocked.length);
+                  const isOpen = openRow === packet.packetId;
+                  const own = typed[packet.packetId] ?? {};
+                  const missing = ([
+                    { key: 'invoiceNumber', label: 'Invoice #', empty: !primary?.invoiceNumber },
+                    { key: 'invoiceAmount', label: 'Amount', empty: !(primary?.invoiceAmount && primary.invoiceAmount > 0) },
+                    { key: 'invoiceDate', label: 'Invoice date', empty: !primary?.invoiceDate },
+                  ] as const).filter((m) => m.empty);
+                  return <Fragment key={packet.packetId}><tr className={isOpen ? 'batchRowOpen' : ''}>
                     <td><strong>{primary?.invoiceNumber || '(unreadable)'}</strong></td>
                     <td>{primary?.debtorName || '-'}</td>
                     <td>{primary?.invoiceAmount == null ? '-' : `$${primary.invoiceAmount.toLocaleString()}`}</td>
@@ -162,11 +182,23 @@ export default function BatchPage() {
                     <td><span className={`pill ${packet.validation.status.toLowerCase()}`}>{packet.validation.status === 'PASS' ? 'READY' : packet.validation.status}</span></td>
                     <td className="attentionCell">{attention.length ? attention.map((c) => <span key={c.id}>{c.label}: {c.message}</span>) : <span className="allClear">All checks clear</span>}</td>
                     <td>
-                      {result ? <span className={`rowResult ${result.state}`}>{result.message}</span> : packet.validation.status === 'PASS' && packet.debtor && packet.analysisReceipt && !packet.factorCloudLookupFailed
-                        ? <button className="tinyButton" disabled={Boolean(busy)} onClick={() => void createOne(packet)}>Submit</button>
-                        : <span className="muted">Not ready</span>}
+                      {result?.state === 'created' || result?.state === 'creating' ? <span className={`rowResult ${result.state}`}>{result.message}</span>
+                        : !submittable ? <span className="muted">{blocked.length ? 'Cannot submit' : 'Not ready'}</span>
+                          : packet.validation.status === 'PASS'
+                            ? <button className="tinyButton" disabled={Boolean(busy)} onClick={() => void createOne(packet)}>Submit</button>
+                            : <button className="tinyButton warnButton" disabled={Boolean(busy)} onClick={() => setOpenRow(isOpen ? null : packet.packetId)}>{isOpen ? 'Close' : 'Submit anyway…'}</button>}
+                      {result?.state === 'error' && <span className="rowResult error">{result.message}</span>}
                     </td>
-                  </tr>;
+                  </tr>
+                  {isOpen && <tr className="batchAnywayRow"><td colSpan={8}>
+                    <SubmitAnywayBox compact flagged={flagged} blocked={blocked} value={notes[packet.packetId] ?? ''} onChange={(text) => setNotes((current) => ({ ...current, [packet.packetId]: text }))} />
+                    {missing.length > 0 && <div className="batchTypedFields">
+                      <span>We couldn't read {missing.map((m) => m.label.toLowerCase()).join(', ')}. Type {missing.length === 1 ? 'it' : 'them'} in:</span>
+                      {missing.map((m) => <label key={m.key}>{m.label}<input type={m.key === 'invoiceDate' ? 'date' : 'text'} inputMode={m.key === 'invoiceAmount' ? 'decimal' : undefined} value={own[m.key] ?? ''} onChange={(e) => setTyped((current) => ({ ...current, [packet.packetId]: { ...current[packet.packetId], [m.key]: e.target.value } }))} /></label>)}
+                    </div>}
+                    <button className="small" disabled={Boolean(busy) || Boolean(explanationProblem(notes[packet.packetId])) || missing.some((m) => !own[m.key]?.trim())} onClick={() => void createOne(packet, notes[packet.packetId] ?? '')}>Submit with my note for review</button>
+                  </td></tr>}
+                  </Fragment>;
                 })}
               </tbody>
             </table>

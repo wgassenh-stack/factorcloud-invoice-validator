@@ -11,6 +11,8 @@ import type { RiskInvoiceRecord } from '@/lib/risk';
 import { AgingBars, CountUp, DashboardSkeleton, DsoLine, LifecyclePipeline, compactMoney } from '@/app/components/CommandCharts';
 import { DemoBadge } from '@/app/components/DemoBadge';
 import { FixRequestsBanner } from '@/app/components/FixRequests';
+import { demoInBrowser, setDemoViewInBrowser } from '@/lib/demo';
+import type { DriverSummary } from '@/lib/demo-store';
 
 type RiskRecord = RiskInvoiceRecord;
 
@@ -50,6 +52,9 @@ type PortalData = {
   debtorAging: AgingSummary;
   dso: DsoPoint[];
   demo?: boolean;
+  /** Demo only: who sent in each invoice, and how each driver's paperwork is doing. */
+  submitters?: Record<string, string>;
+  drivers?: DriverSummary[];
   source: {
     clientId: string;
     clientName: string;
@@ -61,13 +66,14 @@ type PortalData = {
 };
 
 const CLIENT_PRESETS: DashboardPreset[] = [
-  { id: 'overview', label: 'Overview', description: 'Your money and what needs you', widgets: ['metrics', 'pipeline', 'cash', 'debtor-aging', 'attention', 'recent'] },
+  { id: 'overview', label: 'Overview', description: 'Your money and what needs you', widgets: ['metrics', 'pipeline', 'cash', 'debtor-aging', 'attention', 'recent', 'drivers'] },
   { id: 'trends', label: 'Trends', description: 'How volume, payment speed and your debtor mix are moving', widgets: ['dso', 'trend', 'status', 'concentration'] },
 ];
 
 const CLIENT_WIDGETS: DashboardWidgetOption[] = [
   { id: 'pipeline', label: 'Invoice pipeline', description: 'Submitted, verified, funded and paid at a glance' },
   { id: 'cash', label: 'Where your money is', description: 'Paid to you, the fee and the reserve coming back' },
+  { id: 'drivers', label: 'Paperwork by driver', description: 'Who sent what, and whose invoices need a fix (demo)' },
   { id: 'attention', label: 'Needs attention', description: 'Late payers, slow approvals and rejected invoices' },
   { id: 'debtor-aging', label: 'Debtor aging', description: 'Open balances by debtor and age' },
   { id: 'dso', label: 'Days to pay', description: 'How fast your debtors pay, month by month' },
@@ -99,7 +105,10 @@ export default function ClientPortalHome() {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    if (demoInBrowser()) setDemoViewInBrowser('manager');
+    void load();
+  }, []);
 
   const recent = useMemo(() => (data?.records ?? [])
     .slice()
@@ -199,7 +208,7 @@ export default function ClientPortalHome() {
             <StatusDonut items={statusMix} centerValue={data.invoiceCount} centerLabel="Invoices" />
           </DashboardCard>}
 
-          {show('recent') && <DashboardCard className="dashSpan12" kicker="Recent activity" title="Latest invoices" action={<a href="/invoices">View all</a>}>
+          {show('recent') && <DashboardCard className={show('drivers') && data.drivers?.length ? 'dashSpan8' : 'dashSpan12'} kicker="Recent activity" title="Latest invoices" action={<a href="/invoices">View all</a>}>
             <div className="dashInvoiceRows">
               {recent.map((record) => {
                 const workflow = data.portalWorkflows?.[record.id];
@@ -207,7 +216,7 @@ export default function ClientPortalHome() {
                   <div className="dashInvoiceGlyph">{statusInitial(record.status)}</div>
                   <div className="dashInvoiceIdentity">
                     <strong>Invoice {record.invoiceNumber || record.id.slice(0, 8)}</strong>
-                    <span>{record.companyDebtorId ? debtorNames[record.companyDebtorId] || 'FactorCloud debtor' : 'Debtor unavailable'} · {record.invoiceDate || 'No date'}</span>
+                    <span>{record.companyDebtorId ? debtorNames[record.companyDebtorId] || 'FactorCloud debtor' : 'Debtor unavailable'} · {record.invoiceDate || 'No date'}{data.submitters?.[record.id] && <> · Sent in by {data.submitters[record.id]}</>}</span>
                   </div>
                   <div className="dashInvoiceStatuses">
                     <MiniStages record={record} />
@@ -231,6 +240,9 @@ export default function ClientPortalHome() {
             />
           </DashboardCard>}
 
+          {show('drivers') && data.drivers?.length ? <DashboardCard className="dashSpan4" kicker="Your team" title="Paperwork by driver">
+            <DriverTable drivers={data.drivers} />
+          </DashboardCard> : null}
         </section>
 
         <p className="portalDataNote">{data.source.note} Cash and aging figures come from FactorCloud's balance, advance, reserve, funded and paid fields.</p>
@@ -274,6 +286,25 @@ function CashPanel({ cash }: { cash: CashSummary }) {
       {d.amount - d.stillOwed >= 1 && <p><strong>Paid off so far:</strong> debtors have already paid {money(d.amount - d.stillOwed)} of this, so they still owe {money(d.stillOwed)}.</p>}
       <p><strong>Last 30 days:</strong> {money(recent)} paid to you ({money(cash.last30.advanced)} advances + {money(cash.last30.reserveReleased)} reserve back). Fees on invoices paid: {money(cash.last30.fees)}.</p>
     </div>
+  </div>;
+}
+
+function DriverTable({ drivers }: { drivers: DriverSummary[] }) {
+  return <div className="driverTable">
+    {drivers.map((d) => <div className="driverTableRow" key={d.driver}>
+      <span className="driverTableInitial">{d.driver.charAt(0)}</span>
+      <div>
+        <strong>{d.driver}</strong>
+        <small>{d.sent30} sent in 30 days · {compactMoney(d.amount30)}</small>
+      </div>
+      <div className="driverTableFlags">
+        {d.needsFix > 0 && <span className="fix">{d.needsFix} needs a fix</span>}
+        {d.rejected > 0 && <span className="rejected">{d.rejected} rejected</span>}
+        {d.checking > 0 && <span className="checking">{d.checking} being checked</span>}
+        {!d.needsFix && !d.rejected && !d.checking && <span className="ok">All clear</span>}
+      </div>
+    </div>)}
+    <p className="dashCardFootnote">Each driver can have their own login that only sends paperwork and shows their own invoices.</p>
   </div>;
 }
 

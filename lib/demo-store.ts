@@ -2,8 +2,10 @@
 // (new invoices, review decisions). Lives for the life of the server process only.
 
 import { buildDemoPortfolio, buildDemoReviews, type DemoInvoice, type DemoPortfolio, type DemoReview, type DemoSubmission } from './demo-data';
-import { DEMO_CLIENT_ID, DEMO_FACTOR_ID } from './demo';
+import { DEMO_CLIENT_ID, DEMO_DRIVER, DEMO_DRIVERS, DEMO_FACTOR_ID } from './demo';
+import { driverStatus, sortForDriver, type DriverStatus } from './driver-status';
 import { portalConfig } from './portal-config';
+import { flaggedChecks } from './override';
 import type { PortalSession } from './session';
 import type { PortalSubmissionDetail } from './submission-detail';
 import type { CompanyRecord, ValidationReport } from './types';
@@ -41,7 +43,15 @@ function state(): DemoState {
   // decisions; restart the server to slide the dates forward.
   if (!globalState.__fcDemoState) {
     const portfolio = buildDemoPortfolio(day, portalConfig.clientName);
-    globalState.__fcDemoState = { day, portfolio, created: [], reviews: buildDemoReviews(portfolio, Date.now()), submissions: [], documentSeq: 0 };
+    const reviews = buildDemoReviews(portfolio, Date.now());
+    globalState.__fcDemoState = { day, portfolio, created: [], reviews, submissions: [], documentSeq: 0, tasks: [] };
+    // Planted: the factor already asked the demo driver to fix one invoice.
+    const fixable = reviews.filter((r) => r.clientId === DEMO_CLIENT_ID)[1];
+    if (fixable) globalState.__fcDemoState.tasks!.push({
+      id: 'demo-task-planted', reviewId: fixable.reviewId, submissionId: fixable.submissionId, invoiceId: fixable.invoiceId, clientId: fixable.clientId,
+      invoiceNumber: fixable.invoiceNumber, message: "The debtor's phone number on your invoice is wrong. Upload a corrected invoice.",
+      status: 'OPEN', createdAt: new Date(Date.now() - 50 * 60_000).toISOString(), resolvedAt: null, responseNote: null, files: [],
+    });
   }
   return globalState.__fcDemoState;
 }
@@ -134,8 +144,10 @@ export function nextDemoDocumentId(): string {
   return `demo-doc-${String(s.documentSeq).padStart(4, '0')}`;
 }
 
-export function recordDemoSubmission(input: { invoiceId: string; clientId: string; debtorId: string; validation: ValidationReport; files: { fileName: string; documentType: string; sizeBytes: number }[] }): void {
+export function recordDemoSubmission({ submittedBy, ...input }: { invoiceId: string; clientId: string; debtorId: string; validation: ValidationReport; files: { fileName: string; documentType: string; sizeBytes: number }[]; submittedBy?: string }): void {
   const s = state();
+  const created = demoInvoice(input.invoiceId);
+  if (created && submittedBy) created.submittedBy = submittedBy;
   const submission: DemoSubmission = {
     submissionId: `demo-sub-new-${s.submissions.length + 1}`,
     createdAt: new Date().toISOString(),
@@ -157,7 +169,7 @@ export function recordDemoSubmission(input: { invoiceId: string; clientId: strin
         referenceNumber: invoice.referenceNumber,
         invoiceAmount: invoice.invoiceAmount,
         invoiceDate: invoice.invoiceDate.slice(0, 10),
-        reason: input.validation.checks.filter((c) => c.status === 'REVIEW').map((c) => c.label).join(', ') || 'Portal review required.',
+        reason: flaggedChecks(input.validation.checks).map((c) => c.label).join(', ') || 'Portal review required.',
         checks: input.validation.checks.filter((c) => c.status === 'REVIEW' || c.status === 'FAIL'),
         createdAt: submission.createdAt,
         status: 'OPEN',
@@ -232,6 +244,10 @@ export function decideDemoReview(reviewId: string, decision: 'APPROVE' | 'REJECT
     invoice.status = 'APPROVED';
     invoice.verificationStatus = 'VERIFIED';
   }
+  if (invoice && decision === 'REJECT' && invoice.status === 'PENDING') {
+    invoice.status = 'REJECTED';
+    invoice.notes = note;
+  }
   return review;
 }
 
@@ -301,4 +317,83 @@ export function demoSubmissionDetail(by: { invoiceId?: string; submissionId?: st
     reviews: review ? [{ id: review.reviewId, status: review.status, reason: review.reason, decisionNote: review.decisionNote, createdAt: review.createdAt, decidedAt: review.decidedAt, decidedBy: review.decidedAt ? { email: DEMO_SESSION.email, name: DEMO_SESSION.displayName } : { email: null, name: null } }] : [],
     audit,
   };
+}
+
+// --- drivers (demo only) ----------------------------------------------------------------------
+
+export interface DriverInvoiceRow {
+  id: string;
+  invoiceNumber: string;
+  referenceNumber: string;
+  debtorName: string;
+  invoiceAmount: number;
+  invoiceDate: string;
+  sentAt: string;
+  status: DriverStatus;
+  taskId: string | null;
+}
+
+function driverRow(invoice: DemoInvoice): DriverInvoiceRow {
+  const review = state().reviews.find((r) => r.invoiceId === invoice.id) ?? null;
+  const tasks = demoTaskList().filter((t) => t.invoiceId === invoice.id);
+  const open = tasks.find((t) => t.status === 'OPEN') ?? null;
+  return {
+    id: invoice.id,
+    invoiceNumber: invoice.invoiceNumber,
+    referenceNumber: invoice.referenceNumber,
+    debtorName: invoice.companyDebtorName,
+    invoiceAmount: invoice.invoiceAmount,
+    invoiceDate: invoice.invoiceDate.slice(0, 10),
+    sentAt: invoice.createdOn,
+    status: driverStatus({
+      record: invoice,
+      review: review?.status ?? null,
+      openFix: open?.message ?? null,
+      fixAnswered: tasks.some((t) => t.status === 'DONE'),
+      rejectionNote: review?.status === 'REJECTED' ? review.decisionNote : invoice.status === 'REJECTED' ? invoice.notes : null,
+    }),
+    taskId: open?.id ?? null,
+  };
+}
+
+/** One driver's invoices: the last 60 days, plus anything older that still needs them. */
+export function demoDriverInvoices(driver: string = DEMO_DRIVER): DriverInvoiceRow[] {
+  const since = Date.parse(`${demoToday()}T00:00:00Z`) - 60 * 86_400_000;
+  const rows = demoInvoices()
+    .filter((invoice) => invoice.companyClientId === DEMO_CLIENT_ID && invoice.submittedBy === driver)
+    .map(driverRow)
+    .filter((row) => row.status.needsYou || Date.parse(row.sentAt) >= since);
+  return sortForDriver(rows).slice(0, 40);
+}
+
+export interface DriverSummary {
+  driver: string;
+  sent30: number;
+  amount30: number;
+  needsFix: number;
+  rejected: number;
+  checking: number;
+}
+
+/** For the company's manager: how each driver's paperwork is doing over the last 30 days. */
+export function demoDriverSummary(): DriverSummary[] {
+  const since = Date.parse(`${demoToday()}T00:00:00Z`) - 29 * 86_400_000;
+  const mine = demoInvoices().filter((invoice) => invoice.companyClientId === DEMO_CLIENT_ID && invoice.submittedBy);
+  return DEMO_DRIVERS.map((driver) => {
+    const rows = mine.filter((invoice) => invoice.submittedBy === driver).map(driverRow);
+    const recent = rows.filter((row) => Date.parse(row.sentAt) >= since);
+    return {
+      driver,
+      sent30: recent.length,
+      amount30: recent.reduce((sum, row) => sum + row.invoiceAmount, 0),
+      needsFix: rows.filter((row) => row.status.key === 'FIX').length,
+      rejected: recent.filter((row) => row.status.key === 'REJECTED').length,
+      checking: rows.filter((row) => row.status.key === 'CHECKING').length,
+    };
+  }).sort((a, b) => (b.needsFix + b.rejected) - (a.needsFix + a.rejected) || b.sent30 - a.sent30);
+}
+
+/** Who sent in each of the demo client's invoices. */
+export function demoSubmitters(): Record<string, string> {
+  return Object.fromEntries(demoInvoices().filter((invoice) => invoice.submittedBy).map((invoice) => [invoice.id, invoice.submittedBy!]));
 }

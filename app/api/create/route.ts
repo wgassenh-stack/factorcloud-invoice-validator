@@ -19,7 +19,9 @@ import { recordDemoSubmission } from '@/lib/demo-store';
 import { persistSubmissionStart, markSubmissionFactorCloudResult, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
 import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
 import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '@/lib/types';
-import { demoRequest } from '@/lib/demo-request';
+import { demoClientView, demoRequest } from '@/lib/demo-request';
+import { DEMO_DRIVER } from '@/lib/demo';
+import { explanationProblem, hardBlocks, needsExplanation, withClientExplanation } from '@/lib/override';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -31,6 +33,8 @@ interface CreatePayload {
   invoiceDate: string;
   debtorId: string;
   analysisReceipt: string;
+  /** Why the client is submitting despite warnings or failed checks. Required unless every check passes. */
+  explanation?: string | null;
 }
 
 export async function POST(req: Request) {
@@ -83,7 +87,13 @@ export async function POST(req: Request) {
   const rawValidation = validate({ documents: receipt.documents, primaryIndex: receipt.primaryIndex, debtor, client });
   // Credit is re-checked with fresh balances and the amount actually being submitted.
   let validation = applyCreditCheck(addCorrectionReview(rawValidation, corrections), await loadDebtorCredit(clientId, debtor, amount));
-  if (validation.status === 'FAIL') return NextResponse.json({ error: 'Validation failed. Fix the failed checks before submitting the invoice.', validation }, { status: 409 });
+  const blocked = hardBlocks(validation);
+  if (blocked.length) return NextResponse.json({ error: `This invoice cannot be submitted: ${blocked.map((check) => check.message).join(' ')}`, validation }, { status: 409 });
+  if (needsExplanation(validation)) {
+    const problem = explanationProblem(payload.explanation);
+    if (problem) return NextResponse.json({ error: `Some checks did not pass. ${problem}`, validation, needsExplanation: true }, { status: 409 });
+    validation = withClientExplanation(validation, payload.explanation!);
+  }
 
   let duplicateCheckComplete = true;
   try {
@@ -129,6 +139,7 @@ export async function POST(req: Request) {
     const noteParts = [
       'Submitted through FactorCloud client portal',
       validation.status === 'REVIEW' ? 'PORTAL REVIEW REQUIRED' : null,
+      payload.explanation?.trim() && validation.status === 'REVIEW' ? `Client note: ${payload.explanation.trim()}` : null,
       corrections.length ? `Client corrected after verification: ${corrections.join(', ')}` : null,
     ].filter(Boolean);
     const created = await createInvoice({
@@ -184,6 +195,7 @@ export async function POST(req: Request) {
 
   if (demo) {
     recordDemoSubmission({
+      submittedBy: (await demoClientView()) === 'driver' ? DEMO_DRIVER : 'Office',
       invoiceId: invoiceId!,
       clientId,
       debtorId: payload.debtorId,
