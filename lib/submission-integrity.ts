@@ -72,6 +72,49 @@ export function verifyAnalysisReceipt(receipt: string, now = Date.now()): Analys
   return parsed;
 }
 
+/**
+ * Everything read from one upload, signed so the browser can regroup the documents and ask for a
+ * re-check without the documents being read again, and without being able to change what was read.
+ * Signed under its own prefix, so it can never pass as an invoice receipt (or the other way round).
+ */
+export interface DocumentsReceiptPayload {
+  version: 1;
+  kind: 'documents';
+  issuedAt: number;
+  clientId: string;
+  documents: AnalyzedDocument[];
+}
+
+const DOCUMENTS_PREFIX = 'documents.';
+
+export function signDocumentsReceipt(clientId: string, documents: AnalyzedDocument[], now = Date.now()): string {
+  const payload: DocumentsReceiptPayload = { version: 1, kind: 'documents', issuedAt: now, clientId, documents };
+  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = createHmac('sha256', signingSecret()).update(DOCUMENTS_PREFIX + encoded).digest('base64url');
+  return `${encoded}.${signature}`;
+}
+
+export function verifyDocumentsReceipt(receipt: string, now = Date.now()): DocumentsReceiptPayload {
+  const [encoded, suppliedSignature, extra] = String(receipt ?? '').split('.');
+  if (!encoded || !suppliedSignature || extra) throw new ReceiptError('The upload could not be matched to what was read. Read the paperwork again.');
+  const expected = Buffer.from(createHmac('sha256', signingSecret()).update(DOCUMENTS_PREFIX + encoded).digest('base64url'));
+  const supplied = Buffer.from(suppliedSignature);
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) throw new ReceiptError('The upload could not be matched to what was read. Read the paperwork again.');
+  let parsed: DocumentsReceiptPayload;
+  try {
+    parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+  } catch {
+    throw new ReceiptError('The upload could not be read back. Read the paperwork again.');
+  }
+  if (parsed?.kind !== 'documents' || parsed.version !== 1 || !Array.isArray(parsed.documents) || typeof parsed.clientId !== 'string') {
+    throw new ReceiptError('The upload could not be read back. Read the paperwork again.');
+  }
+  if (parsed.issuedAt > now + RECEIPT_CLOCK_SKEW_MS || now - parsed.issuedAt > RECEIPT_MAX_AGE_MS) {
+    throw new ReceiptError('This upload has expired. Read the paperwork again.');
+  }
+  return parsed;
+}
+
 /** Throws before any paid work is done if receipts cannot be signed. */
 export function assertReceiptSigningConfigured(): void {
   signingSecret();

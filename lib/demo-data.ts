@@ -318,7 +318,11 @@ export function buildDemoReviews(portfolio: DemoPortfolio, now: number): DemoRev
 /** Canned document reading for demo mode when no extraction key is configured. */
 export function demoExtraction(fileName: string, today: string, anchorClientName: string, debtor: CompanyRecord): { fields: ExtractedFields; usage: ExtractionUsage } {
   const lower = fileName.toLowerCase();
-  const documentType: ExtractedFields['documentType'] = /\bbol\b|bill.?of.?lading|[_-]bol/.test(lower) ? 'bol'
+  // Camera photos (photo-L2-3.jpg): in demo, the first photo of a load is the invoice, then BOL, then POD.
+  const photo = lower.match(/^photo-l(\d+)-(\d+)/);
+  const photoPage = photo ? Number(photo[2]) : 0;
+  const documentType: ExtractedFields['documentType'] = photo ? (photoPage === 1 ? 'invoice' : photoPage === 2 ? 'bol' : 'pod')
+    : /\bbol\b|bill.?of.?lading|[_-]bol/.test(lower) ? 'bol'
     : /pod|proof|delivery/.test(lower) ? 'pod'
       : /rate|confirm|tender/.test(lower) ? 'rate_confirmation'
         : 'invoice';
@@ -326,7 +330,7 @@ export function demoExtraction(fileName: string, today: string, anchorClientName
   const invoiceNumber = `INV-${20000 + (hash % 9000)}`;
   // Every file in a demo packet shares one load number (taken from the file name when it has one),
   // so a clean packet passes; rename one file's load number to show a mismatch being caught.
-  const reference = fileName.match(/LD\d{4,}/i)?.[0].toUpperCase() ?? 'LD448213';
+  const reference = fileName.match(/LD\d{4,}/i)?.[0].toUpperCase() ?? (photo ? `LD${448212 + Number(photo[1])}` : 'LD448213');
   const invoiceDate = new Date(Date.parse(`${today}T00:00:00Z`) - DAY_MS).toISOString().slice(0, 10);
   const dueDate = new Date(Date.parse(`${invoiceDate}T00:00:00Z`) + 30 * DAY_MS).toISOString().slice(0, 10);
   const isInvoice = documentType === 'invoice';
