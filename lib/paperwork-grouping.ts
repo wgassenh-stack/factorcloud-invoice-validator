@@ -81,3 +81,43 @@ export function groupingProblem(groups: number[][], documentCount: number): stri
   }
   return null;
 }
+
+/**
+ * Likely homes for documents that couldn't be placed, best first, as the invoice document of each
+ * suggested group. Only a hint for the person placing it; nothing is moved automatically.
+ */
+export function suggestPlacements(documents: AnalyzedDocument[], groups: number[][], unassigned: number[], loads: (number | null)[] = []): Record<number, number[]> {
+  const out: Record<number, number[]> = {};
+  for (const d of unassigned) {
+    const doc = documents[d].fields;
+    const scored = groups.map((group) => {
+      const invoice = documents[group[0]].fields;
+      let score = 0;
+      if (sameId(invoice.referenceNumber, doc.referenceNumber)) score += 3;
+      else if (closeId(invoice.referenceNumber, doc.referenceNumber)) score += 2;
+      if (sameId(invoice.invoiceNumber, doc.invoiceNumber)) score += 3;
+      const load = loads[d] ?? null;
+      if (load != null && group.some((i) => (loads[i] ?? null) === load)) score += 2;
+      const customer = normalizeCompanyName(doc.debtorName);
+      if (customer && customer === normalizeCompanyName(invoice.debtorName)) score += 1;
+      // A POD or BOL most likely belongs to an invoice that doesn't have one yet.
+      if (score === 0 && doc.documentType !== 'invoice' && !group.some((i) => documents[i].fields.documentType === doc.documentType)) score += 0.5;
+      return { invoice: group[0], score };
+    }).filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
+    // A weak "missing this type" hint only helps when it points at exactly one invoice.
+    const strong = scored.filter((s) => s.score >= 1);
+    out[d] = (strong.length ? strong : scored.length === 1 ? scored : []).slice(0, 3).map((s) => s.invoice);
+  }
+  return out;
+}
+
+/** Load numbers one typo apart (one character different, or one missing). */
+function closeId(a: string | null, b: string | null): boolean {
+  const x = normalizeIdentifier(a);
+  const y = normalizeIdentifier(b);
+  if (!x || !y || x === y || Math.abs(x.length - y.length) > 1 || Math.min(x.length, y.length) < 4) return false;
+  if (x.length === y.length) return [...x].filter((ch, i) => ch !== y[i]).length === 1;
+  const [short, long] = x.length < y.length ? [x, y] : [y, x];
+  for (let i = 0; i < long.length; i++) if (long.slice(0, i) + long.slice(i + 1) === short) return true;
+  return false;
+}
