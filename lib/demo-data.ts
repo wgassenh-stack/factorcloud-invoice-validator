@@ -318,6 +318,8 @@ export function buildDemoReviews(portfolio: DemoPortfolio, now: number): DemoRev
 /** Canned document reading for demo mode when no extraction key is configured. */
 export function demoExtraction(fileName: string, today: string, anchorClientName: string, debtor: CompanyRecord): { fields: ExtractedFields; usage: ExtractionUsage } {
   const lower = fileName.toLowerCase();
+  // Demo only: a file named like 'blurry-pod.jpg' plays an unreadable photo.
+  if (lower.includes('blurry')) throw new Error('Demo: this photo is too blurry to read.');
   // Camera photos (photo-L2-3.jpg): in demo, the first photo of a load is the invoice, then BOL, then POD.
   const photo = lower.match(/^photo-l(\d+)-(\d+)/);
   const photoPage = photo ? Number(photo[2]) : 0;

@@ -4,7 +4,8 @@ import { FactorCloudError, allowedDebtorIds, getCompany } from './factorcloud';
 import { scoreDebtor } from './matching';
 import { validate } from './rules';
 import { applyFactorCloudAvailability } from './validation-availability';
-import { signAnalysisReceipt } from './submission-integrity';
+import { hashFile, signAnalysisReceipt } from './submission-integrity';
+import { extractDocument, isSupportedFile } from './extract';
 import type { AnalyzeResponse, AnalyzedDocument, CompanyRecord } from './types';
 
 // Checks each group of an upload as its own invoice: match the debtor, run the checks, and sign a
@@ -18,13 +19,68 @@ export interface PaperworkCard extends AnalyzeResponse {
   documentIndexes: number[];
 }
 
+export interface SkippedFile {
+  fileName: string;
+  /** Position of the file in the browser's list. */
+  fileIndex: number;
+  reason: string;
+}
+
 export interface PaperworkResponse {
   documents: AnalyzedDocument[];
   /** Signed copy of everything read, sent back for re-checks. */
   documentsReceipt: string;
   cards: PaperworkCard[];
   unassigned: number[];
+  /** Likely homes for each unplaced document (its invoice document's position), best first. */
+  suggestions: Record<number, number[]>;
+  /** Files that couldn't be read; everything else carries on. */
+  unreadable: SkippedFile[];
+  /** Files uploaded twice; only the first copy is used. */
+  duplicates: SkippedFile[];
   warnings: string[];
+}
+
+/**
+ * Reads uploaded files. The same file twice is read once; a file that can't be read is reported
+ * rather than failing the whole upload. `firstIndex` is where these files start in the browser's
+ * list, so each document can point back at its file.
+ */
+export async function readFiles(files: File[], firstIndex: number, knownHashes: string[] = [], concurrency = 4): Promise<{ documents: AnalyzedDocument[]; fileIndexes: number[]; unreadable: SkippedFile[]; duplicates: SkippedFile[] }> {
+  const hashes = await Promise.all(files.map((file) => hashFile(file)));
+  const seen = new Map<string, string>(knownHashes.map((h) => [h, 'a file already uploaded']));
+  const duplicates: SkippedFile[] = [];
+  const toRead: number[] = [];
+  hashes.forEach((hash, i) => {
+    const earlier = seen.get(hash);
+    if (earlier) duplicates.push({ fileName: files[i].name, fileIndex: firstIndex + i, reason: `Same file as ${earlier}.` });
+    else { seen.set(hash, files[i].name); toRead.push(i); }
+  });
+
+  const results = new Array<AnalyzedDocument | Error>(toRead.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, toRead.length) }, async () => {
+    while (next < toRead.length) {
+      const slot = next++;
+      const file = files[toRead[slot]];
+      try {
+        const read = await extractDocument(file);
+        results[slot] = { fileName: file.name, fields: read.fields, usage: read.usage };
+      } catch (err) {
+        results[slot] = err instanceof Error ? err : new Error(String(err));
+      }
+    }
+  }));
+
+  const documents: AnalyzedDocument[] = [];
+  const fileIndexes: number[] = [];
+  const unreadable: SkippedFile[] = [];
+  results.forEach((result, slot) => {
+    const i = toRead[slot];
+    if (result instanceof Error) unreadable.push({ fileName: files[i].name, fileIndex: firstIndex + i, reason: 'We could not read this file. Retake the photo or upload a clearer copy.' });
+    else { documents.push({ ...result, fileHash: hashes[i], sourceIndex: firstIndex + i }); fileIndexes.push(firstIndex + i); }
+  });
+  return { documents, fileIndexes, unreadable, duplicates };
 }
 
 export async function checkCards(clientId: string, documents: AnalyzedDocument[], groups: { id: string; documentIndexes: number[] }[]): Promise<{ cards: PaperworkCard[]; warnings: string[] }> {
@@ -90,4 +146,19 @@ function matchDebtor(documents: AnalyzedDocument[], candidates: CompanyRecord[])
     }
   }
   return best;
+}
+
+const MAX_FILES = 24;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 25 * 1024 * 1024;
+
+/** Upload limits, shared by reading and adding documents. */
+export function uploadProblem(files: File[], alreadyCount = 0): { message: string; status: number } | null {
+  if (!files.length) return { message: 'Add at least one document or photo.', status: 400 };
+  if (files.length + alreadyCount > MAX_FILES) return { message: `Send at most ${MAX_FILES} documents at a time.`, status: 400 };
+  if (files.some((f) => f.size > MAX_FILE_BYTES)) return { message: 'Each file must be 10 MB or smaller.', status: 413 };
+  if (files.reduce((sum, f) => sum + f.size, 0) > MAX_TOTAL_BYTES) return { message: 'All files together must be 25 MB or smaller.', status: 413 };
+  const unsupported = files.filter((f) => !isSupportedFile(f.type));
+  if (unsupported.length) return { message: `Unsupported file type: ${unsupported.map((f) => f.name).join(', ')}. Use PDF, PNG, JPEG, GIF or WebP.`, status: 400 };
+  return null;
 }

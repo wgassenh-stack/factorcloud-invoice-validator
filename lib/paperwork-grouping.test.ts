@@ -74,3 +74,23 @@ describe('grouping paperwork into invoices', () => {
     expect(groupingProblem([], 3)).toMatch(/Nothing/);
   });
 });
+
+describe('suggesting where an unplaced document goes', () => {
+  it('ranks a one-typo load number, the same camera load, and an invoice missing that kind of document', async () => {
+    const { suggestPlacements } = await import('./paperwork-grouping');
+    const docs = [
+      doc('invoice-a', { documentType: 'invoice', referenceNumber: 'LD448213' }),
+      doc('invoice-b', { documentType: 'invoice', referenceNumber: 'LD448299' }),
+      doc('pod-typo', { documentType: 'pod', referenceNumber: 'LD448218' }),
+      doc('pod-blurry', { documentType: 'pod' }),
+    ];
+    const groups = [[0], [1]];
+    expect(suggestPlacements(docs, groups, [2])).toEqual({ 2: [0] });
+    expect(suggestPlacements(docs, groups, [3], [null, 2, null, 2])).toEqual({ 3: [1] });
+    // Nothing to go on, and both invoices lack a POD: no suggestion rather than a guess.
+    expect(suggestPlacements(docs, groups, [3])).toEqual({ 3: [] });
+    // Only one invoice lacks a POD: suggest it.
+    const withPod = [...docs, doc('pod-a', { documentType: 'pod', referenceNumber: 'LD448213' })];
+    expect(suggestPlacements(withPod, [[0, 4], [1]], [3])).toEqual({ 3: [1] });
+  });
+});
