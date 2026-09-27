@@ -9,12 +9,11 @@ FactorCloud remains the system of record for factoring/accounting records. The p
 
 ## Current portal modules
 
-- Dashboard: invoice activity, recent statuses, concentration summary, alerts, and quick actions.
+- Dashboard: two views. Overview shows the client's money (billed, paid to them, waiting on the factor, reserve coming back, late invoices), who owes them, and what needs attention. Trends shows volume, days to pay, status mix and debtor concentration.
 - Invoices: searchable invoice history from FactorCloud.
 - Submit invoice: AI extraction plus deterministic validation before creating the invoice in FactorCloud.
 - Batch upload: cautious grouping of mixed invoice/support-document stacks.
-- Alerts: V1 debtor-concentration and invoice-volume signals.
-- Factor operations: factor-wide client overview, client drill-down, and review queue.
+- Factor operations: Command center (exposure, aging, cash, collections) and Operations (volume, reviews, latest work) views, client drill-down, debtors, and the review queue.
 
 ## Security model
 

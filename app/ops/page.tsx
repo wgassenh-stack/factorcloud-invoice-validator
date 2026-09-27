@@ -58,11 +58,8 @@ type OpsResponse = {
 };
 
 const FACTOR_PRESETS: DashboardPreset[] = [
-  { id: 'command', label: 'Command center', description: 'Exposure, aging, cash and collections', widgets: ['kpis', 'aging', 'exposure', 'cashflow', 'dso', 'calendar', 'reviews'] },
-  { id: 'executive', label: 'Executive', description: 'Portfolio health at a glance', widgets: ['metrics', 'volume', 'top-clients', 'status', 'reviews', 'clients'] },
-  { id: 'portfolio', label: 'Portfolio', description: 'Client mix and activity concentration', widgets: ['metrics', 'volume', 'top-clients', 'clients'] },
-  { id: 'operations', label: 'Operations', description: 'Reviews, status mix and recent work', widgets: ['metrics', 'reviews', 'status', 'recent', 'clients'] },
-  { id: 'activity', label: 'Activity', description: 'Volume trend and latest invoices', widgets: ['metrics', 'volume', 'status', 'recent'] },
+  { id: 'command', label: 'Command center', description: 'Exposure, aging, cash and collections', widgets: ['kpis', 'aging', 'exposure', 'cashflow', 'dso', 'calendar', 'reviews', 'clients'] },
+  { id: 'operations', label: 'Operations', description: 'Reviews, volume and the latest work', widgets: ['metrics', 'volume', 'status', 'reviews', 'recent', 'clients'] },
 ];
 
 const FACTOR_WIDGETS: DashboardWidgetOption[] = [

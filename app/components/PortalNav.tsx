@@ -6,7 +6,7 @@ import { DemoToggle } from './DemoToggle';
 import { ViewSwitch } from './ViewSwitch';
 import { ConnectionLink } from './ConnectionLink';
 
-type NavKey = 'home' | 'invoices' | 'submit' | 'batch' | 'risk' | 'statements';
+type NavKey = 'home' | 'invoices' | 'submit' | 'batch' | 'statements';
 
 export function PortalNav({ active }: { active: NavKey }) {
   const links = [
@@ -15,7 +15,6 @@ export function PortalNav({ active }: { active: NavKey }) {
     { key: 'submit', href: '/submit', label: 'Submit invoice', enabled: portalConfig.features.submit, icon: 'upload' },
     { key: 'batch', href: '/batch', label: 'Batch upload', enabled: portalConfig.features.batch, icon: 'batch' },
     { key: 'statements', href: '/statements', label: 'Statements', enabled: portalConfig.features.statements, icon: 'statement' },
-    { key: 'risk', href: '/risk', label: 'Alerts', enabled: portalConfig.features.alerts, icon: 'alert' },
   ] as const;
 
   return <nav className="portalNav">

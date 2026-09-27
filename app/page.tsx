@@ -61,11 +61,8 @@ type PortalData = {
 };
 
 const CLIENT_PRESETS: DashboardPreset[] = [
-  { id: 'overview', label: 'Overview', description: 'Your money and what needs you', widgets: ['metrics', 'pipeline', 'cash', 'debtor-aging', 'attention', 'recent', 'quick-actions'] },
-  { id: 'cash', label: 'Cash', description: 'Funding, reserves and collections', widgets: ['metrics', 'pipeline', 'cash', 'debtor-aging', 'dso'] },
-  { id: 'activity', label: 'Activity', description: 'Invoice pace and statuses', widgets: ['metrics', 'trend', 'status', 'recent'] },
-  { id: 'debtors', label: 'Debtors', description: 'Concentration and exceptions', widgets: ['metrics', 'concentration', 'alerts', 'status'] },
-  { id: 'reviews', label: 'Reviews', description: 'Portal review workload', widgets: ['metrics', 'recent', 'alerts', 'quick-actions'] },
+  { id: 'overview', label: 'Overview', description: 'Your money and what needs you', widgets: ['metrics', 'pipeline', 'cash', 'debtor-aging', 'attention', 'recent'] },
+  { id: 'trends', label: 'Trends', description: 'How volume, payment speed and your debtor mix are moving', widgets: ['dso', 'trend', 'status', 'concentration'] },
 ];
 
 const CLIENT_WIDGETS: DashboardWidgetOption[] = [
@@ -78,9 +75,7 @@ const CLIENT_WIDGETS: DashboardWidgetOption[] = [
   { id: 'trend', label: 'Activity trend', description: 'Eight weeks of invoice amount and volume' },
   { id: 'status', label: 'Status mix', description: 'How invoices are distributed across FactorCloud statuses' },
   { id: 'recent', label: 'Recent invoices', description: 'Latest invoice activity with review context' },
-  { id: 'alerts', label: 'Alerts', description: 'Concentration and volume signals that need attention' },
   { id: 'concentration', label: 'Debtor concentration', description: 'Top debtors by share of invoice activity' },
-  { id: 'quick-actions', label: 'Quick actions', description: 'Shortcuts to submit, search and review' },
 ];
 
 export default function ClientPortalHome() {
@@ -204,7 +199,7 @@ export default function ClientPortalHome() {
             <StatusDonut items={statusMix} centerValue={data.invoiceCount} centerLabel="Invoices" />
           </DashboardCard>}
 
-          {show('recent') && <DashboardCard className="dashSpan8" kicker="Recent activity" title="Latest invoices" action={<a href="/invoices">View all</a>}>
+          {show('recent') && <DashboardCard className="dashSpan12" kicker="Recent activity" title="Latest invoices" action={<a href="/invoices">View all</a>}>
             <div className="dashInvoiceRows">
               {recent.map((record) => {
                 const workflow = data.portalWorkflows?.[record.id];
@@ -225,17 +220,7 @@ export default function ClientPortalHome() {
             </div>
           </DashboardCard>}
 
-          {show('alerts') && <DashboardCard className="dashSpan4" kicker="Attention" title="Signals to review" action={<a href="/risk">Open alerts</a>}>
-            <div className="dashAlertStack">
-              {data.alerts.slice(0, 5).map((alert) => <div className={`dashAlertItem ${alert.level.toLowerCase()}`} key={alert.id}>
-                <span className="dashAlertIcon">!</span>
-                <div><strong>{alert.title}</strong><span>{alert.detail}</span></div>
-              </div>)}
-              {!data.alerts.length && <div className="dashAllClear"><span>✓</span><div><strong>Nothing needs attention</strong><small>No concentration or volume signal is currently triggered.</small></div></div>}
-            </div>
-          </DashboardCard>}
-
-          {show('concentration') && <DashboardCard className="dashSpan8" kicker="Debtor mix" title="Concentration by invoice activity" action={<a href="/risk">See thresholds</a>}>
+          {show('concentration') && <DashboardCard className="dashSpan8" kicker="Debtor mix" title="Concentration by invoice activity">
             <RankBars
               items={data.concentrations.slice(0, 6).map((row) => ({
                 id: row.debtorId,
@@ -246,14 +231,6 @@ export default function ClientPortalHome() {
             />
           </DashboardCard>}
 
-          {show('quick-actions') && <DashboardCard className="dashSpan4" kicker="Shortcuts" title="Get something done">
-            <div className="dashQuickGrid">
-              <QuickAction href="/submit" icon="↑" title="Submit invoice" detail="Upload, verify, and send a funding packet" />
-              <QuickAction href="/invoices" icon="#" title="Find an invoice" detail="Search FactorCloud and portal review status" />
-              {portalConfig.features.batch && <QuickAction href="/batch" icon="≡" title="Batch upload" detail="Process multiple invoice packets" />}
-              {portalConfig.features.alerts && <QuickAction href="/risk" icon="!" title="Review alerts" detail="Inspect concentration and volume signals" />}
-            </div>
-          </DashboardCard>}
         </section>
 
         <p className="portalDataNote">{data.source.note} Cash and aging figures come from FactorCloud's balance, advance, reserve, funded and paid fields.</p>
@@ -295,7 +272,6 @@ function CashPanel({ cash }: { cash: CashSummary }) {
     </div>
     <div className="cashFoot">
       {d.amount - d.stillOwed >= 1 && <p><strong>Paid off so far:</strong> debtors have already paid {money(d.amount - d.stillOwed)} of this, so they still owe {money(d.stillOwed)}.</p>}
-      <p><strong>Waiting on the factor:</strong> {cash.waitingOnFactor.count ? `${money(cash.waitingOnFactor.amount)} on ${cash.waitingOnFactor.count} invoice${cash.waitingOnFactor.count === 1 ? '' : 's'} not funded yet.` : 'nothing, every invoice you sent is funded.'}</p>
       <p><strong>Last 30 days:</strong> {money(recent)} paid to you ({money(cash.last30.advanced)} advances + {money(cash.last30.reserveReleased)} reserve back). Fees on invoices paid: {money(cash.last30.fees)}.</p>
     </div>
   </div>;
@@ -341,10 +317,6 @@ function DashMetric({ icon, label, value, detail, trend, tone = '' }: { icon: st
     <strong>{value}</strong>
     <small>{detail}</small>
   </div>;
-}
-
-function QuickAction({ href, icon, title, detail }: { href: string; icon: string; title: string; detail: string }) {
-  return <a className="dashQuickAction" href={href}><span>{icon}</span><div><strong>{title}</strong><small>{detail}</small></div><b>›</b></a>;
 }
 
 function trendCopy(value: number | null, suffix: string): string {
