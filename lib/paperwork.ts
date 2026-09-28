@@ -5,7 +5,7 @@ import { scoreDebtor } from './matching';
 import { validate } from './rules';
 import { applyFactorCloudAvailability } from './validation-availability';
 import { hashFile, signAnalysisReceipt } from './submission-integrity';
-import { extractDocument, isSupportedFile, transientGeminiError } from './extract';
+import { extractDocument, isSupportedFile, readerRetryAfterMs, transientGeminiError } from './extract';
 import type { AnalyzeResponse, AnalyzedDocument, CompanyRecord } from './types';
 
 // Checks each group of an upload as its own invoice: match the debtor, run the checks, and sign a
@@ -38,6 +38,21 @@ export interface ReadOptions {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Longest wait we'll accept from the reader before giving up on this try. */
+const MAX_READER_WAIT_MS = 20_000;
+
+type ReadResult = { fields: AnalyzedDocument['fields']; usage: AnalyzedDocument['usage'] };
+
+// Files already read, by content hash. The same paperwork uploaded again (a retry, "Start over",
+// a second run-through of a demo) is answered instantly instead of asking the reader again.
+const readCache: Map<string, ReadResult> = ((globalThis as unknown as { __fcReadCache?: Map<string, ReadResult> }).__fcReadCache ??= new Map());
+const READ_CACHE_LIMIT = 500;
+
+function remember(hash: string, result: ReadResult): void {
+  if (readCache.size >= READ_CACHE_LIMIT) readCache.delete(readCache.keys().next().value!);
+  readCache.set(hash, result);
+}
+
 export interface PaperworkResponse {
   documents: AnalyzedDocument[];
   /** Signed copy of everything read, sent back for re-checks. */
@@ -59,9 +74,10 @@ export interface PaperworkResponse {
  * list, so each document can point back at its file.
  */
 export async function readFiles(files: File[], firstIndex: number, knownHashes: string[] = [], options: ReadOptions = {}): Promise<{ documents: AnalyzedDocument[]; fileIndexes: number[]; unreadable: SkippedFile[]; duplicates: SkippedFile[] }> {
-  // Fewer at once and a couple of retries: the reader sometimes refuses a burst of requests
+  // Fewer at once, and patient retries: the reader sometimes refuses a burst of requests
   // ("too many requests", "busy"), which says nothing about the file itself.
-  const { concurrency = 3, retryDelaysMs = [1500, 4000], extract = extractDocument } = options;
+  const { concurrency = 3, retryDelaysMs = [2000, 5000, 10000], extract } = options;
+  const read = extract ?? extractDocument;
   const hashes = await Promise.all(files.map((file) => hashFile(file)));
   const seen = new Map<string, string>(knownHashes.map((h) => [h, 'a file already uploaded']));
   const duplicates: SkippedFile[] = [];
@@ -73,25 +89,42 @@ export async function readFiles(files: File[], firstIndex: number, knownHashes: 
   });
 
   const results = new Array<AnalyzedDocument | Error>(toRead.length);
+  // When the reader says it's busy, every worker backs off, not just the one that was refused:
+  // piling more requests onto a rate limit only keeps it tripped.
+  let pausedUntil = 0;
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(concurrency, toRead.length) }, async () => {
     while (next < toRead.length) {
       const slot = next++;
       const file = files[toRead[slot]];
+      // The reader is also shown the file name, so it is part of what was read.
+      const hash = `${hashes[toRead[slot]]}:${file.name}`;
+      const cached = extract ? undefined : readCache.get(hash);
+      if (cached) {
+        results[slot] = { fileName: file.name, fields: cached.fields, usage: cached.usage && { ...cached.usage, inputTokens: 0, outputTokens: 0, thinkingTokens: 0, totalTokens: 0, estimatedCostUsd: 0 } };
+        continue;
+      }
       for (let attempt = 0; ; attempt++) {
+        if (pausedUntil > Date.now()) await sleep(pausedUntil - Date.now());
         try {
-          const read = await extract(file);
-          results[slot] = { fileName: file.name, fields: read.fields, usage: read.usage };
+          const done = await read(file);
+          if (!extract) remember(hash, done);
+          results[slot] = { fileName: file.name, fields: done.fields, usage: done.usage };
           break;
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err));
+          const busy = transientGeminiError(error);
+          const askedWait = busy ? readerRetryAfterMs(error) : null;
           // A busy reader gets every retry; any other failure gets one more try.
-          if (attempt >= retryDelaysMs.length || (attempt >= 1 && !transientGeminiError(error))) {
+          if (attempt >= retryDelaysMs.length || (attempt >= 1 && !busy) || (askedWait ?? 0) > MAX_READER_WAIT_MS) {
             console.error(`[paperwork] could not read ${file.name} after ${attempt + 1} tries:`, error.message);
             results[slot] = error;
             break;
           }
-          await sleep(retryDelaysMs[attempt]);
+          const base = Math.max(retryDelaysMs[attempt], askedWait ?? 0);
+          const wait = base ? base + Math.round(Math.random() * base * 0.25) : 0;
+          if (busy) pausedUntil = Math.max(pausedUntil, Date.now() + wait);
+          else await sleep(wait);
         }
       }
     }
