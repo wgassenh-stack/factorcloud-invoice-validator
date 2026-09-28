@@ -25,7 +25,7 @@ describe('reading uploaded files', () => {
   it('after the retries, says the reader was busy and offers another try', async () => {
     const extract = vi.fn(async () => { throw new Error('503 UNAVAILABLE: high demand'); });
     const out = await readFiles([file('a.pdf')], 4, [], { extract, retryDelaysMs: [0] });
-    expect(out.unreadable).toEqual([{ fileName: 'a.pdf', fileIndex: 4, retryable: true, reason: 'The document reader was busy. Try again in a moment.' }]);
+    expect(out.unreadable).toEqual([{ fileName: 'a.pdf', fileIndex: 4, retryable: true, reason: "Google's document reader is overloaded right now. Try again in a moment." }]);
   });
 
   it('reads the same file only once', async () => {
@@ -64,5 +64,12 @@ describe('reader wait hints', () => {
   it('reads the retry delay Gemini sends with a rate limit', () => {
     expect(readerRetryAfterMs(new Error('{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"7s"}'))).toBe(7000);
     expect(readerRetryAfterMs(new Error('503 UNAVAILABLE'))).toBeNull();
+  });
+
+  it('says so when the daily allowance is used up, without retrying', async () => {
+    const extract = vi.fn(async () => { throw new Error('429 RESOURCE_EXHAUSTED quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier'); });
+    const out = await readFiles([file('a.pdf')], 0, [], { extract, retryDelaysMs: [0, 0] });
+    expect(extract).toHaveBeenCalledTimes(1);
+    expect(out.unreadable[0].reason).toMatch(/today's allowance/);
   });
 });
