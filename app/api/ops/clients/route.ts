@@ -7,7 +7,7 @@ import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { summarizeClients } from '@/lib/ops';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
-import { demoReviews } from '@/lib/demo-store';
+import { demoArrivalsToday, demoReviews, type Arrival } from '@/lib/demo-store';
 import { demoRequest } from '@/lib/demo-request';
 
 export const runtime = 'nodejs';
@@ -17,6 +17,17 @@ type ReviewSummaryRow = {
   open_count: number | string;
   open_amount: number | string | null;
   oldest_created_at: Date | string | null;
+};
+
+type ArrivalRow = {
+  id: string;
+  factorcloud_invoice_id: string;
+  invoice_number_submitted: string | null;
+  factorcloud_client_id: string;
+  invoice_amount_submitted: number | string | null;
+  document_count: number | string;
+  submitted_by: string | null;
+  created_at: Date | string;
 };
 
 export async function GET() {
@@ -74,6 +85,49 @@ export async function GET() {
       console.error('[ops-clients] review summary unavailable', err);
     }
 
+    // Invoices that passed every check and went straight into FactorCloud today: nothing for the
+    // portal's review queue, but the factor still decides on funding in FactorCloud.
+    let arrivals: Arrival[] | null = null;
+    if (await demoRequest()) arrivals = demoArrivalsToday();
+    else try {
+      const rows = await query<ArrivalRow>(`
+        select s.id, s.factorcloud_invoice_id, s.invoice_number_submitted, c.factorcloud_client_id,
+          s.invoice_amount_submitted, s.created_at,
+          coalesce(u.display_name, u.email) as submitted_by,
+          (select count(*) from submission_files f where f.submission_id = s.id)::int as document_count
+        from submissions s
+        join portal_clients c on c.id = s.client_id
+        left join portal_users u on u.id = s.submitted_by_user_id
+        where s.factor_id = $1 and s.validation_status = 'PASS' and s.workflow_status = 'CREATED_IN_FACTORCLOUD'
+          and s.factorcloud_invoice_id is not null and s.created_at >= date_trunc('day', now())
+        order by s.created_at desc
+        limit 50
+      `, [session.factorId]);
+      arrivals = rows.map((row) => ({
+        submissionId: row.id,
+        invoiceId: row.factorcloud_invoice_id,
+        invoiceNumber: row.invoice_number_submitted,
+        clientId: row.factorcloud_client_id,
+        invoiceAmount: row.invoice_amount_submitted == null ? null : Number(row.invoice_amount_submitted),
+        documentCount: Number(row.document_count),
+        submittedBy: row.submitted_by,
+        createdAt: new Date(row.created_at).toISOString(),
+      }));
+    } catch (err) {
+      console.error('[ops-clients] arrivals unavailable', err);
+    }
+    const statusById = new Map(records.map((record) => [record.id, record.status]));
+    const arrivedToday = {
+      available: arrivals != null,
+      count: arrivals?.length ?? 0,
+      amount: (arrivals ?? []).reduce((sum, a) => sum + (a.invoiceAmount ?? 0), 0),
+      items: (arrivals ?? []).slice(0, 8).map((a) => ({
+        ...a,
+        clientName: clientNames[a.clientId] || a.clientId,
+        status: statusById.get(a.invoiceId) ?? null,
+      })),
+    };
+
     const recentInvoices = records
       .slice()
       // Same-day ties: the later entry in FactorCloud's list (added more recently) comes first.
@@ -103,6 +157,7 @@ export async function GET() {
         topClientShare: topClient && totalAmount > 0 ? topClient.invoiceAmount / totalAmount : 0,
         recentInvoices,
         reviewSummary,
+        arrivedToday,
       },
       analytics: {
         today,
