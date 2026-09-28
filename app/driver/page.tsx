@@ -25,7 +25,7 @@ const STEPS = ['Sent', 'Checked', 'Funded', 'Paid'] as const;
 const REACHED: Record<DriverStatusKey, number> = { SENT: 0, CHECKING: 0, FIX: 0, REJECTED: 0, CANCELED: 0, APPROVED: 1, FUNDED: 2, PAID: 3 };
 
 export default function DriverHome() {
-  const [data, setData] = useState<{ driver: string; invoices: Row[] } | null>(null);
+  const [data, setData] = useState<{ driver: string | null; invoices: Row[] } | null>(null);
   const [error, setError] = useState('');
 
   async function load() {
@@ -48,7 +48,7 @@ export default function DriverHome() {
   const needsYou = rows.filter((row) => row.status.needsYou);
   const rest = rows.filter((row) => !row.status.needsYou);
   const count = (keys: DriverStatusKey[]) => rows.filter((row) => keys.includes(row.status.key)).length;
-  const firstName = data?.driver.split(' ')[0] ?? '';
+  const firstName = data?.driver?.split(' ')[0] ?? '';
 
   return (
     <main className="portalShell driverPage">
@@ -57,7 +57,7 @@ export default function DriverHome() {
       <section className="driverHero">
         <div>
           <div className="driverHeroMeta"><span className="eyebrow">Driver view</span><DemoBadge /></div>
-          <h1>{data ? `Hi ${firstName}` : 'Loading your invoices...'}</h1>
+          <h1>{data ? (firstName ? `Hi ${firstName}` : 'Your paperwork') : 'Loading your invoices...'}</h1>
           <p>Send in paperwork from your phone and see where every load you've sent stands.</p>
         </div>
         <a className="driverSendButton" href="/submit"><span aria-hidden="true">📷</span>Send in paperwork</a>

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCompany, getInvoice } from '@/lib/factorcloud';
-import { requireFactorSession } from '@/lib/portal-auth';
+import { pilotAdminViews, requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { submissionDetailById } from '@/lib/submission-detail';
@@ -14,6 +14,7 @@ export async function GET(_req: Request, context: { params: Promise<{ submission
   try {
     const session = await requireFactorSession();
     const { submissionId } = await context.params;
+    if (!(await demoRequest()) && pilotAdminViews()) return NextResponse.json({ error: 'Submission records need the portal database.' }, { status: 404 });
     const submission = (await demoRequest()) ? demoSubmissionDetail({ submissionId }) : await submissionDetailById(session.factorId, submissionId);
     if (!submission) return NextResponse.json({ error: 'Submission not found.' }, { status: 404 });
 

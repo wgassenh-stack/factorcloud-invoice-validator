@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
-import { requireFactorSession } from '@/lib/portal-auth';
+import { pilotAdminViews, requireFactorSession } from '@/lib/portal-auth';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { decideDemoReview, demoRequestFix } from '@/lib/demo-store';
 import { demoRequest } from '@/lib/demo-request';
@@ -28,6 +28,8 @@ export async function POST(req: Request, context: { params: Promise<{ reviewId: 
     const done = decision === 'REQUEST_FIX' ? demoRequestFix(reviewId, note!) : decideDemoReview(reviewId, decision, note);
     return done ? NextResponse.json({ ok: true, status: decision === 'REQUEST_FIX' ? 'FIX_REQUESTED' : done.status }) : NextResponse.json({ error: 'Open review item not found.' }, { status: 404 });
   }
+
+  if (pilotAdminViews()) return NextResponse.json({ error: 'Decide on this invoice in FactorCloud. This setup has no portal database to record decisions.' }, { status: 409 });
 
   try { await ensureWorkflowSchema(); }
   catch (err) { return apiErrorResponse(err, 'ops-review-decision'); }

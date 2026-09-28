@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { apiErrorResponse } from '@/lib/api-errors';
-import { currentValidPortalSession } from '@/lib/portal-auth';
+import { currentValidPortalSession, pilotAdminViews } from '@/lib/portal-auth';
 import { databaseAuthEnabled } from '@/lib/session';
 import { DEMO_SESSION } from '@/lib/demo-store';
 import { demoRequest } from '@/lib/demo-request';
@@ -12,7 +12,7 @@ export async function GET() {
   if (!databaseAuthEnabled() && await demoRequest()) {
     return NextResponse.json({ mode: 'demo', authenticated: true, user: { email: DEMO_SESSION.email, displayName: DEMO_SESSION.displayName, role: DEMO_SESSION.role, clients: DEMO_SESSION.clients } });
   }
-  if (!databaseAuthEnabled()) return NextResponse.json({ mode: 'pilot', authenticated: false });
+  if (!databaseAuthEnabled()) return NextResponse.json({ mode: 'pilot', authenticated: false, adminViews: pilotAdminViews() });
   let session;
   try { session = await currentValidPortalSession(); }
   catch (err) { return apiErrorResponse(err, 'portal-session'); }

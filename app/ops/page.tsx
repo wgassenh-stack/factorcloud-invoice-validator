@@ -30,13 +30,13 @@ type RecentInvoice = {
 };
 
 type Arrival = {
-  submissionId: string;
+  submissionId: string | null;
   invoiceId: string;
   invoiceNumber: string | null;
   clientId: string;
   clientName: string;
   invoiceAmount: number | null;
-  documentCount: number;
+  documentCount: number | null;
   submittedBy: string | null;
   createdAt: string;
   status: string | null;
@@ -198,11 +198,11 @@ export default function FactorOperationsPage() {
             {!data.portfolio.arrivedToday.available ? <div className="portalEmpty"><strong>Arrivals unavailable</strong><span>Could not load today's portal submissions.</span></div> : <>
               <div className="dashCardStatline"><strong>{data.portfolio.arrivedToday.count}</strong><span>{data.portfolio.arrivedToday.count === 1 ? 'clean invoice' : 'clean invoices'} today · {money(data.portfolio.arrivedToday.amount)} · no portal review needed</span></div>
               <div className="dashInvoiceRows">
-                {data.portfolio.arrivedToday.items.map((a) => <a className="dashInvoiceRow factorInvoiceRow" href={`/ops/submissions/${encodeURIComponent(a.submissionId)}`} key={a.submissionId}>
+                {data.portfolio.arrivedToday.items.map((a) => <a className="dashInvoiceRow factorInvoiceRow" href={a.submissionId ? `/ops/submissions/${encodeURIComponent(a.submissionId)}` : `/ops/clients/${encodeURIComponent(a.clientId)}`} key={a.submissionId ?? a.invoiceId}>
                   <div className="dashInvoiceGlyph">{(a.clientName || 'C').charAt(0).toUpperCase()}</div>
                   <div className="dashInvoiceIdentity">
                     <strong>{a.clientName}</strong>
-                    <span>Invoice {a.invoiceNumber || a.invoiceId.slice(0, 8)} · {a.documentCount} document{a.documentCount === 1 ? '' : 's'}{a.submittedBy ? ` · by ${a.submittedBy}` : ''} · {timeOfDay(a.createdAt)}{a.status ? ` · ${pretty(a.status)} in FactorCloud` : ''}</span>
+                    <span>Invoice {a.invoiceNumber || a.invoiceId.slice(0, 8)}{a.documentCount != null ? ` · ${a.documentCount} document${a.documentCount === 1 ? '' : 's'}` : ''}{a.submittedBy ? ` · by ${a.submittedBy === 'Driver' ? 'a driver' : a.submittedBy === 'Office' ? 'the office' : a.submittedBy}` : ''}{a.createdAt.includes('T') ? ` · ${timeOfDay(a.createdAt)}` : ''}{a.status ? ` · ${pretty(a.status)} in FactorCloud` : ''}</span>
                   </div>
                   <span className="portalStatus pass">✓ All checks passed</span>
                   <strong>{a.invoiceAmount == null ? '-' : money(a.invoiceAmount)}</strong>

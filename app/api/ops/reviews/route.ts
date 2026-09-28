@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { apiErrorResponse } from '@/lib/api-errors';
-import { getCompany } from '@/lib/factorcloud';
-import { requireFactorSession } from '@/lib/portal-auth';
+import { getCompany, listInvoices } from '@/lib/factorcloud';
+import { pilotAdminViews, requireFactorSession } from '@/lib/portal-auth';
+import { collectRiskInvoiceRecords } from '@/lib/risk';
+import { flaggedForReview, sentAt } from '@/lib/pilot-views';
+import { readPortalNote } from '@/lib/portal-notes';
+import { EXPLANATION_CHECK_ID } from '@/lib/override';
 import { demoCompany, demoLatestTask, demoReviews } from '@/lib/demo-store';
 import { latestTasksBySubmission, type ClientTask } from '@/lib/client-tasks';
 import { demoRequest } from '@/lib/demo-request';
@@ -31,6 +35,7 @@ export async function GET() {
   try {
     const session = await requireFactorSession();
     if (await demoRequest()) return NextResponse.json(demoReviewList());
+    if (pilotAdminViews()) return NextResponse.json(await pilotReviewList());
     const rows = await query<DbReviewRow>(`
       select r.id as review_id, r.submission_id, s.factorcloud_invoice_id, s.invoice_number_submitted,
         s.debtor_factorcloud_id, s.invoice_amount_submitted, s.invoice_date_submitted, s.workflow_status,
@@ -105,6 +110,45 @@ function demoReviewList() {
     clientNames: Object.fromEntries(open.map((review) => [review.clientId, review.clientName])),
     debtorNames: Object.fromEntries(open.map((review) => [review.debtorId, demoCompany(review.debtorId)?.companyName ?? review.debtorId])),
     source: { note: 'Demo data. Review decisions are kept in memory for this demo only.' },
+  };
+}
+
+/**
+ * Without the portal database: invoices the portal flagged, read from its note on each FactorCloud
+ * invoice. Read only. The factor approves, rejects or asks for a fix in FactorCloud.
+ */
+async function pilotReviewList() {
+  const records = flaggedForReview(collectRiskInvoiceRecords((await listInvoices()).raw));
+  const ids = [...new Set(records.flatMap((r) => [r.companyClientId, r.companyDebtorId]).filter((id): id is string => Boolean(id)))].slice(0, 60);
+  const names = Object.fromEntries(await Promise.all(ids.map(async (id) => {
+    try {
+      const company = await getCompany(id);
+      return [id, company.companyName || company.compCode || id] as const;
+    } catch {
+      return [id, id] as const;
+    }
+  })));
+  return {
+    records: records.map((record) => {
+      const note = readPortalNote(record.notes);
+      return {
+        id: record.id,
+        invoiceNumber: record.invoiceNumber,
+        companyClientId: record.companyClientId,
+        companyDebtorId: record.companyDebtorId,
+        invoiceAmount: record.invoiceAmount,
+        invoiceDate: record.invoiceDate ? record.invoiceDate.slice(0, 10) : null,
+        status: record.status,
+        reason: `Flagged by the portal's checks${note.sentBy ? ` · sent by ${note.sentBy === 'Driver' ? 'a driver' : 'the office'}` : ''}`,
+        createdAt: sentAt(record).includes('T') ? sentAt(record) : undefined,
+        checks: note.clientNote ? [{ id: EXPLANATION_CHECK_ID, label: "Client's note", status: 'REVIEW' as const, message: note.clientNote }] : [],
+        fix: null,
+      };
+    }),
+    clientNames: Object.fromEntries(records.flatMap((r) => r.companyClientId ? [[r.companyClientId, names[r.companyClientId] ?? r.companyClientId]] : [])),
+    debtorNames: Object.fromEntries(records.flatMap((r) => r.companyDebtorId ? [[r.companyDebtorId, names[r.companyDebtorId] ?? r.companyDebtorId]] : [])),
+    readOnly: true,
+    source: { note: 'Invoices the portal flagged that are still waiting in FactorCloud. Approve, reject or ask for a fix in FactorCloud: this shared-password setup has no portal database to record decisions.' },
   };
 }
 

@@ -61,3 +61,15 @@ export function demoViewInBrowser(): DemoClientView {
 export function setDemoViewInBrowser(view: DemoClientView): void {
   document.cookie = `${DEMO_VIEW_COOKIE}=${view}; path=/; max-age=${60 * 60 * 24 * 30}; samesite=lax`;
 }
+
+// Shared-password (pilot) deployments only, for test environments: NEXT_PUBLIC_ADMIN_VIEWS=true
+// treats whoever holds the site password as the factor's admin, who can switch between the
+// Manager, Driver and Factor views on real data. Ignored with database sign-in, where roles decide.
+export function adminViewsEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_ADMIN_VIEWS === 'true';
+}
+
+/** Browser only: whether this browser is showing the Driver view (demo data or admin views). */
+export function driverViewInBrowser(): boolean {
+  return (demoInBrowser() || adminViewsEnabled()) && demoViewInBrowser() === 'driver';
+}
