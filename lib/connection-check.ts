@@ -1,7 +1,8 @@
 import 'server-only';
 
 import { publicErrorMessage } from './api-errors';
-import { allowedDebtorIds, getClientDebtor, getCompany, getInvoice, listInvoices } from './factorcloud';
+import { allowedDebtorIds, fcRequest, getClientDebtor, getCompany, getInvoice, listInvoices } from './factorcloud';
+import { PORTAL_NOTE } from './portal-notes';
 import { fairCoverage, valueCounts, type FieldCoverage, type ValueCounts } from './field-coverage';
 import { collectRiskInvoiceRecords, type RiskInvoiceRecord } from './risk';
 
@@ -119,9 +120,13 @@ export async function runConnectionCheck(opts: { clientId: string | null; scope:
     items.push({ id: 'debtors', label: 'Matchable debtors', state: 'warn', detail: 'FACTORCLOUD_DEBTOR_IDS is empty, so uploads cannot be matched to a debtor.' });
   }
 
+  // 7. Labels and notes: how FactorCloud describes a label, so the portal can put one on the
+  // invoices it flags, and whether the portal's note survives on invoices it created.
+  items.push(...await labelsAndNotes(records));
+
   items.push({ id: 'writes', label: 'Creating invoices and attaching documents', state: 'skip', detail: 'Not tested here, because it would change FactorCloud. Submit one test invoice to confirm.' });
 
-  // 7. Field coverage: will the dashboards have numbers to show?
+  // 8. Field coverage: will the dashboards have numbers to show?
   const coverage = fairCoverage(records);
   const thin = coverage.filter((c) => c.total > 0 && c.share < 0.5);
   if (records.length) {
@@ -134,4 +139,43 @@ export async function runConnectionCheck(opts: { clientId: string | null; scope:
   }
 
   return { generatedAt: new Date().toISOString(), scope: opts.scope, invoiceCount: records.length, items, coverage, values: valueCounts(records) };
+}
+
+function invoiceOf(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  for (const key of ['invoice', 'data']) if (obj[key] && typeof obj[key] === 'object') return obj[key] as Record<string, unknown>;
+  return obj;
+}
+
+const clip = (value: unknown, max = 600) => {
+  const text = JSON.stringify(value);
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+};
+
+async function labelsAndNotes(records: RiskInvoiceRecord[]): Promise<ConnectionItem[]> {
+  const items: ConnectionItem[] = [];
+  // The most recently created invoices, read one by one (the list may leave labels out).
+  const recent = records.slice().sort((a, b) => String(b.createdOn ?? b.invoiceDate ?? '').localeCompare(String(a.createdOn ?? a.invoiceDate ?? ''))).slice(0, 15);
+  const details = await Promise.all(recent.map(async (record) => ({ record, invoice: invoiceOf(await getInvoice(record.id).catch(() => null)) })));
+
+  const labelled = details.find((d) => Array.isArray(d.invoice?.labels) && (d.invoice!.labels as unknown[]).length);
+  items.push(labelled
+    ? { id: 'labels', label: 'Invoice labels', state: 'ok', detail: `Invoice ${labelled.record.invoiceNumber ?? labelled.record.id} has labels: ${clip(labelled.invoice!.labels)}` }
+    : { id: 'labels', label: 'Invoice labels', state: 'warn', detail: `None of the ${details.length} newest invoices has a label${details[0]?.invoice && 'labels' in details[0].invoice ? ` (the field comes back as ${clip(details[0].invoice.labels, 80)})` : ''}. Add one in FactorCloud to see its format.` });
+
+  for (const path of ['/labels', '/invoice-labels', '/invoices/labels']) {
+    const catalog = await timed(() => fcRequest(path));
+    if (catalog.value) {
+      items.push({ id: 'label-catalog', label: 'Label list', state: 'ok', detail: `GET ${path}: ${clip(catalog.value)}`, ms: catalog.ms });
+      break;
+    }
+    if (path === '/invoices/labels') items.push({ id: 'label-catalog', label: 'Label list', state: 'warn', detail: 'No label list found at /labels, /invoice-labels or /invoices/labels.' });
+  }
+
+  const portal = details.find((d) => typeof d.record.notes === 'string' && d.record.notes.includes(PORTAL_NOTE)) ?? details.find((d) => typeof d.invoice?.notes === 'string' && (d.invoice.notes as string).includes(PORTAL_NOTE));
+  items.push(portal
+    ? { id: 'notes', label: "Portal's invoice note", state: 'ok', detail: `Invoice ${portal.record.invoiceNumber ?? portal.record.id} keeps it: ${clip(portal.invoice?.notes ?? portal.record.notes, 300)}` }
+    : { id: 'notes', label: "Portal's invoice note", state: 'warn', detail: `None of the ${details.length} newest invoices carries the portal's note${details[0]?.invoice ? ` (notes on the newest: ${clip(details[0].invoice.notes ?? null, 120)})` : ''}. FactorCloud may be dropping it.` });
+  return items;
 }

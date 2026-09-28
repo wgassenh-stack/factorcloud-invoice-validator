@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { cleanArrivals, driverRows, flaggedForReview } from './pilot-views';
-import { PORTAL_NOTE, REVIEW_NOTE, readPortalNote, sentByNote } from './portal-notes';
+import { PORTAL_NOTE, REVIEW_NOTE, buildPortalNote, readPortalNote, sentByNote } from './portal-notes';
+import { forFactorReview, withClientExplanation } from './override';
+import { applyCreditCheck } from './credit';
 import type { RiskInvoiceRecord } from './risk';
 
 const TODAY = '2026-09-28';
@@ -51,5 +53,28 @@ describe('Driver view without the portal database', () => {
     expect(rows.map((r) => r.id)).toEqual([rejected.id, sent.id, flagged.id]);
     expect(rows[0].status.key).toBe('REJECTED');
     expect(rows.find((r) => r.id === flagged.id)?.status.key).toBe('CHECKING');
+  });
+});
+
+describe('the note the portal writes on FactorCloud invoices', () => {
+  it('says a flagged invoice needs review, what was flagged, and keeps the client note whole', () => {
+    const text = buildPortalNote({ review: true, sender: 'Driver', flagged: ['Amount matches across documents'], corrections: ['invoice amount'], clientNote: 'Lumper fee | paid at delivery' });
+    expect(text).toBe('Submitted through FactorCloud client portal | PORTAL REVIEW REQUIRED | Sent by: Driver | Flagged: Amount matches across documents | Client corrected after verification: invoice amount | Client note: Lumper fee | paid at delivery');
+    expect(readPortalNote(text)).toEqual({ viaPortal: true, flagged: true, sentBy: 'Driver', clientNote: 'Lumper fee | paid at delivery' });
+  });
+
+  it('keeps a clean invoice short', () => {
+    expect(buildPortalNote({ review: false, clientNote: 'ignored' })).toBe(PORTAL_NOTE);
+  });
+});
+
+describe('an invoice sent anyway', () => {
+  it('goes to the review queue even when a later check recomputes it as failed', () => {
+    const explained = withClientExplanation({ status: 'FAIL', checks: [{ id: 'amount-across-docs', label: 'Amount', status: 'FAIL', message: 'Differs' }] }, 'Lumper fee added at delivery');
+    expect(explained.status).toBe('REVIEW');
+    const afterCredit = applyCreditCheck(explained, { creditLimit: 50_000, creditLimitApproved: true, openBalance: 0, invoiceAmount: 100 } as never);
+    expect(afterCredit.status).toBe('FAIL');
+    expect(forFactorReview(afterCredit).status).toBe('REVIEW');
+    expect(forFactorReview({ status: 'PASS', checks: [] }).status).toBe('PASS');
   });
 });
