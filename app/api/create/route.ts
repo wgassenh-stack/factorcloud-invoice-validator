@@ -11,7 +11,7 @@ import {
 import { isBlank, normalizeDate, normalizeMoney } from '@/lib/normalize';
 import { apiErrorResponse, publicErrorMessage } from '@/lib/api-errors';
 import { isDefinitiveCreateFailure } from '@/lib/errors';
-import { currentPortalSession, pilotAdminViews, resolveConfiguredClientId } from '@/lib/portal-auth';
+import { adminDriverViewAllowed, currentPortalSession, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
 import { applyCreditCheck, withoutCreditCheck } from '@/lib/credit';
 import { loadDebtorCredit } from '@/lib/debtor-credit';
@@ -144,9 +144,9 @@ export async function POST(req: Request) {
   const respond = (ok: boolean, error?: string) => NextResponse.json({ ok, invoiceId, documentIds, steps, validation: withoutCreditCheck(validation), error } satisfies CreateResponse, { status: ok ? 200 : 502 });
 
   try {
-    // Without the portal database this note is the only record of who sent the invoice (the
-    // Driver view lists what was sent from it), so admin views add the sender.
-    const sender = pilotAdminViews() ? sentByNote((await demoClientView()) === 'driver' ? 'Driver' : 'Office') : null;
+    // With admin views the note says who sent the invoice: the Driver view lists what was sent
+    // from it, and without the portal database the note is the only record of that.
+    const sender = (await adminDriverViewAllowed()) ? sentByNote((await demoClientView()) === 'driver' ? 'Driver' : 'Office') : null;
     const noteParts = [
       PORTAL_NOTE,
       validation.status === 'REVIEW' ? REVIEW_NOTE : null,

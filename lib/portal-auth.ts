@@ -76,6 +76,17 @@ export function pilotAdminViews(): boolean {
   return adminViewsEnabled() && !databaseAuthEnabled();
 }
 
+/**
+ * Who may use the Driver view on real data when admin views are on (NEXT_PUBLIC_ADMIN_VIEWS=true):
+ * with the shared password, whoever holds it; with database sign-in, signed-in factor staff.
+ */
+export async function adminDriverViewAllowed(): Promise<boolean> {
+  if (!adminViewsEnabled()) return false;
+  if (!databaseAuthEnabled()) return true;
+  const session = await currentValidPortalSession();
+  return Boolean(session && session.role !== 'CLIENT_USER');
+}
+
 const PILOT_ADMIN_SESSION: PortalSession = {
   v: 1,
   userId: 'pilot-admin',

@@ -139,6 +139,8 @@ export async function GET() {
       console.error('[ops-clients] arrivals unavailable', err);
     }
     const statusById = new Map(records.map((record) => [record.id, record.status]));
+    // With admin views everyone sends as the same admin, so the note's "Sent by" says more.
+    const senderById = new Map(records.map((record) => [record.id, readPortalNote(record.notes).sentBy]));
     const arrivedToday = {
       available: arrivals != null,
       count: arrivals?.length ?? 0,
@@ -146,6 +148,7 @@ export async function GET() {
       items: (arrivals ?? []).slice(0, 8).map((a) => ({
         ...a,
         clientName: clientNames[a.clientId] || a.clientId,
+        submittedBy: senderById.get(a.invoiceId) ?? a.submittedBy,
         status: statusById.get(a.invoiceId) ?? null,
       })),
     };

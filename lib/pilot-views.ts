@@ -32,6 +32,15 @@ export function cleanArrivals(records: RiskInvoiceRecord[], today: string): Risk
     .sort((a, b) => sentAt(b).localeCompare(sentAt(a)));
 }
 
+/** What the portal database knows about an invoice, when there is one (database sign-in). */
+export interface PortalState {
+  review?: 'OPEN' | 'APPROVED' | 'REJECTED' | null;
+  rejectionNote?: string | null;
+  openFix?: string | null;
+  fixAnswered?: boolean;
+  taskId?: string | null;
+}
+
 export interface PilotDriverRow {
   id: string;
   invoiceNumber: string;
@@ -41,11 +50,15 @@ export interface PilotDriverRow {
   invoiceDate: string;
   sentAt: string;
   status: DriverStatus;
-  taskId: null;
+  taskId: string | null;
 }
 
-/** What the Driver view lists: invoices sent from it, the last 60 days plus anything that needs the driver. */
-export function driverRows(records: RiskInvoiceRecord[], clientId: string, today: string): PilotDriverRow[] {
+/**
+ * What the Driver view lists: invoices sent from it, the last 60 days plus anything that needs the
+ * driver. With the portal database, its review decisions and fix requests (`portal`, by invoice id)
+ * take the place of what the FactorCloud note implies.
+ */
+export function driverRows(records: RiskInvoiceRecord[], clientId: string, today: string, portal: Record<string, PortalState> = {}): PilotDriverRow[] {
   const since = Date.parse(`${today}T00:00:00Z`) - 60 * 86_400_000;
   const rows = records
     .filter((record) => record.companyClientId === clientId && readPortalNote(record.notes).sentBy === 'Driver')
@@ -57,8 +70,10 @@ export function driverRows(records: RiskInvoiceRecord[], clientId: string, today
       invoiceAmount: record.invoiceAmount ?? 0,
       invoiceDate: (record.invoiceDate ?? '').slice(0, 10),
       sentAt: sentAt(record),
-      status: driverStatus({ record, review: awaitingFactor(record) ? 'OPEN' : null }),
-      taskId: null,
+      status: portal[record.id]
+        ? driverStatus({ record, ...portal[record.id] })
+        : driverStatus({ record, review: awaitingFactor(record) ? 'OPEN' : null }),
+      taskId: portal[record.id]?.taskId ?? null,
     }))
     .filter((row) => row.status.needsYou || !row.sentAt || Date.parse(row.sentAt.slice(0, 10)) >= since);
   return sortForDriver(rows).slice(0, 40);

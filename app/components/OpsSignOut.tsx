@@ -1,11 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DemoToggle } from './DemoToggle';
-import { adminViewsEnabled } from '@/lib/demo';
 
 export function OpsSignOut() {
   const [signingOut, setSigningOut] = useState(false);
+  // A shared site password can't be signed out of.
+  const [sharedPassword, setSharedPassword] = useState(false);
+  useEffect(() => {
+    void fetch('/api/portal-auth/session', { cache: 'no-store' })
+      .then(async (res) => { if (res.ok) setSharedPassword((await res.json()).mode === 'pilot'); })
+      .catch(() => {});
+  }, []);
 
   async function logout() {
     setSigningOut(true);
@@ -18,8 +24,7 @@ export function OpsSignOut() {
 
   return <>
     <DemoToggle variant="ops" />
-    {/* A shared site password can't be signed out of. */}
-    {!adminViewsEnabled() && <button type="button" className="opsSignOut" onClick={() => void logout()} disabled={signingOut}>
+    {!sharedPassword && <button type="button" className="opsSignOut" onClick={() => void logout()} disabled={signingOut}>
       {signingOut ? 'Signing out...' : 'Sign out'}
     </button>}
   </>;
