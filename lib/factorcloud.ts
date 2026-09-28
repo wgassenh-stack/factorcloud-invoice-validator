@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import type { CompanyRecord } from './types';
 import { FactorCloudError } from './errors';
 import { collectInvoiceRecords, findToken, unwrapRecord } from './fc-response';
+import { labelsIn, type InvoiceLabel } from './labels';
 import { normalizeIdentifier } from './normalize';
 import { scoreDebtor, type DebtorHints } from './matching';
 import { addDemoInvoice, demoClientDebtor, demoCompany, demoDebtors, demoInvoice, demoInvoices, nextDemoDocumentId } from './demo-store';
@@ -370,6 +371,24 @@ export async function uploadDocument(clientId: string, file: File, type: string)
 export async function addDocumentsToInvoice(invoiceId: string, documentIds: string[]): Promise<unknown> {
   if (await demoRequest()) return { status: 'SUCCESS', invoiceId, documents: documentIds };
   return fcRequest(`/invoices/${encodeURIComponent(invoiceId)}/documents`, { method: 'POST', json: { documentIds } });
+}
+
+export type { InvoiceLabel } from './labels';
+
+/** FactorCloud's invoice labels (set up by the factor in FactorCloud). Used by FactorCloud's own web app. */
+export async function listInvoiceLabels(): Promise<InvoiceLabel[]> {
+  if (await demoRequest()) return [];
+  const body = await fcRequest('/labels', { query: { entityType: 'INVOICE' } });
+  return labelsIn(body);
+}
+
+/**
+ * Sets an invoice's labels, as FactorCloud's web app does (PATCH /invoices/{id}/labels). Not in the
+ * published API reference, so callers treat a failure as non-fatal.
+ */
+export async function setInvoiceLabels(invoiceId: string, labelIds: string[]): Promise<unknown> {
+  if (await demoRequest()) return { status: 'SUCCESS', invoiceId, labelIds };
+  return fcRequest(`/invoices/${encodeURIComponent(invoiceId)}/labels`, { method: 'PATCH', json: { labelIds } });
 }
 
 export async function attachDocuments(invoiceId: string, documentIds: string[]): Promise<unknown> {

@@ -22,6 +22,7 @@ import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '
 import { demoClientView, demoRequest } from '@/lib/demo-request';
 import { DEMO_DRIVER } from '@/lib/demo';
 import { buildPortalNote } from '@/lib/portal-notes';
+import { labelForReview } from '@/lib/review-label';
 import { explanationProblem, flaggedChecks, forFactorReview, hardBlocks, needsExplanation, withClientExplanation } from '@/lib/override';
 
 export const runtime = 'nodejs';
@@ -205,6 +206,13 @@ export async function POST(req: Request) {
       try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: 'DOCUMENT_ATTACH_FAILED', eventData: { invoiceId, documentIds, error: detail } }); } catch { /* original error remains primary */ }
       return respond(false, `Invoice ${invoiceId} was created and documents uploaded, but attaching them failed. Do not recreate it. Attach the uploaded documents in FactorCloud.`);
     }
+  }
+
+  // Flagged invoices get the factor's review label so they stand out in FactorCloud's list. Best
+  // effort and not shown to the sender: the invoice is created either way.
+  if (validation.status === 'REVIEW' && !demo) {
+    const labelled = await labelForReview(invoiceId!);
+    try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: labelled.ok ? 'REVIEW_LABEL_ADDED' : 'REVIEW_LABEL_FAILED', eventData: { invoiceId, detail: labelled.detail } }); } catch { /* invoice workflow should still succeed */ }
   }
 
   if (demo) {
