@@ -29,6 +29,19 @@ type RecentInvoice = {
   status: string | null;
 };
 
+type Arrival = {
+  submissionId: string;
+  invoiceId: string;
+  invoiceNumber: string | null;
+  clientId: string;
+  clientName: string;
+  invoiceAmount: number | null;
+  documentCount: number;
+  submittedBy: string | null;
+  createdAt: string;
+  status: string | null;
+};
+
 type OpsResponse = {
   clients: OpsClientSummary[];
   totals: { clientCount: number; invoiceCount: number; invoiceAmount: number };
@@ -42,6 +55,7 @@ type OpsResponse = {
     topClientShare: number;
     recentInvoices: RecentInvoice[];
     reviewSummary: { available: boolean; openCount: number; openAmount: number; oldestCreatedAt: string | null };
+    arrivedToday: { available: boolean; count: number; amount: number; items: Arrival[] };
   };
   analytics: {
     today: string;
@@ -58,8 +72,8 @@ type OpsResponse = {
 };
 
 const FACTOR_PRESETS: DashboardPreset[] = [
-  { id: 'command', label: 'Command center', description: 'Exposure, aging, cash and collections', widgets: ['kpis', 'aging', 'exposure', 'cashflow', 'dso', 'calendar', 'reviews', 'clients'] },
-  { id: 'operations', label: 'Operations', description: 'Reviews, volume and the latest work', widgets: ['metrics', 'volume', 'status', 'reviews', 'recent', 'clients'] },
+  { id: 'command', label: 'Command center', description: 'Exposure, aging, cash and collections', widgets: ['kpis', 'aging', 'exposure', 'cashflow', 'dso', 'arrivals', 'reviews', 'calendar', 'clients'] },
+  { id: 'operations', label: 'Operations', description: 'Reviews, volume and the latest work', widgets: ['metrics', 'arrivals', 'reviews', 'volume', 'status', 'recent', 'clients'] },
 ];
 
 const FACTOR_WIDGETS: DashboardWidgetOption[] = [
@@ -73,6 +87,7 @@ const FACTOR_WIDGETS: DashboardWidgetOption[] = [
   { id: 'volume', label: 'Volume trend', description: 'Twelve weeks of factor-wide invoice activity' },
   { id: 'top-clients', label: 'Top clients', description: 'Clients ranked by invoice activity amount' },
   { id: 'status', label: 'Status mix', description: 'FactorCloud status distribution across invoices' },
+  { id: 'arrivals', label: 'Arrived today', description: 'Invoices that passed every check and went straight into FactorCloud today' },
   { id: 'reviews', label: 'Review workload', description: 'Open portal reviews and queue context' },
   { id: 'recent', label: 'Recent invoices', description: 'Latest invoice activity across clients' },
   { id: 'clients', label: 'Client table', description: 'Searchable operating view across clients' },
@@ -179,21 +194,23 @@ export default function FactorOperationsPage() {
             <DsoLine points={data.analytics.dso} target={40} />
           </DashboardCard>}
 
-          {show('calendar') && <DashboardCard className="dashSpan8" kicker="Activity" title="Submission calendar">
-            <CalendarHeatmap days={data.analytics.daily} />
-          </DashboardCard>}
-
-          {show('volume') && <DashboardCard className="dashSpan8" kicker="Portfolio activity" title="Twelve-week invoice trend">
-            <div className="dashCardStatline"><strong>{money(data.portfolio.weeklyActivity.reduce((sum, point) => sum + point.amount, 0))}</strong><span>{data.portfolio.weeklyActivity.reduce((sum, point) => sum + point.count, 0)} invoices across the last twelve calendar weeks</span></div>
-            <ActivityTrendChart points={data.portfolio.weeklyActivity} />
-          </DashboardCard>}
-
-          {show('top-clients') && <DashboardCard className="dashSpan4" kicker="Portfolio mix" title="Top clients by activity">
-            <RankBars items={topClients.map((client) => ({ id: client.clientId, label: client.clientName, value: client.invoiceAmount, detail: `${client.invoiceCount} invoices` }))} />
-          </DashboardCard>}
-
-          {show('status') && <DashboardCard className="dashSpan4" kicker="FactorCloud status" title="Invoice status mix">
-            <StatusDonut items={data.portfolio.statuses} centerValue={data.totals.invoiceCount} centerLabel="Invoices" />
+          {show('arrivals') && <DashboardCard className="dashSpan8" kicker="Passed every check" title="Arrived today" action={<span className="dashCardHint">Funding decisions stay in FactorCloud</span>}>
+            {!data.portfolio.arrivedToday.available ? <div className="portalEmpty"><strong>Arrivals unavailable</strong><span>Could not load today's portal submissions.</span></div> : <>
+              <div className="dashCardStatline"><strong>{data.portfolio.arrivedToday.count}</strong><span>{data.portfolio.arrivedToday.count === 1 ? 'clean invoice' : 'clean invoices'} today · {money(data.portfolio.arrivedToday.amount)} · no portal review needed</span></div>
+              <div className="dashInvoiceRows">
+                {data.portfolio.arrivedToday.items.map((a) => <a className="dashInvoiceRow factorInvoiceRow" href={`/ops/submissions/${encodeURIComponent(a.submissionId)}`} key={a.submissionId}>
+                  <div className="dashInvoiceGlyph">{(a.clientName || 'C').charAt(0).toUpperCase()}</div>
+                  <div className="dashInvoiceIdentity">
+                    <strong>{a.clientName}</strong>
+                    <span>Invoice {a.invoiceNumber || a.invoiceId.slice(0, 8)} · {a.documentCount} document{a.documentCount === 1 ? '' : 's'}{a.submittedBy ? ` · by ${a.submittedBy}` : ''} · {timeOfDay(a.createdAt)}{a.status ? ` · ${pretty(a.status)} in FactorCloud` : ''}</span>
+                  </div>
+                  <span className="portalStatus pass">✓ All checks passed</span>
+                  <strong>{a.invoiceAmount == null ? '-' : money(a.invoiceAmount)}</strong>
+                </a>)}
+                {!data.portfolio.arrivedToday.count && <div className="portalEmpty"><strong>Nothing yet today</strong><span>Invoices that pass every check will appear here as clients send them.</span></div>}
+                {data.portfolio.arrivedToday.count > data.portfolio.arrivedToday.items.length && <span className="dashCardHint">and {data.portfolio.arrivedToday.count - data.portfolio.arrivedToday.items.length} more today</span>}
+              </div>
+            </>}
           </DashboardCard>}
 
           {show('reviews') && <DashboardCard className="dashSpan4" kicker="Portal workflow" title="Review workload" action={<a href="/ops/reviews">Open queue</a>}>
@@ -218,7 +235,24 @@ export default function FactorOperationsPage() {
             </div>}
           </DashboardCard>}
 
-          {show('recent') && <DashboardCard className="dashSpan8" kicker="Recent activity" title="Latest invoices across clients">
+          {show('calendar') && <DashboardCard className="dashSpan12" kicker="Activity" title="Submission calendar">
+            <CalendarHeatmap days={data.analytics.daily} />
+          </DashboardCard>}
+
+          {show('volume') && <DashboardCard className="dashSpan8" kicker="Portfolio activity" title="Twelve-week invoice trend">
+            <div className="dashCardStatline"><strong>{money(data.portfolio.weeklyActivity.reduce((sum, point) => sum + point.amount, 0))}</strong><span>{data.portfolio.weeklyActivity.reduce((sum, point) => sum + point.count, 0)} invoices across the last twelve calendar weeks</span></div>
+            <ActivityTrendChart points={data.portfolio.weeklyActivity} />
+          </DashboardCard>}
+
+          {show('top-clients') && <DashboardCard className="dashSpan4" kicker="Portfolio mix" title="Top clients by activity">
+            <RankBars items={topClients.map((client) => ({ id: client.clientId, label: client.clientName, value: client.invoiceAmount, detail: `${client.invoiceCount} invoices` }))} />
+          </DashboardCard>}
+
+          {show('status') && <DashboardCard className="dashSpan4" kicker="FactorCloud status" title="Invoice status mix">
+            <StatusDonut items={data.portfolio.statuses} centerValue={data.totals.invoiceCount} centerLabel="Invoices" />
+          </DashboardCard>}
+
+          {show('recent') && <DashboardCard className="dashSpan12" kicker="Recent activity" title="Latest invoices across clients">
             <div className="dashInvoiceRows">
               {data.portfolio.recentInvoices.map((invoice) => <a className="dashInvoiceRow factorInvoiceRow" href={invoice.companyClientId ? `/ops/clients/${encodeURIComponent(invoice.companyClientId)}` : '/ops'} key={invoice.id}>
                 <div className="dashInvoiceGlyph">{(invoice.clientName || 'C').charAt(0).toUpperCase()}</div>
@@ -299,6 +333,10 @@ function trendCopy(value: number | null, suffix: string): string {
   if (value == null) return `No prior baseline ${suffix}`;
   if (Math.abs(value) < 0.5) return `Flat ${suffix}`;
   return `${value > 0 ? '+' : ''}${value.toFixed(0)}% ${suffix}`;
+}
+
+function timeOfDay(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
 function ageCopy(iso: string | null): string {

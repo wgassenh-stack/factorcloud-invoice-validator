@@ -8,7 +8,7 @@ import { portalConfig } from './portal-config';
 import { flaggedChecks } from './override';
 import type { PortalSession } from './session';
 import type { PortalSubmissionDetail } from './submission-detail';
-import type { CompanyRecord, ValidationReport } from './types';
+import type { CheckResult, CompanyRecord, ValidationReport } from './types';
 
 interface DemoState {
   day: string;
@@ -45,6 +45,7 @@ function state(): DemoState {
     const portfolio = buildDemoPortfolio(day, portalConfig.clientName);
     const reviews = buildDemoReviews(portfolio, Date.now());
     globalState.__fcDemoState = { day, portfolio, created: [], reviews, submissions: [], documentSeq: 0, tasks: [] };
+    plantCleanArrivals(globalState.__fcDemoState, Date.now());
     // Planted: the factor already asked the demo driver to fix one invoice.
     const fixable = reviews.filter((r) => r.clientId === DEMO_CLIENT_ID)[1];
     if (fixable) globalState.__fcDemoState.tasks!.push({
@@ -266,14 +267,7 @@ export function demoSubmissionDetail(by: { invoiceId?: string; submissionId?: st
   const createdAt = submission?.createdAt ?? review?.createdAt ?? invoice.createdOn;
   const validation: ValidationReport = submission?.validation ?? {
     status: review ? 'REVIEW' : 'PASS',
-    checks: [
-      ...(review?.checks ?? []),
-      { id: 'invoice-in-packet', label: 'Invoice in packet', status: 'PASS', message: 'An invoice was identified in the uploaded packet.' },
-      { id: 'required-fields', label: 'Required invoice fields', status: 'PASS', message: 'Invoice number, amount, date and debtor were all read.' },
-      { id: 'debtor-found', label: 'Debtor found in FactorCloud', status: 'PASS', message: `Matched ${invoice.companyDebtorName} by exact name.` },
-      { id: 'client', label: 'Client matches FactorCloud client', status: 'PASS', message: 'Invoice was issued by this client.' },
-      { id: 'duplicate', label: 'Not a duplicate', status: 'PASS', message: 'No other invoice with this number exists for this client.' },
-    ],
+    checks: [...(review?.checks ?? []), ...passedChecks(invoice)],
   };
   const at = (offsetSeconds: number) => new Date(Date.parse(createdAt) + offsetSeconds * 1000).toISOString();
   const actor = { email: 'dispatch@client.example', name: 'Client dispatcher' };
@@ -317,6 +311,79 @@ export function demoSubmissionDetail(by: { invoiceId?: string; submissionId?: st
     reviews: review ? [{ id: review.reviewId, status: review.status, reason: review.reason, decisionNote: review.decisionNote, createdAt: review.createdAt, decidedAt: review.decidedAt, decidedBy: review.decidedAt ? { email: DEMO_SESSION.email, name: DEMO_SESSION.displayName } : { email: null, name: null } }] : [],
     audit,
   };
+}
+
+function passedChecks(invoice: DemoInvoice): CheckResult[] {
+  return [
+    { id: 'invoice-in-packet', label: 'Invoice in packet', status: 'PASS', message: 'An invoice was identified in the uploaded packet.' },
+    { id: 'required-fields', label: 'Required invoice fields', status: 'PASS', message: 'Invoice number, amount, date and debtor were all read.' },
+    { id: 'debtor-found', label: 'Debtor found in FactorCloud', status: 'PASS', message: `Matched ${invoice.companyDebtorName} by exact name.` },
+    { id: 'client', label: 'Client matches FactorCloud client', status: 'PASS', message: 'Invoice was issued by this client.' },
+    { id: 'duplicate', label: 'Not a duplicate', status: 'PASS', message: 'No other invoice with this number exists for this client.' },
+  ];
+}
+
+/**
+ * Planted: a few of today's invoices came in clean through the portal earlier today, so the
+ * factor's "Arrived today" list isn't empty when the demo starts.
+ */
+function plantCleanArrivals(s: DemoState, now: number): void {
+  const reviewed = new Set(s.reviews.map((r) => r.invoiceId));
+  const startOfDay = Date.parse(`${s.day}T00:00:00Z`);
+  const today = s.portfolio.invoices.filter((inv) => inv.createdOn.startsWith(s.day) && !reviewed.has(inv.id) && (inv.status === 'PENDING' || inv.status === 'APPROVED'));
+  [0.6, 1.3, 2.4, 3.9, 5.5].forEach((hoursAgo, i) => {
+    const invoice = today[i];
+    if (!invoice) return;
+    const createdAt = new Date(Math.max(startOfDay + (5 - i) * 60_000, now - hoursAgo * 3_600_000)).toISOString();
+    invoice.createdOn = createdAt;
+    s.submissions.push({
+      submissionId: `demo-sub-clean-${i + 1}`,
+      invoiceId: invoice.id,
+      clientId: invoice.companyClientId,
+      debtorId: invoice.companyDebtorId,
+      validation: { status: 'PASS', checks: passedChecks(invoice) },
+      files: [
+        { fileName: `${invoice.invoiceNumber}.pdf`, documentType: 'invoice', sizeBytes: 176_402 },
+        { fileName: `BOL-${invoice.referenceNumber}.pdf`, documentType: 'bol', sizeBytes: 391_227 },
+        { fileName: `POD-${invoice.referenceNumber}.jpg`, documentType: 'pod', sizeBytes: 1_164_950 },
+      ],
+      createdAt,
+      workflowStatus: 'CREATED_IN_FACTORCLOUD',
+    });
+  });
+}
+
+export interface Arrival {
+  submissionId: string;
+  invoiceId: string;
+  invoiceNumber: string | null;
+  clientId: string;
+  invoiceAmount: number | null;
+  documentCount: number;
+  submittedBy: string | null;
+  createdAt: string;
+}
+
+/** Invoices that passed every check and went into FactorCloud today (UTC), newest first. */
+export function demoArrivalsToday(): Arrival[] {
+  const s = state();
+  const day = new Date().toISOString().slice(0, 10);
+  return s.submissions
+    .filter((sub) => sub.validation.status === 'PASS' && sub.workflowStatus === 'CREATED_IN_FACTORCLOUD' && sub.createdAt.startsWith(day))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((sub) => {
+      const invoice = demoInvoice(sub.invoiceId);
+      return {
+        submissionId: sub.submissionId,
+        invoiceId: sub.invoiceId,
+        invoiceNumber: invoice?.invoiceNumber ?? null,
+        clientId: sub.clientId,
+        invoiceAmount: invoice?.invoiceAmount ?? null,
+        documentCount: sub.files.length,
+        submittedBy: invoice?.submittedBy ?? null,
+        createdAt: sub.createdAt,
+      };
+    });
 }
 
 // --- drivers (demo only) ----------------------------------------------------------------------
