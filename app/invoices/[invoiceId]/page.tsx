@@ -6,7 +6,7 @@ import { PortalNav } from '@/app/components/PortalNav';
 import { InvoiceTracker, Skeleton } from '@/app/components/CommandCharts';
 import { DemoBadge } from '@/app/components/DemoBadge';
 import { FixRequestPanel } from '@/app/components/FixRequests';
-import { lifecycleStage } from '@/lib/analytics';
+import { lifecycleStage, reserveOn } from '@/lib/analytics';
 import type { RiskInvoiceRecord } from '@/lib/risk';
 
 type InvoiceRecord = RiskInvoiceRecord;
@@ -159,10 +159,9 @@ export default function InvoiceDetailPage() {
 }
 
 function MoneyBreakdown({ invoice }: { invoice: InvoiceRecord }) {
-  const amount = invoice.invoiceAmount ?? 0;
   const advance = invoice.advanceAmount ?? 0;
   const fee = invoice.purchaseFeeAmount ?? 0;
-  const reserve = Math.max(0, (invoice.escrowReserveAmount ?? amount - advance) - fee);
+  const reserve = reserveOn(invoice);
   const parts = [
     { label: 'Advanced to you', value: advance, color: '#2a78d6' },
     { label: invoice.paidDate ? 'Reserve released' : 'Reserve (paid when debtor pays)', value: reserve, color: '#86b6ef' },

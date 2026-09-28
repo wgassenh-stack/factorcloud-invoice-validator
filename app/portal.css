@@ -242,3 +242,4 @@
 .linkButton, .linkButton:disabled { width:auto; margin:0; padding:0; border:0; border-radius:0; background:none; box-shadow:none; }
 .linkButton:disabled { color:#98a2b3; }
 .choice { width:100%; }
+.sendSkipped p.unreadable { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 14px; }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { resolveConfiguredClientId } from '@/lib/portal-auth';
 import { signDocumentsReceipt, verifyDocumentsReceipt } from '@/lib/submission-integrity';
 import { apiErrorResponse } from '@/lib/api-errors';
-import { groupingProblem } from '@/lib/paperwork-grouping';
+import { groupingProblem, placeAdded } from '@/lib/paperwork-grouping';
 import { checkCards, readFiles, uploadProblem } from '@/lib/paperwork';
 
 export const runtime = 'nodejs';
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     if (receipt.clientId !== clientId) return NextResponse.json({ error: 'This upload belongs to a different client.' }, { status: 403 });
 
     const files = form.getAll('files').filter((f): f is File => f instanceof File && f.size > 0);
-    const problem = uploadProblem(files, receipt.documents.length);
+    const problem = uploadProblem(files, { count: receipt.documents.length, bytes: receipt.documents.reduce((sum, d) => sum + (d.sizeBytes ?? 0), 0) });
     if (problem) return NextResponse.json({ error: problem.message }, { status: problem.status });
 
     const firstIndex = Number(form.get('firstIndex'));
@@ -45,14 +45,21 @@ export async function POST(req: Request) {
     const read = await readFiles(files, firstIndex, receipt.documents.map((d) => d.fileHash ?? ''));
     const documents = [...receipt.documents, ...read.documents];
     const added = read.documents.map((_, i) => receipt.documents.length + i);
-    if (added.length) {
+    let unassigned: number[] = [];
+    if (added.length && target === 'auto') {
+      // "Try again" on a file that couldn't be read: place it the way the first read would have.
+      const placed = placeAdded(documents, groups.map((g) => g.documentIndexes), added);
+      placed.into.forEach((docs, g) => { if (docs.length) groups[g].documentIndexes = [...groups[g].documentIndexes, ...docs]; });
+      placed.newGroups.forEach((docs, n) => groups.push({ id: `card-a${Date.now().toString(36)}${n}`, documentIndexes: docs }));
+      unassigned = placed.unassigned;
+    } else if (added.length) {
       const card = groups.find((g) => g.id === target);
       if (card) card.documentIndexes = [...card.documentIndexes, ...added];
       else groups.push({ id: `card-a${Date.now().toString(36)}`, documentIndexes: added });
     }
 
     const { cards, warnings } = await checkCards(clientId, documents, groups);
-    return NextResponse.json({ documents, documentsReceipt: signDocumentsReceipt(clientId, documents), cards, added, unreadable: read.unreadable, duplicates: read.duplicates, warnings });
+    return NextResponse.json({ documents, documentsReceipt: signDocumentsReceipt(clientId, documents), cards, added, unassigned, unreadable: read.unreadable, duplicates: read.duplicates, warnings });
   } catch (err) {
     return apiErrorResponse(err, 'paperwork-add');
   }

@@ -110,7 +110,7 @@ In the review queue, **Request fix…** sends the client a message (for example 
 
 ## Debtor credit check
 
-When a packet is verified, the portal reads the client–debtor credit terms from FactorCloud (`GET /clients/{client}/debtors/{debtor}`: `creditLimit`, `creditLimitApproved`) and adds up what that debtor still owes on the client's unpaid invoices. The submit page shows how much of the limit is in use and where this invoice lands. The invoice goes to review, not blocked, when it would pass the limit, when the limit isn't approved, or when FactorCloud marks the debtor as not approved for purchase. The check runs again with fresh balances at submit time. If FactorCloud can't be reached, the check is skipped rather than blocking.
+Credit limits are the factor's business, so the person submitting never sees them: the upload page doesn't load or show credit, and a credit problem never asks the client for a note. When an invoice is sent, the portal reads the client–debtor credit terms from FactorCloud (`GET /clients/{client}/debtors/{debtor}`: `creditLimit`, `creditLimitApproved`) and adds up what that debtor still owes on the client's unpaid invoices. If the invoice would pass the limit, the limit isn't approved, or FactorCloud marks the debtor as not approved for purchase, the invoice goes to the factor's review queue with a warning for the approver (for example "Warning: this may put the client over the credit limit", with the open balance, this invoice and the limit). Everything sent back to the browser has the credit check removed. If FactorCloud can't be reached, the check is skipped rather than blocking.
 
 ## Connection check
 

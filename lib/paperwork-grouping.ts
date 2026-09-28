@@ -121,3 +121,27 @@ function closeId(a: string | null, b: string | null): boolean {
   for (let i = 0; i < long.length; i++) if (long.slice(0, i) + long.slice(i + 1) === short) return true;
   return false;
 }
+
+/**
+ * Places documents added to an upload that is already sorted (e.g. a file read again after it
+ * failed). A new invoice starts its own group; paperwork joins the group whose invoice has the same
+ * load or invoice number, or the only group when there is just one; anything else waits.
+ * `into[g]` lists the documents going into existing group g.
+ */
+export function placeAdded(documents: AnalyzedDocument[], groups: number[][], added: number[]): { into: number[][]; newGroups: number[][]; unassigned: number[] } {
+  const into = groups.map(() => [] as number[]);
+  const newGroups: number[][] = [];
+  const unassigned: number[] = [];
+  for (const d of added) {
+    const doc = documents[d].fields;
+    if (doc.documentType === 'invoice') { newGroups.push([d]); continue; }
+    const matches = groups.flatMap((group, g) => {
+      const invoice = documents[group[0]].fields;
+      return sameId(invoice.referenceNumber, doc.referenceNumber) || sameId(invoice.invoiceNumber, doc.invoiceNumber) ? [g] : [];
+    });
+    if (matches.length === 1) into[matches[0]].push(d);
+    else if (!matches.length && groups.length === 1 && !newGroups.length) into[0].push(d);
+    else unassigned.push(d);
+  }
+  return { into, newGroups, unassigned };
+}

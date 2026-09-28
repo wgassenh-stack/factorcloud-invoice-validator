@@ -201,7 +201,8 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
       invoiceAmount: amount,
       invoiceBalance: funded ? balance : amount,
       advanceAmount: funded ? round2(amount * advanceRate) : 0,
-      escrowReserveAmount: funded ? round2(amount * (1 - advanceRate)) : 0,
+      // Like FactorCloud: advance + escrow reserve + purchase fee add up to the invoice amount.
+      escrowReserveAmount: funded ? round2(amount - round2(amount * advanceRate) - round2(amount * feeRate)) : 0,
       purchaseFeeAmount: funded ? round2(amount * feeRate) : 0,
       invoiceDate: `${invoiceDate}T00:00:00Z`,
       createdOn: `${invoiceDate}T${String(13 + Math.floor(rng() * 8)).padStart(2, '0')}:${String(Math.floor(rng() * 60)).padStart(2, '0')}:00Z`,

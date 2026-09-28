@@ -113,7 +113,8 @@ function gemini(): GoogleGenAI {
   return client;
 }
 
-function transientGeminiError(err: unknown): boolean {
+/** A busy or overloaded reader rather than a problem with the file: worth trying again. */
+export function transientGeminiError(err: unknown): boolean {
   const text = err instanceof Error ? err.message : String(err);
   return /\b(429|500|502|503|504)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|temporar/i.test(text);
 }

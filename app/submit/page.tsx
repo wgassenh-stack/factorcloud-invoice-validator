@@ -18,7 +18,7 @@ import type { AnalyzedDocument, CreateResponse, ValidationReport } from '@/lib/t
 // that couldn't be placed wait in a tray with a suggested match.
 
 type Edits = { invoiceNumber: string; referenceNumber: string; invoiceAmount: string; invoiceDate: string };
-type Sent = { state: 'sending' | 'sent' | 'error'; message: string; invoiceId?: string; review?: boolean };
+type Sent = { state: 'sending' | 'sent' | 'error' | 'duplicate'; message: string; invoiceId?: string; review?: boolean };
 type Card = PaperworkCard & { edits: Edits; note: string; sent?: Sent; serverFlags?: ValidationReport };
 type Target = { id: string; label: string };
 
@@ -135,8 +135,9 @@ export default function SendPaperworkPage() {
   /** "+ Add a document": reads only the new files and puts them on that card. */
   async function addToCard(target: string, added: File[]) {
     if (!upload || !added.length) return;
+    // The new files join the page only once the server has accepted them, so a refused add leaves
+    // nothing behind. They'll sit right after the files already here, at these positions.
     const firstIndex = files.length;
-    addFiles(added, null);
     setBusy('adding');
     setError('');
     try {
@@ -149,9 +150,38 @@ export default function SendPaperworkPage() {
       const res = await fetch('/api/paperwork/add', { method: 'POST', body: form });
       const body = await res.json() as { documents: AnalyzedDocument[]; documentsReceipt: string; cards: PaperworkCard[]; unreadable: SkippedFile[]; duplicates: SkippedFile[]; warnings: string[]; error?: string };
       if (!res.ok) throw new Error(body.error || 'The document could not be added.');
+      addFiles(added, null);
       setUpload({ documents: body.documents, receipt: body.documentsReceipt, warnings: upload.warnings });
       setCards(mergeCards(body.cards));
       setSkipped((current) => ({ unreadable: [...current.unreadable, ...body.unreadable], duplicates: [...current.duplicates, ...body.duplicates] }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  /** "Try again" on a file that couldn't be read: reads it again and places it like the first read. */
+  async function retryRead(skip: SkippedFile) {
+    if (!upload) return;
+    const file = files[skip.fileIndex];
+    if (!file) return;
+    setBusy('adding');
+    setError('');
+    try {
+      const form = new FormData();
+      form.append('documentsReceipt', upload.receipt);
+      form.append('cards', JSON.stringify(cards.map((c) => ({ id: c.id, documentIndexes: c.documentIndexes }))));
+      form.append('target', 'auto');
+      form.append('firstIndex', String(skip.fileIndex));
+      form.append('files', file);
+      const res = await fetch('/api/paperwork/add', { method: 'POST', body: form });
+      const body = await res.json() as { documents: AnalyzedDocument[]; documentsReceipt: string; cards: PaperworkCard[]; unassigned: number[]; unreadable: SkippedFile[]; error?: string };
+      if (!res.ok) throw new Error(body.error || 'The file could not be read again.');
+      setUpload({ documents: body.documents, receipt: body.documentsReceipt, warnings: upload.warnings });
+      setCards(mergeCards(body.cards));
+      setUnassigned((current) => [...current, ...(body.unassigned ?? [])]);
+      setSkipped((current) => ({ ...current, unreadable: [...current.unreadable.filter((u) => u.fileIndex !== skip.fileIndex), ...body.unreadable] }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -186,6 +216,11 @@ export default function SendPaperworkPage() {
         // The server found something the page couldn't check (for example a possible duplicate).
         // Show its reasons and ask for a note instead of just failing.
         setCards((current) => current.map((c) => (c.id === card.id ? { ...c, serverFlags: body.validation, sent: undefined } : c)));
+        return false;
+      }
+      if (body.duplicate) {
+        // Not an error: it's already in. Say so and link to it.
+        setSent({ state: 'duplicate', message: `Already submitted: Invoice ${body.duplicate.invoiceNumber} already exists.`, invoiceId: body.duplicate.invoiceId });
         return false;
       }
       if (!res.ok || !body.ok) throw new Error(body.error || 'Sending failed.');
@@ -275,7 +310,10 @@ export default function SendPaperworkPage() {
         </section>
         {upload.warnings.map((w) => <div className="warning" key={w}>{w}</div>)}
         {(skipped.unreadable.length > 0 || skipped.duplicates.length > 0) && <section className="sendSkipped">
-          {skipped.unreadable.map((f) => <p key={`u${f.fileIndex}`} className="unreadable"><b>Couldn't read {f.fileName}.</b> Retake the photo or upload a clearer copy with “+ Add a document” on its invoice.</p>)}
+          {skipped.unreadable.map((f) => <p key={`u${f.fileIndex}`} className="unreadable">
+            <span><b>Couldn't read {f.fileName}.</b> {f.reason}</span>
+            {f.retryable && files[f.fileIndex] && <button type="button" className="linkButton" disabled={Boolean(busy)} onClick={() => void retryRead(f)}>{busy === 'adding' ? 'Reading…' : 'Try again'}</button>}
+          </p>)}
           {skipped.duplicates.map((f) => <p key={`d${f.fileIndex}`}><b>{f.fileName}</b> was uploaded twice, so we only used it once.</p>)}
         </section>}
 
@@ -345,9 +383,10 @@ function InvoiceCard({ card, documents, targets, busy, asDriver, only, urlFor, f
   const state = cardState(card);
   const flagged = flaggedChecks(live.checks);
   const blocked = hardBlocks(live);
-  const sent = card.sent?.state === 'sent';
+  const sent = card.sent?.state === 'sent' || card.sent?.state === 'duplicate';
   const amount = Number(card.edits.invoiceAmount);
-  const [tone, label] = sent ? (card.sent!.review ? ['review', 'Sent for review'] : ['pass', 'Sent'])
+  const [tone, label] = card.sent?.state === 'duplicate' ? ['neutral', 'Already submitted']
+    : sent ? (card.sent!.review ? ['review', 'Sent for review'] : ['pass', 'Sent'])
     : state === 'ready' ? ['pass', 'Ready'] : state === 'needs-note' ? ['review', 'Needs a note'] : ['fail', "Can't send yet"];
   const elsewhere = targets.filter((t) => t.id !== card.id);
 
@@ -399,7 +438,7 @@ function InvoiceCard({ card, documents, targets, busy, asDriver, only, urlFor, f
     {!sent && blocked.length > 0 && <SubmitAnywayBox flagged={[]} blocked={blocked} value="" onChange={() => {}} />}
 
     <footer className="sendCardFoot">
-      {card.sent && <span className={`rowResult ${card.sent.state === 'sent' ? 'created' : card.sent.state}`}>{card.sent.message}{card.sent.invoiceId && !asDriver ? <> · <a href={`/invoices/${encodeURIComponent(card.sent.invoiceId)}`}>view</a></> : null}</span>}
+      {card.sent && <span className={`rowResult ${card.sent.state === 'sent' ? 'created' : card.sent.state}`}>{card.sent.message}{card.sent.invoiceId && !asDriver ? <> · <a href={`/invoices/${encodeURIComponent(card.sent.invoiceId)}`}>{card.sent.state === 'duplicate' ? 'View existing invoice →' : 'view'}</a></> : null}</span>}
       {!sent && <button className="small" disabled={busy || card.sent?.state === 'sending' || (state !== 'ready' && state !== 'needs-note') || (state === 'needs-note' && Boolean(explanationProblem(card.note)))} onClick={onSend}>
         {card.sent?.state === 'sending' ? 'Sending…' : state === 'needs-note' ? 'Send with my note' : 'Send this invoice'}
       </button>}
@@ -482,7 +521,7 @@ function mergeServerFlags(base: ValidationReport, server: ValidationReport | und
 }
 
 function cardState(card: Card): 'ready' | 'needs-note' | 'blocked' | 'sent' {
-  if (card.sent?.state === 'sent') return 'sent';
+  if (card.sent?.state === 'sent' || card.sent?.state === 'duplicate') return 'sent';
   const live = liveValidation(card);
   const hasBasics = Boolean(card.edits.invoiceNumber && Number(card.edits.invoiceAmount) > 0 && card.edits.invoiceDate);
   if (!card.debtor || !card.analysisReceipt || card.factorCloudLookupFailed || !hasBasics || hardBlocks(live).length) return 'blocked';

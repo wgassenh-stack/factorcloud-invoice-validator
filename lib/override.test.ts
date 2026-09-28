@@ -31,4 +31,13 @@ describe('submitting with an explanation', () => {
     expect(hardBlocks(report('FAIL', noBuy, failDate))).toEqual([noBuy]);
     expect(hardBlocks(report('FAIL', failDate))).toEqual([]);
   });
+
+  it('leaves "no invoice in the upload" to the factor, not a client note', async () => {
+    const { blockAdvice } = await import('./override');
+    const noInvoice = { id: 'invoice-document', label: 'Invoice document detected', status: 'FAIL' as const, message: 'No invoice document was confidently detected.' };
+    expect(hardBlocks(report('FAIL', noInvoice))).toEqual([noInvoice]);
+    expect(blockAdvice([noInvoice])).toMatch(/invoice document/);
+    // Several invoices in one packet is only a warning, and can be explained.
+    expect(hardBlocks(report('REVIEW', { ...noInvoice, status: 'REVIEW' }))).toEqual([]);
+  });
 });

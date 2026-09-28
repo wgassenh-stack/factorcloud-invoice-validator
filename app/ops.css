@@ -69,3 +69,5 @@
 @media (max-width:650px) { .opsHeader{align-items:flex-start;flex-direction:column}.opsMetrics{grid-template-columns:1fr 1fr}.opsPanelHeader{align-items:stretch;flex-direction:column}.opsSearch{min-width:0}.opsContent{padding:24px 16px 50px}.opsHeader h1{font-size:34px} }.clientNote { display:grid; gap:3px; margin:8px 0; padding:9px 12px; border-left:3px solid #eb6834; border-radius:0 9px 9px 0; background:#fff4ee; font-size:13px; }
 .clientNote b { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:#9a3d14; }
 .clientNote span { color:#2b1a10; font-style:italic; }
+.reviewWorkloadHero.unavailable { background:#f2f4f7; border-color:#d0d5dd; }
+.reviewWorkloadHero.unavailable strong { color:#667085; }

@@ -94,3 +94,19 @@ describe('suggesting where an unplaced document goes', () => {
     expect(suggestPlacements(withPod, [[0, 4], [1]], [3])).toEqual({ 3: [1] });
   });
 });
+
+describe('placing a document added later (e.g. read again after a failure)', () => {
+  it('starts a new invoice, joins a matching one, or waits to be placed', async () => {
+    const { placeAdded } = await import('./paperwork-grouping');
+    const docs = [
+      doc('invoice-a', { documentType: 'invoice', referenceNumber: 'LOAD-A' }),
+      doc('invoice-b', { documentType: 'invoice', referenceNumber: 'LOAD-B' }),
+      doc('late-invoice', { documentType: 'invoice', referenceNumber: 'LOAD-C' }),
+      doc('pod-b', { documentType: 'pod', referenceNumber: 'LOAD-B' }),
+      doc('pod-unknown', { documentType: 'pod' }),
+    ];
+    expect(placeAdded(docs, [[0], [1]], [2, 3, 4])).toEqual({ into: [[], [3]], newGroups: [[2]], unassigned: [4] });
+    // With only one invoice so far, loose paperwork goes with it.
+    expect(placeAdded(docs, [[0]], [4])).toEqual({ into: [[4]], newGroups: [], unassigned: [] });
+  });
+});

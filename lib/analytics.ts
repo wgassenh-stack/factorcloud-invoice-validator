@@ -69,7 +69,7 @@ export interface CashSummary {
    * advanced to the client + the factor's fee + reserve the client gets back once the debtor pays.
    * `notBrokenOut` is invoice value FactorCloud sent no advance amount for.
    */
-  withDebtors: { count: number; amount: number; advanced: number; fees: number; reserveBack: number; notBrokenOut: number; stillOwed: number };
+  withDebtors: { count: number; amount: number; advanced: number; fees: number; reserveBack: number; notBrokenOut: number; stillOwed: number; balanceAssumed: number };
   /** Money that reached the client in the last 30 days: advances plus reserve released on paid invoices. */
   last30: { advanced: number; reserveReleased: number; fees: number };
   /** Balance still owed on funded invoices more than 60 days after the invoice date (matches the aging chart). */
@@ -136,10 +136,31 @@ export function isPaid(record: RiskInvoiceRecord): boolean {
   return token(record.status) === 'PAID';
 }
 
-/** Money still owed on an invoice that has been bought (funded) and not yet paid off. */
+/**
+ * Money still owed on an invoice that has been bought (funded) and not yet paid off. Uses
+ * FactorCloud's invoice balance; when FactorCloud sends none, the full invoice amount is assumed
+ * (see `balanceReported`, so screens can say so instead of presenting it as fact).
+ */
 export function openBalance(record: RiskInvoiceRecord): number {
   if (isPaid(record) || isClosedOut(record)) return 0;
   return Math.max(0, record.invoiceBalance ?? record.invoiceAmount ?? 0);
+}
+
+/** Whether FactorCloud sent a balance for this invoice (rather than it being assumed). */
+export function balanceReported(record: RiskInvoiceRecord): boolean {
+  return record.invoiceBalance !== null && record.invoiceBalance !== undefined;
+}
+
+/**
+ * The reserve on an invoice: what the client gets back once the debtor pays. FactorCloud splits an
+ * invoice into advance + escrow reserve + purchase fee, which add up to the invoice amount (checked
+ * on a real invoice: $8,190 + $1,462.50 + $97.50 = $9,750), so the fee is not taken out of the
+ * escrow reserve. Without an escrow figure, the reserve is what's left after the advance and fee.
+ */
+export function reserveOn(record: RiskInvoiceRecord): number {
+  if (record.escrowReserveAmount !== null && record.escrowReserveAmount !== undefined) return Math.max(0, record.escrowReserveAmount);
+  if (record.advanceAmount === null || record.advanceAmount === undefined) return 0;
+  return Math.max(0, (record.invoiceAmount ?? 0) - record.advanceAmount - (record.purchaseFeeAmount ?? 0));
 }
 
 export function lifecycleStage(record: RiskInvoiceRecord): LifecycleStage {
@@ -192,7 +213,7 @@ export function buildAging(records: RiskInvoiceRecord[], groupNames: Record<stri
   return { buckets: AGING_BUCKETS, rows, totals, openBalance: totals.reduce((a, b) => a + b, 0), openCount };
 }
 
-/** Open balance by client, for the concentration treemap. Falls back to 90-day volume when nothing is open. */
+/** Open balance on funded invoices by client (or debtor), for the concentration treemap. */
 export function buildExposure(records: RiskInvoiceRecord[], groupNames: Record<string, string>, groupBy: 'client' | 'debtor' = 'client', thresholds = { review: 0.15, high: 0.25 }): ExposureItem[] {
   const byGroup = new Map<string, { value: number; count: number }>();
   for (const record of records) {
@@ -332,7 +353,7 @@ export function buildCashSummary(records: RiskInvoiceRecord[], today: string): C
   const since30 = todayMs - 29 * DAY_MS;
   const pipeline = LIFECYCLE_STAGES.map((stage) => ({ stage: stage.key, label: stage.label, count: 0, amount: 0 }));
   const waitingOnFactor = { count: 0, amount: 0, oldestDays: null as number | null };
-  const withDebtors = { count: 0, amount: 0, advanced: 0, fees: 0, reserveBack: 0, notBrokenOut: 0, stillOwed: 0 };
+  const withDebtors = { count: 0, amount: 0, advanced: 0, fees: 0, reserveBack: 0, notBrokenOut: 0, stillOwed: 0, balanceAssumed: 0 };
   const last30 = { advanced: 0, reserveReleased: 0, fees: 0 };
   const over60 = { count: 0, amount: 0 };
 
@@ -351,7 +372,7 @@ export function buildCashSummary(records: RiskInvoiceRecord[], today: string): C
     if (funded >= since30 && funded <= todayMs) last30.advanced += record.advanceAmount ?? 0;
     if (paidMs >= since30 && paidMs <= todayMs) {
       last30.fees += record.purchaseFeeAmount ?? 0;
-      last30.reserveReleased += Math.max(0, (record.escrowReserveAmount ?? 0) - (record.purchaseFeeAmount ?? 0));
+      last30.reserveReleased += reserveOn(record);
     }
 
     if (stage === 'SUBMITTED' || stage === 'VERIFIED') {
@@ -367,6 +388,7 @@ export function buildCashSummary(records: RiskInvoiceRecord[], today: string): C
       withDebtors.amount += amount;
       const owed = openBalance(record);
       withDebtors.stillOwed += owed;
+      if (!balanceReported(record)) withDebtors.balanceAssumed += 1;
       if (record.advanceAmount == null) {
         withDebtors.notBrokenOut += amount;
       } else {
