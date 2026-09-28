@@ -119,6 +119,16 @@ export function transientGeminiError(err: unknown): boolean {
   return /\b(429|500|502|503|504)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|temporar/i.test(text);
 }
 
+/**
+ * How long the reader asked us to wait before trying again, when it said so (Gemini puts a
+ * `retryDelay` such as "7s" in its rate-limit errors).
+ */
+export function readerRetryAfterMs(err: unknown): number | null {
+  const text = err instanceof Error ? err.message : String(err);
+  const match = /retryDelay"?\s*[:=]\s*"?(\d+(?:\.\d+)?)s/i.exec(text);
+  return match ? Math.round(Number(match[1]) * 1000) : null;
+}
+
 function pricingFor(model: string): { input: number; output: number } | null {
   if (model === 'gemini-3.1-flash-lite') return { input: 0.25, output: 1.5 };
   if (model === 'gemini-3.5-flash-lite') return { input: 0.3, output: 2.5 };
