@@ -53,3 +53,13 @@ export function clientExplanation(checks: CheckResult[] | undefined): string | n
 export function flaggedChecks(checks: CheckResult[] | undefined): CheckResult[] {
   return (checks ?? []).filter((check) => check.id !== EXPLANATION_CHECK_ID && (check.status === 'REVIEW' || check.status === 'FAIL'));
 }
+
+/**
+ * The final result for an invoice the client sent anyway. Hard blocks were refused before this, so
+ * any remaining warning or failure has the client's explanation and goes to the factor's review
+ * queue. Later steps (the credit check, an incomplete duplicate check) recompute the status from
+ * the checks, which would turn an explained failure back into FAIL and skip the queue.
+ */
+export function forFactorReview(validation: ValidationReport): ValidationReport {
+  return validation.status === 'FAIL' ? { ...validation, status: 'REVIEW' } : validation;
+}

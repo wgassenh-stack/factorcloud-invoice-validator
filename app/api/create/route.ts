@@ -13,7 +13,7 @@ import { apiErrorResponse, publicErrorMessage } from '@/lib/api-errors';
 import { isDefinitiveCreateFailure } from '@/lib/errors';
 import { adminDriverViewAllowed, currentPortalSession, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
-import { applyCreditCheck, withoutCreditCheck } from '@/lib/credit';
+import { applyCreditCheck, CREDIT_CHECK_ID, withoutCreditCheck } from '@/lib/credit';
 import { loadDebtorCredit } from '@/lib/debtor-credit';
 import { recordDemoSubmission } from '@/lib/demo-store';
 import { persistSubmissionStart, markSubmissionFactorCloudResult, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
@@ -21,8 +21,8 @@ import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
 import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '@/lib/types';
 import { demoClientView, demoRequest } from '@/lib/demo-request';
 import { DEMO_DRIVER } from '@/lib/demo';
-import { PORTAL_NOTE, REVIEW_NOTE, sentByNote } from '@/lib/portal-notes';
-import { explanationProblem, hardBlocks, needsExplanation, withClientExplanation } from '@/lib/override';
+import { buildPortalNote } from '@/lib/portal-notes';
+import { explanationProblem, flaggedChecks, forFactorReview, hardBlocks, needsExplanation, withClientExplanation } from '@/lib/override';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -116,6 +116,7 @@ export async function POST(req: Request) {
   }
   // Could not read FactorCloud's invoice list to the end: submit, but flag for a person to confirm.
   if (!duplicateCheckComplete) validation = addDuplicateCheckReview(validation);
+  validation = forFactorReview(validation);
 
   // Demo submissions stay in memory: nothing is written to the portal database.
   const demo = await demoRequest();
@@ -146,14 +147,15 @@ export async function POST(req: Request) {
   try {
     // With admin views the note says who sent the invoice: the Driver view lists what was sent
     // from it, and without the portal database the note is the only record of that.
-    const sender = (await adminDriverViewAllowed()) ? sentByNote((await demoClientView()) === 'driver' ? 'Driver' : 'Office') : null;
-    const noteParts = [
-      PORTAL_NOTE,
-      validation.status === 'REVIEW' ? REVIEW_NOTE : null,
+    const sender = (await adminDriverViewAllowed()) ? ((await demoClientView()) === 'driver' ? 'Driver' as const : 'Office' as const) : null;
+    // FactorCloud notes may be visible beyond the factor, so the credit warning stays out of them.
+    const notes = buildPortalNote({
+      review: validation.status === 'REVIEW',
       sender,
-      payload.explanation?.trim() && validation.status === 'REVIEW' ? `Client note: ${payload.explanation.trim()}` : null,
-      corrections.length ? `Client corrected after verification: ${corrections.join(', ')}` : null,
-    ].filter(Boolean);
+      flagged: flaggedChecks(validation.checks).filter((check) => check.id !== CREDIT_CHECK_ID).map((check) => check.label),
+      corrections,
+      clientNote: payload.explanation,
+    });
     const created = await createInvoice({
       invoiceNumber: payload.invoiceNumber.trim(),
       referenceNumber: payload.referenceNumber?.trim() || null,
@@ -161,7 +163,7 @@ export async function POST(req: Request) {
       companyDebtorId: payload.debtorId,
       invoiceAmount: amount!,
       invoiceDate: invoiceDate!,
-      notes: noteParts.join(' | '),
+      notes,
     });
     invoiceId = created.id;
     steps.push({ step: 'Create invoice', ok: true, detail: `Invoice ${invoiceId}` });
