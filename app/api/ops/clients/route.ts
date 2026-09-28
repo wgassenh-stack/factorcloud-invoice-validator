@@ -76,7 +76,9 @@ export async function GET() {
 
     const recentInvoices = records
       .slice()
-      .sort((a, b) => String(b.invoiceDate ?? '').localeCompare(String(a.invoiceDate ?? '')))
+      // Same-day ties: the later entry in FactorCloud's list (added more recently) comes first.
+      .reverse()
+      .sort((a, b) => sentAt(b).localeCompare(sentAt(a)))
       .slice(0, 10)
       .map((record) => ({
         id: record.id,
@@ -128,4 +130,9 @@ function completenessNote(list: { complete: boolean; incompleteReason?: string; 
   return list.complete
     ? `Includes every matching FactorCloud invoice (${list.pages} page${list.pages === 1 ? '' : 's'} read).`
     : `These figures may be incomplete: ${list.incompleteReason ?? 'FactorCloud\'s invoice list could not be read to the end.'}`;
+}
+
+/** When an invoice was sent in (FactorCloud's created time), so "latest" means most recently sent. */
+function sentAt(record: { createdOn?: string | null; invoiceDate?: string | null }): string {
+  return String(record.createdOn ?? record.invoiceDate ?? '');
 }
