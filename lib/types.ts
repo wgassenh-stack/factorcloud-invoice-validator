@@ -39,6 +39,8 @@ export interface AnalyzedDocument {
   usage?: ExtractionUsage;
   fileHash?: string;
   sourceIndex?: number;
+  /** File size, so upload limits can count everything in a package, including later additions. */
+  sizeBytes?: number;
 }
 
 export interface CompanyRecord {
@@ -117,4 +119,6 @@ export interface CreateResponse {
   steps: CreateStep[];
   validation?: ValidationReport;
   error?: string;
+  /** Set when the invoice already exists in FactorCloud, so the page can link to it. */
+  duplicate?: { invoiceId: string; invoiceNumber: string; status: string | null };
 }

@@ -3,7 +3,7 @@
 // FactorCloud reports balances as of today, not history, so the statement is activity-based rather
 // than a running ledger; the open position shown is today's.
 
-import { isClosedOut, isPaid, openBalance } from './analytics';
+import { isClosedOut, isPaid, openBalance, reserveOn } from './analytics';
 import type { RiskInvoiceRecord } from './risk';
 
 export interface StatementLine {
@@ -66,7 +66,7 @@ export function buildStatement(records: RiskInvoiceRecord[], month: string): Sta
     }
     if (inMonth(record.paidDate)) {
       const fee = record.purchaseFeeAmount ?? 0;
-      const released = Math.max(0, (record.escrowReserveAmount ?? 0) - fee);
+      const released = reserveOn(record);
       statement.paid.count += 1;
       statement.paid.amount += amount;
       statement.paid.fees += fee;

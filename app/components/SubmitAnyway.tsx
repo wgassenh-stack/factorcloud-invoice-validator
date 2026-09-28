@@ -1,6 +1,6 @@
 'use client';
 
-import { MIN_EXPLANATION_LENGTH, MAX_EXPLANATION_LENGTH, explanationProblem } from '@/lib/override';
+import { MIN_EXPLANATION_LENGTH, MAX_EXPLANATION_LENGTH, blockAdvice, explanationProblem } from '@/lib/override';
 import type { CheckResult } from '@/lib/types';
 
 /**
@@ -18,7 +18,7 @@ export function SubmitAnywayBox({ flagged, blocked, value, onChange, compact = f
     return <div className="submitAnyway blocked">
       <strong>This invoice can't be submitted</strong>
       {blocked.map((check) => <span key={check.id}>{check.message}</span>)}
-      <small>Contact your factor about this debtor.</small>
+      <small>{blockAdvice(blocked)}</small>
     </div>;
   }
   if (!flagged.length) return null;

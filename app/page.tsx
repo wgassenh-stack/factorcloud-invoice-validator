@@ -173,7 +173,7 @@ export default function ClientPortalHome() {
           <DashMetric icon="↓" label="Paid to you, 30 days" value={<CountUp value={data.cash.last30.advanced + data.cash.last30.reserveReleased} format={(v) => money(v)} />} detail={`${compactMoney(data.cash.last30.advanced)} advances + ${compactMoney(data.cash.last30.reserveReleased)} reserve back`} tone="good" />
           <DashMetric icon="⏳" label="Waiting on the factor" value={<CountUp value={data.cash.waitingOnFactor.amount} format={(v) => money(v)} />} detail={data.cash.waitingOnFactor.count ? `${data.cash.waitingOnFactor.count} not funded yet · oldest ${data.cash.waitingOnFactor.oldestDays ?? 0}d` : 'Everything sent in is funded'} tone={(data.cash.waitingOnFactor.oldestDays ?? 0) > SLOW_APPROVAL_DAYS ? 'review' : 'good'} />
           <DashMetric icon="↺" label="Reserve coming back" value={<CountUp value={data.cash.withDebtors.reserveBack} format={(v) => money(v)} />} detail="Paid to you as debtors pay" />
-          <DashMetric icon="!" label="Unpaid 60+ days" value={money(data.cash.over60.amount)} detail={data.cash.over60.count ? `${data.cash.over60.count} invoice${data.cash.over60.count === 1 ? '' : 's'} · chase or expect a charge-back` : 'No late debtor payments'} tone={data.cash.over60.count ? 'bad' : 'good'} />
+          <DashMetric icon="!" label="Unpaid 60+ days" value={money(data.cash.over60.amount)} detail={data.cash.over60.count ? `${data.cash.over60.count} invoice${data.cash.over60.count === 1 ? '' : 's'} still unpaid by the debtor` : 'No late debtor payments'} tone={data.cash.over60.count ? 'bad' : 'good'} />
         </section>}
 
         <section className="dashBoard">
@@ -188,7 +188,7 @@ export default function ClientPortalHome() {
 
           {show('debtor-aging') && <DashboardCard className="dashSpan8" kicker="Who owes you" title="Unpaid funded invoices by debtor">
             <AgingBars aging={data.debtorAging} />
-            <p className="dashCardFootnote">Darker means older. Your reserve on these comes back only when the debtor pays, and invoices left unpaid too long are usually charged back to you.</p>
+            <p className="dashCardFootnote">Darker means older. Your reserve on these comes back when the debtor pays.</p>
           </DashboardCard>}
 
           {show('attention') && <DashboardCard className="dashSpan4" kicker="Attention" title="Needs attention" action={<a href="/invoices">Track invoices</a>}>
@@ -284,6 +284,7 @@ function CashPanel({ cash }: { cash: CashSummary }) {
     </div>
     <div className="cashFoot">
       {d.amount - d.stillOwed >= 1 && <p><strong>Paid off so far:</strong> debtors have already paid {money(d.amount - d.stillOwed)} of this, so they still owe {money(d.stillOwed)}.</p>}
+      {cash.withDebtors.balanceAssumed > 0 && <p><strong>Note:</strong> FactorCloud sent no balance for {cash.withDebtors.balanceAssumed} of these invoice{cash.withDebtors.balanceAssumed === 1 ? '' : 's'}, so {cash.withDebtors.balanceAssumed === 1 ? 'its' : 'their'} full amount is shown as still owed.</p>}
       <p><strong>Last 30 days:</strong> {money(recent)} paid to you ({money(cash.last30.advanced)} advances + {money(cash.last30.reserveReleased)} reserve back). Fees on invoices paid: {money(cash.last30.fees)}.</p>
     </div>
   </div>;
@@ -310,7 +311,7 @@ function DriverTable({ drivers }: { drivers: DriverSummary[] }) {
 
 function ClientAttention({ cash, rejected, inReview }: { cash: CashSummary; rejected: number; inReview: number }) {
   const items: { tone: 'high' | 'review'; title: string; detail: string }[] = [];
-  if (cash.over60.count) items.push({ tone: 'high', title: `${money(cash.over60.amount)} unpaid 60+ days`, detail: `${cash.over60.count} funded invoice${cash.over60.count === 1 ? ' is' : 's are'} late. Unpaid invoices are usually charged back to you (often at 90 days), so chase these debtors.` });
+  if (cash.over60.count) items.push({ tone: 'high', title: `${money(cash.over60.amount)} unpaid 60+ days`, detail: `${cash.over60.count} funded invoice${cash.over60.count === 1 ? ' is' : 's are'} past 60 days and still unpaid by the debtor. Your agreement with your factor says how late payments are handled.` });
   if ((cash.waitingOnFactor.oldestDays ?? 0) > SLOW_APPROVAL_DAYS) items.push({ tone: 'review', title: `Waiting on the factor for ${cash.waitingOnFactor.oldestDays} days`, detail: `${cash.waitingOnFactor.count} invoice${cash.waitingOnFactor.count === 1 ? ' is' : 's are'} not funded yet (${money(cash.waitingOnFactor.amount)}). Ask your factor if something is missing.` });
   if (rejected) items.push({ tone: 'high', title: `${rejected} rejected in the last 30 days`, detail: 'Fix the paperwork and send them in again to get paid.' });
   if (inReview) items.push({ tone: 'review', title: `${inReview} in factor review`, detail: 'The factor is checking these before funding. You will get a request here if they need anything.' });

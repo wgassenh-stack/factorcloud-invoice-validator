@@ -41,7 +41,7 @@ type OpsResponse = {
     last30TrendPct: number | null;
     topClientShare: number;
     recentInvoices: RecentInvoice[];
-    reviewSummary: { openCount: number; openAmount: number; oldestCreatedAt: string | null };
+    reviewSummary: { available: boolean; openCount: number; openAmount: number; oldestCreatedAt: string | null };
   };
   analytics: {
     today: string;
@@ -153,7 +153,9 @@ export default function FactorOperationsPage() {
         {show('metrics') && <section className="dashMetricGrid factorMetricGrid">
           <DashMetric icon="$" label="30-day activity" value={money(data.portfolio.last30Amount)} detail={trendCopy(data.portfolio.last30TrendPct, 'vs. prior 30 days')} trend={data.portfolio.last30TrendPct} />
           <DashMetric icon="C" label="Clients with activity" value={data.totals.clientCount} detail={`${data.totals.invoiceCount} invoices in loaded history`} />
-          <DashMetric icon="!" label="Open reviews" value={data.portfolio.reviewSummary.openCount} detail={data.portfolio.reviewSummary.openCount ? `${money(data.portfolio.reviewSummary.openAmount)} submitted amount` : 'Review queue is clear'} tone={data.portfolio.reviewSummary.openCount ? 'review' : 'good'} />
+          {data.portfolio.reviewSummary.available
+            ? <DashMetric icon="!" label="Open reviews" value={data.portfolio.reviewSummary.openCount} detail={data.portfolio.reviewSummary.openCount ? `${money(data.portfolio.reviewSummary.openAmount)} submitted amount` : 'Review queue is clear'} tone={data.portfolio.reviewSummary.openCount ? 'review' : 'good'} />
+            : <DashMetric icon="?" label="Open reviews" value="Unavailable" detail="Could not load the portal review queue" tone="review" />}
           <DashMetric icon="Ø" label="Average invoice" value={money(data.portfolio.averageInvoiceAmount)} detail={`${money(data.totals.invoiceAmount)} total invoice activity`} />
           <DashMetric icon="%" label="Top client share" value={`${Math.round(data.portfolio.topClientShare * 100)}%`} detail={topClients[0]?.clientName || 'No client activity yet'} tone={data.portfolio.topClientShare >= .5 ? 'review' : 'good'} />
         </section>}
@@ -195,7 +197,14 @@ export default function FactorOperationsPage() {
           </DashboardCard>}
 
           {show('reviews') && <DashboardCard className="dashSpan4" kicker="Portal workflow" title="Review workload" action={<a href="/ops/reviews">Open queue</a>}>
-            <div className="reviewWorkload">
+            {!data.portfolio.reviewSummary.available ? <div className="reviewWorkload">
+              <div className="reviewWorkloadHero unavailable">
+                <span>Review status unavailable</span>
+                <strong>?</strong>
+                <small>Could not load the portal review queue.</small>
+              </div>
+              <a className="reviewQueueLink" href="/ops/reviews">Try the review queue <span>›</span></a>
+            </div> : <div className="reviewWorkload">
               <div className={`reviewWorkloadHero ${data.portfolio.reviewSummary.openCount ? 'hasWork' : ''}`}>
                 <span>{data.portfolio.reviewSummary.openCount ? 'Needs attention' : 'All clear'}</span>
                 <strong>{data.portfolio.reviewSummary.openCount}</strong>
@@ -206,7 +215,7 @@ export default function FactorOperationsPage() {
                 <div><span>Oldest open item</span><strong>{ageCopy(data.portfolio.reviewSummary.oldestCreatedAt)}</strong></div>
               </div>
               <a className="reviewQueueLink" href="/ops/reviews">Work the review queue <span>›</span></a>
-            </div>
+            </div>}
           </DashboardCard>}
 
           {show('recent') && <DashboardCard className="dashSpan8" kicker="Recent activity" title="Latest invoices across clients">

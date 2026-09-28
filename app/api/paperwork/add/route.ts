@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     if (receipt.clientId !== clientId) return NextResponse.json({ error: 'This upload belongs to a different client.' }, { status: 403 });
 
     const files = form.getAll('files').filter((f): f is File => f instanceof File && f.size > 0);
-    const problem = uploadProblem(files, receipt.documents.length);
+    const problem = uploadProblem(files, { count: receipt.documents.length, bytes: receipt.documents.reduce((sum, d) => sum + (d.sizeBytes ?? 0), 0) });
     if (problem) return NextResponse.json({ error: problem.message }, { status: problem.status });
 
     const firstIndex = Number(form.get('firstIndex'));

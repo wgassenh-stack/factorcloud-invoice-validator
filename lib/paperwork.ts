@@ -78,7 +78,7 @@ export async function readFiles(files: File[], firstIndex: number, knownHashes: 
   results.forEach((result, slot) => {
     const i = toRead[slot];
     if (result instanceof Error) unreadable.push({ fileName: files[i].name, fileIndex: firstIndex + i, reason: 'We could not read this file. Retake the photo or upload a clearer copy.' });
-    else { documents.push({ ...result, fileHash: hashes[i], sourceIndex: firstIndex + i }); fileIndexes.push(firstIndex + i); }
+    else { documents.push({ ...result, fileHash: hashes[i], sourceIndex: firstIndex + i, sizeBytes: files[i].size }); fileIndexes.push(firstIndex + i); }
   });
   return { documents, fileIndexes, unreadable, duplicates };
 }
@@ -152,12 +152,15 @@ const MAX_FILES = 24;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 25 * 1024 * 1024;
 
-/** Upload limits, shared by reading and adding documents. */
-export function uploadProblem(files: File[], alreadyCount = 0): { message: string; status: number } | null {
+/**
+ * Upload limits, shared by reading and adding documents. `already` is what the package holds so
+ * far, so adding documents later can't grow it past the same limits in small steps.
+ */
+export function uploadProblem(files: File[], already: { count: number; bytes: number } = { count: 0, bytes: 0 }): { message: string; status: number } | null {
   if (!files.length) return { message: 'Add at least one document or photo.', status: 400 };
-  if (files.length + alreadyCount > MAX_FILES) return { message: `Send at most ${MAX_FILES} documents at a time.`, status: 400 };
+  if (files.length + already.count > MAX_FILES) return { message: `Send at most ${MAX_FILES} documents at a time.`, status: 400 };
   if (files.some((f) => f.size > MAX_FILE_BYTES)) return { message: 'Each file must be 10 MB or smaller.', status: 413 };
-  if (files.reduce((sum, f) => sum + f.size, 0) > MAX_TOTAL_BYTES) return { message: 'All files together must be 25 MB or smaller.', status: 413 };
+  if (files.reduce((sum, f) => sum + f.size, already.bytes) > MAX_TOTAL_BYTES) return { message: already.count ? 'This would take the paperwork over 25 MB in total. Send these invoices first, then start a new upload.' : 'All files together must be 25 MB or smaller.', status: 413 };
   const unsupported = files.filter((f) => !isSupportedFile(f.type));
   if (unsupported.length) return { message: `Unsupported file type: ${unsupported.map((f) => f.name).join(', ')}. Use PDF, PNG, JPEG, GIF or WebP.`, status: 400 };
   return null;

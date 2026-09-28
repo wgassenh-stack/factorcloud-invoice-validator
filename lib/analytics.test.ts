@@ -51,9 +51,9 @@ describe('portfolio analytics', () => {
   it('summarizes a client cash picture', () => {
     const summary = buildCashSummary(records, TODAY);
     expect(summary.waitingOnFactor).toEqual({ count: 1, amount: 1000, oldestDays: 5 });
-    expect(summary.withDebtors).toEqual({ count: 2, amount: 2000, advanced: 900, fees: 20, reserveBack: 80, notBrokenOut: 1000, stillOwed: 1400 });
+    expect(summary.withDebtors).toEqual({ count: 2, amount: 2000, advanced: 900, fees: 20, reserveBack: 80, notBrokenOut: 1000, stillOwed: 1400, balanceAssumed: 1 });
     expect(summary.over60).toEqual({ count: 1, amount: 400 });
-    expect(summary.last30).toEqual({ advanced: 900, reserveReleased: 0, fees: 30 });
+    expect(summary.last30).toEqual({ advanced: 900, reserveReleased: 70, fees: 30 });
     expect(summary.pipeline.map((p) => p.count)).toEqual([1, 0, 2, 1]);
   });
 
@@ -65,7 +65,18 @@ describe('portfolio analytics', () => {
     ], TODAY);
     expect(withDebtors.advanced + withDebtors.fees + withDebtors.reserveBack + withDebtors.notBrokenOut).toBe(withDebtors.amount);
     expect(withDebtors).toMatchObject({ amount: 1500, advanced: 1380, fees: 45, reserveBack: 75 });
-    expect(last30).toEqual({ advanced: 1380, reserveReleased: 70, fees: 30 });
+    expect(last30).toEqual({ advanced: 1380, reserveReleased: 100, fees: 30 });
+  });
+
+  it('reads the reserve the way FactorCloud splits an invoice (advance + reserve + fee = amount)', async () => {
+    const { reserveOn, balanceReported } = await import('./analytics');
+    // FactorCloud invoice Test008: $9,750 = $8,190 advance + $1,462.50 escrow reserve + $97.50 fee.
+    const test008 = inv('Test008', { invoiceAmount: 9750, invoiceBalance: 9750, advanceAmount: 8190, escrowReserveAmount: 1462.5, purchaseFeeAmount: 97.5 });
+    expect(reserveOn(test008)).toBe(1462.5);
+    expect(reserveOn({ ...test008, escrowReserveAmount: null })).toBe(1462.5);
+    expect(reserveOn({ ...test008, escrowReserveAmount: null, advanceAmount: null })).toBe(0);
+    expect(balanceReported(test008)).toBe(true);
+    expect(balanceReported({ ...test008, invoiceBalance: null })).toBe(false);
   });
 
   it('reads FactorCloud status values whole, not as substrings', () => {

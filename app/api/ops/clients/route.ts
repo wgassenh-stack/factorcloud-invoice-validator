@@ -44,10 +44,12 @@ export async function GET() {
     const today = new Date().toISOString().slice(0, 10);
     const topClient = [...clients].sort((a, b) => b.invoiceAmount - a.invoiceAmount)[0];
 
-    let reviewSummary = { openCount: 0, openAmount: 0, oldestCreatedAt: null as string | null };
+    // "Unavailable" is never shown as zero: an empty queue and a queue we couldn't read are different.
+    let reviewSummary = { available: false, openCount: 0, openAmount: 0, oldestCreatedAt: null as string | null };
     if (await demoRequest()) {
       const open = demoReviews().filter((review) => review.status === 'OPEN');
       reviewSummary = {
+        available: true,
         openCount: open.length,
         openAmount: open.reduce((sum, review) => sum + review.invoiceAmount, 0),
         oldestCreatedAt: open.map((review) => review.createdAt).sort()[0] ?? null,
@@ -63,6 +65,7 @@ export async function GET() {
       `, [session.factorId]);
       const row = rows[0];
       reviewSummary = {
+        available: true,
         openCount: Number(row?.open_count ?? 0),
         openAmount: Number(row?.open_amount ?? 0),
         oldestCreatedAt: row?.oldest_created_at ? new Date(row.oldest_created_at).toISOString() : null,

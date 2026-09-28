@@ -1,6 +1,8 @@
 // Submitting an invoice that did not pass every check. The client may send it anyway with a written
-// explanation; it then goes to the factor's review queue with that note. A few checks can never be
-// overridden because the factor has already said no (a No Buy debtor) or there is no debtor at all.
+// explanation; it then goes to the factor's review queue with that note. Mismatches (address, phone,
+// amount, load number, invoice age, unclear reading) can be explained. Some things are the factor's
+// call, never the client's: no invoice document at all, a missing or No Buy debtor, and an invoice
+// that already exists in FactorCloud (the create step refuses exact duplicates on its own).
 
 import type { CheckResult, ValidationReport } from './types';
 
@@ -8,9 +10,18 @@ export const EXPLANATION_CHECK_ID = 'client-explanation';
 export const MIN_EXPLANATION_LENGTH = 10;
 export const MAX_EXPLANATION_LENGTH = 500;
 
+/** Failed checks only the factor can get past, never with a client's note. */
+const FACTOR_ONLY = new Set(['debtor-found', 'invoice-document', 'documents']);
+
 /** Failed checks that no explanation can get past. */
 export function hardBlocks(validation: ValidationReport): CheckResult[] {
-  return validation.checks.filter((check) => check.status === 'FAIL' && check.id === 'debtor-found');
+  return validation.checks.filter((check) => check.status === 'FAIL' && FACTOR_ONLY.has(check.id));
+}
+
+/** What to tell the client about a check they can't override. */
+export function blockAdvice(blocked: CheckResult[]): string {
+  if (blocked.some((c) => c.id === 'invoice-document' || c.id === 'documents')) return 'Add the invoice document itself, or contact your factor.';
+  return 'Contact your factor about this debtor.';
 }
 
 /** Anything short of a clean pass needs the client to say why they are submitting anyway. */
