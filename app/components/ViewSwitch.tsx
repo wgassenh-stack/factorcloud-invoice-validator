@@ -9,7 +9,7 @@ type SessionInfo = { mode: 'pilot' | 'database' | 'demo'; authenticated: boolean
  * Switch between the client side (as the company's manager, or as one of its drivers) and the
  * factor's view. Shown only when the viewer can open more than one: in demo mode, when signed in as
  * factor staff, or with admin views on a shared-password test site. The Driver view needs demo
- * data or admin views.
+ * data or admin views (NEXT_PUBLIC_ADMIN_VIEWS=true; with database sign-in, factor staff only).
  */
 export function ViewSwitch({ current }: { current: 'client' | 'staff' }) {
   const [options, setOptions] = useState<{ driver: boolean; show: boolean }>({ driver: false, show: false });
@@ -22,7 +22,7 @@ export function ViewSwitch({ current }: { current: 'client' | 'staff' }) {
       const session = await res.json() as SessionInfo;
       const demo = session.mode === 'demo' || demoInBrowser();
       const staff = session.mode === 'database' && session.authenticated && session.user?.role !== 'CLIENT_USER';
-      const admin = session.mode === 'pilot' && Boolean(session.adminViews);
+      const admin = Boolean(session.adminViews);
       setOptions({ driver: demo || admin, show: demo || staff || admin });
     }).catch(() => {});
   }, []);

@@ -102,11 +102,16 @@ For sales demos, click **Load demo data** in the sidebar. That browser then sees
 - Without `GEMINI_API_KEY`, document reading returns canned fields for Acme Manufacturing LLC. Files in one packet share the load number in their file names (for example `invoice-LD448213.png`), so a matching packet passes. Give one file a different number to show a mismatch being caught.
 - Planted stories: Acme Manufacturing holds about 42% of the portal client's volume, the portal client had a volume spike this week, it has open invoices past 90 days, Lone Star Haulers holds about 20% of the factor's open A/R, and days to collect improve over the year.
 
-## Admin views on a shared-password test site
+## Admin views: the Driver view on real data
 
-`NEXT_PUBLIC_ADMIN_VIEWS=true` treats whoever holds `APP_ACCESS_PASSWORD` as the factor's admin, with the **Manager | Driver | Factor** switch on real FactorCloud data. It is for test environments only: anyone with the password sees every client. It does nothing with database sign-in, where roles decide.
+`NEXT_PUBLIC_ADMIN_VIEWS=true` adds the Driver view to the **Manager | Driver | Factor** switch on real FactorCloud data, for test environments:
 
-There is no portal database in this setup, so the portal's note on each FactorCloud invoice is the record: `Submitted through FactorCloud client portal`, `PORTAL REVIEW REQUIRED` when the checks flagged it, `Sent by: Driver` or `Sent by: Office`, and the client's note.
+- **With database sign-in**, factor staff (admins and reviewers) get the Driver view. Client users never do. Review decisions and fix requests from the portal database show up in the driver's list.
+- **With the shared password**, whoever holds `APP_ACCESS_PASSWORD` is treated as the factor's admin and gets all three views. Anyone with the password sees every client.
+
+Either way, invoices created by an admin carry `Sent by: Driver` or `Sent by: Office` in their FactorCloud note, and the Driver view lists those sent from it. Everyone shares one Driver view until drivers get their own logins.
+
+Without database sign-in there is no portal database, so the portal's note on each FactorCloud invoice is the record: `Submitted through FactorCloud client portal`, `PORTAL REVIEW REQUIRED` when the checks flagged it, `Sent by: Driver` or `Sent by: Office`, and the client's note.
 
 - **Driver**: the upload page in driver mode, and "My invoices" lists what was sent from the Driver view. All drivers share it, since everyone shares the password.
 - **Factor**: the full command center. "Arrived today" and the review queue come from the notes. The queue is read only: approve, reject or ask for a fix in FactorCloud.

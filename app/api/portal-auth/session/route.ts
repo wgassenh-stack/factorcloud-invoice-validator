@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { currentValidPortalSession, pilotAdminViews } from '@/lib/portal-auth';
+import { adminViewsEnabled } from '@/lib/demo';
 import { databaseAuthEnabled } from '@/lib/session';
 import { DEMO_SESSION } from '@/lib/demo-store';
 import { demoRequest } from '@/lib/demo-request';
@@ -20,6 +21,8 @@ export async function GET() {
   return NextResponse.json({
     mode: 'database',
     authenticated: true,
+    // Admin views: factor staff also get the Driver view.
+    adminViews: adminViewsEnabled() && session.role !== 'CLIENT_USER',
     user: {
       email: session.email,
       displayName: session.displayName,
