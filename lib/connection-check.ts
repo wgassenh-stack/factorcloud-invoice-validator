@@ -1,7 +1,8 @@
 import 'server-only';
 
 import { publicErrorMessage } from './api-errors';
-import { allowedDebtorIds, fcRequest, getClientDebtor, getCompany, getInvoice, listInvoices } from './factorcloud';
+import { allowedDebtorIds, getClientDebtor, getCompany, getInvoice, listInvoiceLabels, listInvoices } from './factorcloud';
+import { findReviewLabel, reviewLabelName } from './review-label';
 import { PORTAL_NOTE } from './portal-notes';
 import { fairCoverage, valueCounts, type FieldCoverage, type ValueCounts } from './field-coverage';
 import { collectRiskInvoiceRecords, type RiskInvoiceRecord } from './risk';
@@ -164,13 +165,17 @@ async function labelsAndNotes(records: RiskInvoiceRecord[]): Promise<ConnectionI
     ? { id: 'labels', label: 'Invoice labels', state: 'ok', detail: `Invoice ${labelled.record.invoiceNumber ?? labelled.record.id} has labels: ${clip(labelled.invoice!.labels)}` }
     : { id: 'labels', label: 'Invoice labels', state: 'warn', detail: `None of the ${details.length} newest invoices has a label${details[0]?.invoice && 'labels' in details[0].invoice ? ` (the field comes back as ${clip(details[0].invoice.labels, 80)})` : ''}. Add one in FactorCloud to see its format.` });
 
-  for (const path of ['/labels', '/invoice-labels', '/invoices/labels']) {
-    const catalog = await timed(() => fcRequest(path));
-    if (catalog.value) {
-      items.push({ id: 'label-catalog', label: 'Label list', state: 'ok', detail: `GET ${path}: ${clip(catalog.value)}`, ms: catalog.ms });
-      break;
-    }
-    if (path === '/invoices/labels') items.push({ id: 'label-catalog', label: 'Label list', state: 'warn', detail: 'No label list found at /labels, /invoice-labels or /invoices/labels.' });
+  // The label flagged invoices get (see lib/review-label.ts).
+  const catalog = await timed(() => listInvoiceLabels());
+  if (catalog.value) {
+    const review = process.env.FACTORCLOUD_REVIEW_LABEL_ID?.trim() ? null : findReviewLabel(catalog.value);
+    items.push(process.env.FACTORCLOUD_REVIEW_LABEL_ID?.trim()
+      ? { id: 'label-catalog', label: 'Review label', state: 'ok', detail: 'Flagged invoices get the label set in FACTORCLOUD_REVIEW_LABEL_ID.', ms: catalog.ms }
+      : review
+        ? { id: 'label-catalog', label: 'Review label', state: 'ok', detail: `Flagged invoices get the "${review.name}" label (${catalog.value.length} invoice labels in FactorCloud).`, ms: catalog.ms }
+        : { id: 'label-catalog', label: 'Review label', state: 'warn', detail: `No "${reviewLabelName()}" label among FactorCloud's ${catalog.value.length} invoice labels (${catalog.value.map((l) => l.name).slice(0, 8).join(', ') || 'none'}). Create it in FactorCloud so flagged invoices stand out.`, ms: catalog.ms });
+  } else {
+    items.push({ id: 'label-catalog', label: 'Review label', state: 'warn', detail: `Could not read FactorCloud's invoice labels (GET /labels?entityType=INVOICE): ${fail(catalog.error)}`, ms: catalog.ms });
   }
 
   const portal = details.find((d) => typeof d.record.notes === 'string' && d.record.notes.includes(PORTAL_NOTE)) ?? details.find((d) => typeof d.invoice?.notes === 'string' && (d.invoice.notes as string).includes(PORTAL_NOTE));
