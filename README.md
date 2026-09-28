@@ -102,7 +102,16 @@ For sales demos, click **Load demo data** in the sidebar. That browser then sees
 - Without `GEMINI_API_KEY`, document reading returns canned fields for Acme Manufacturing LLC. Files in one packet share the load number in their file names (for example `invoice-LD448213.png`), so a matching packet passes. Give one file a different number to show a mismatch being caught.
 - Planted stories: Acme Manufacturing holds about 42% of the portal client's volume, the portal client had a volume spike this week, it has open invoices past 90 days, Lone Star Haulers holds about 20% of the factor's open A/R, and days to collect improve over the year.
 
-Changing either `NEXT_PUBLIC_` setting needs a rebuild, because Next.js inlines those values into the browser bundle. The switch itself needs no rebuild.
+## Admin views on a shared-password test site
+
+`NEXT_PUBLIC_ADMIN_VIEWS=true` treats whoever holds `APP_ACCESS_PASSWORD` as the factor's admin, with the **Manager | Driver | Factor** switch on real FactorCloud data. It is for test environments only: anyone with the password sees every client. It does nothing with database sign-in, where roles decide.
+
+There is no portal database in this setup, so the portal's note on each FactorCloud invoice is the record: `Submitted through FactorCloud client portal`, `PORTAL REVIEW REQUIRED` when the checks flagged it, `Sent by: Driver` or `Sent by: Office`, and the client's note.
+
+- **Driver**: the upload page in driver mode, and "My invoices" lists what was sent from the Driver view. All drivers share it, since everyone shares the password.
+- **Factor**: the full command center. "Arrived today" and the review queue come from the notes. The queue is read only: approve, reject or ask for a fix in FactorCloud.
+
+Changing any `NEXT_PUBLIC_` setting needs a rebuild (a redeploy on Vercel), because Next.js inlines those values into the browser bundle. The demo switch itself needs no rebuild.
 
 ## Fix requests
 

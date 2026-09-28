@@ -8,7 +8,7 @@ import { SubmitAnywayBox } from '@/app/components/SubmitAnyway';
 import { validate } from '@/lib/rules';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
 import { explanationProblem, flaggedChecks, hardBlocks } from '@/lib/override';
-import { demoInBrowser, demoViewInBrowser } from '@/lib/demo';
+import { driverViewInBrowser } from '@/lib/demo';
 import type { PaperworkCard, PaperworkResponse, SkippedFile } from '@/lib/paperwork';
 import type { AnalyzedDocument, CreateResponse, ValidationReport } from '@/lib/types';
 
@@ -40,7 +40,7 @@ export default function SendPaperworkPage() {
   const [preview, setPreview] = useState<number | null>(null);
   const [asDriver, setAsDriver] = useState(false);
 
-  useEffect(() => { setAsDriver(demoInBrowser() && demoViewInBrowser() === 'driver'); }, []);
+  useEffect(() => { setAsDriver(driverViewInBrowser()); }, []);
 
   // A viewable link for every file, for thumbnails and the preview.
   const urls = useMemo(() => files.map((file) => URL.createObjectURL(file)), [files]);

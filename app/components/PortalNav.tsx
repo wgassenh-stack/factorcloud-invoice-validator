@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { portalConfig } from '@/lib/portal-config';
-import { DEMO_DRIVER, demoInBrowser, demoViewInBrowser } from '@/lib/demo';
+import { DEMO_DRIVER, demoInBrowser, driverViewInBrowser } from '@/lib/demo';
 import { SessionUser } from './SessionUser';
 import { DemoToggle } from './DemoToggle';
 import { ViewSwitch } from './ViewSwitch';
@@ -11,9 +11,14 @@ import { ConnectionLink } from './ConnectionLink';
 type NavKey = 'home' | 'invoices' | 'submit' | 'statements' | 'driver';
 
 export function PortalNav({ active }: { active: NavKey }) {
-  // Demo only: the Driver view trims the menu to sending paperwork and the driver's own invoices.
+  // The Driver view (demo data or admin views) trims the menu to sending paperwork and the
+  // driver's own invoices.
   const [driver, setDriver] = useState(false);
-  useEffect(() => { setDriver(active === 'driver' || (demoInBrowser() && demoViewInBrowser() === 'driver')); }, [active]);
+  const [driverName, setDriverName] = useState('Driver');
+  useEffect(() => {
+    setDriver(active === 'driver' || driverViewInBrowser());
+    setDriverName(demoInBrowser() ? DEMO_DRIVER : 'Driver');
+  }, [active]);
 
   const managerLinks = [
     { key: 'home', href: '/', label: 'Dashboard', enabled: true, icon: 'home' },
@@ -43,7 +48,7 @@ export function PortalNav({ active }: { active: NavKey }) {
 
     <div className="portalNavFooter">
       {driver
-        ? <div className="portalClientBadge"><span className="portalClientInitial">{DEMO_DRIVER.charAt(0)}</span><div><strong>{DEMO_DRIVER}</strong><small>Driver · {portalConfig.clientShortName}</small></div></div>
+        ? <div className="portalClientBadge"><span className="portalClientInitial">{driverName.charAt(0)}</span><div><strong>{driverName}</strong><small>Driver · {portalConfig.clientShortName}</small></div></div>
         : <div className="portalClientBadge"><span className="portalClientInitial">{portalConfig.clientShortName.charAt(0).toUpperCase()}</span><div><strong>{portalConfig.clientShortName}</strong><small>{portalConfig.environmentLabel}</small></div></div>}
       <DemoToggle />
       {!driver && <ConnectionLink />}

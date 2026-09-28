@@ -5,7 +5,9 @@ import { averageInvoiceAmount, buildStatusMix, buildWeeklyActivity, periodAmount
 import { query } from '@/lib/db';
 import { getCompany, listInvoices } from '@/lib/factorcloud';
 import { summarizeClients } from '@/lib/ops';
-import { requireFactorSession } from '@/lib/portal-auth';
+import { pilotAdminViews, requireFactorSession } from '@/lib/portal-auth';
+import { cleanArrivals, flaggedForReview, sentAt as recordSentAt } from '@/lib/pilot-views';
+import { readPortalNote } from '@/lib/portal-notes';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
 import { demoArrivalsToday, demoReviews, type Arrival } from '@/lib/demo-store';
 import { demoRequest } from '@/lib/demo-request';
@@ -57,7 +59,17 @@ export async function GET() {
 
     // "Unavailable" is never shown as zero: an empty queue and a queue we couldn't read are different.
     let reviewSummary = { available: false, openCount: 0, openAmount: 0, oldestCreatedAt: null as string | null };
-    if (await demoRequest()) {
+    const pilot = !(await demoRequest()) && pilotAdminViews();
+    if (pilot) {
+      // No portal database: flagged invoices are read from the portal's note on each invoice.
+      const open = flaggedForReview(records);
+      reviewSummary = {
+        available: true,
+        openCount: open.length,
+        openAmount: open.reduce((sum, record) => sum + (record.invoiceAmount ?? 0), 0),
+        oldestCreatedAt: open[0] ? recordSentAt(open[0]) || null : null,
+      };
+    } else if (await demoRequest()) {
       const open = demoReviews().filter((review) => review.status === 'OPEN');
       reviewSummary = {
         available: true,
@@ -89,6 +101,16 @@ export async function GET() {
     // portal's review queue, but the factor still decides on funding in FactorCloud.
     let arrivals: Arrival[] | null = null;
     if (await demoRequest()) arrivals = demoArrivalsToday();
+    else if (pilot) arrivals = cleanArrivals(records, today).map((record) => ({
+      submissionId: null,
+      invoiceId: record.id,
+      invoiceNumber: record.invoiceNumber,
+      clientId: record.companyClientId ?? '',
+      invoiceAmount: record.invoiceAmount,
+      documentCount: null,
+      submittedBy: readPortalNote(record.notes).sentBy,
+      createdAt: recordSentAt(record),
+    }));
     else try {
       const rows = await query<ArrivalRow>(`
         select s.id, s.factorcloud_invoice_id, s.invoice_number_submitted, c.factorcloud_client_id,

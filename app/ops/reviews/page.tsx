@@ -230,7 +230,7 @@ function ReviewCard({ record, index, now, clientName, debtorName, busy, disabled
             {record.fix?.status !== 'OPEN' && <button className="tinyButton fixButton" disabled={disabled} onClick={() => setMode('fix')}>Request fix…</button>}
             <button className="tinyButton dangerButton" disabled={disabled} onClick={() => setMode('reject')}>Reject…</button>
           </div>)
-        : <span className="muted">Read only</span>}
+        : <span className="muted">Decide in FactorCloud</span>}
     </div>
   </article>;
 }

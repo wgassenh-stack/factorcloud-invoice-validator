@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { DEMO_COOKIE, demoFromCookie, demoMode } from './lib/demo';
+import { DEMO_COOKIE, adminViewsEnabled, demoFromCookie, demoMode } from './lib/demo';
 import { databaseAuthEnabled, PORTAL_SESSION_COOKIE, verifyPortalSession } from './lib/session';
 
 export async function middleware(req: NextRequest) {
@@ -41,7 +41,8 @@ function pilotAuth(req: NextRequest, demo: boolean) {
   // Factor operations show every client's data, so they need per-user roles. Without database
   // authentication they are switched off entirely rather than left open to the shared password.
   // A browser in demo mode may open them: every ops API answers demo requests with fake data only.
-  if (isOpsPath(req.nextUrl.pathname) && !demo) {
+  // With NEXT_PUBLIC_ADMIN_VIEWS=true (test environments) the password holder is the factor's admin.
+  if (isOpsPath(req.nextUrl.pathname) && !demo && !adminViewsEnabled()) {
     return NextResponse.json({ error: 'Factor operations require database authentication.' }, { status: 404 });
   }
   return passwordGate(req);

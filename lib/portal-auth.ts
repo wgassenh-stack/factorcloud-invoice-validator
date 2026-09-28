@@ -3,7 +3,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { query } from './db';
 import { PublicError } from './errors';
-import { DEMO_CLIENT_ID } from './demo';
+import { DEMO_CLIENT_ID, adminViewsEnabled } from './demo';
 import { DEMO_SESSION } from './demo-store';
 import { databaseAuthEnabled, PORTAL_SESSION_COOKIE, sessionMismatch, verifyPortalSession, type PortalRole, type PortalSession, type SessionAccountState } from './session';
 import { demoRequest } from './demo-request';
@@ -68,9 +68,32 @@ async function loadAccountState(userId: string): Promise<SessionAccountState | n
   return row ? { isActive: row.is_active, role: row.role, factorId: row.factor_id, activeClientIds: row.client_ids } : null;
 }
 
-/** Factor staff only. Fails closed: without database authentication there are no roles, so no access. */
+/**
+ * Shared-password deployment with admin views on: whoever holds the site password is the factor's
+ * admin. There is no portal database, so the Factor and Driver views read FactorCloud only.
+ */
+export function pilotAdminViews(): boolean {
+  return adminViewsEnabled() && !databaseAuthEnabled();
+}
+
+const PILOT_ADMIN_SESSION: PortalSession = {
+  v: 1,
+  userId: 'pilot-admin',
+  email: 'admin@shared-password',
+  displayName: 'Admin',
+  role: 'FACTOR_ADMIN',
+  factorId: 'pilot',
+  clients: [],
+  exp: Number.MAX_SAFE_INTEGER,
+};
+
+/**
+ * Factor staff only. Fails closed: without database authentication there are no roles, so no
+ * access, unless admin views were switched on for a shared-password test environment.
+ */
 export async function requireFactorSession(): Promise<PortalSession> {
   if (await demoRequest()) return DEMO_SESSION;
+  if (pilotAdminViews()) return PILOT_ADMIN_SESSION;
   if (!databaseAuthEnabled()) throw new PortalAccessError('Factor operations require database authentication.', 404);
   const session = await requirePortalSession();
   if (session.role === 'CLIENT_USER') throw new PortalAccessError('Factor access required.', 403);

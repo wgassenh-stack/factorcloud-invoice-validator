@@ -3,15 +3,16 @@
 import { useEffect, useState } from 'react';
 import { demoInBrowser, demoViewInBrowser, setDemoViewInBrowser, type DemoClientView } from '@/lib/demo';
 
-type SessionInfo = { mode: 'pilot' | 'database' | 'demo'; authenticated: boolean; user?: { role: string } };
+type SessionInfo = { mode: 'pilot' | 'database' | 'demo'; authenticated: boolean; adminViews?: boolean; user?: { role: string } };
 
 /**
- * Switch between the client side (as the company's manager, or in demo as one of its drivers) and
- * the factor's view. Shown only when the viewer can open more than one: in demo mode, or when
- * signed in as factor staff. The Driver view exists only with demo data for now.
+ * Switch between the client side (as the company's manager, or as one of its drivers) and the
+ * factor's view. Shown only when the viewer can open more than one: in demo mode, when signed in as
+ * factor staff, or with admin views on a shared-password test site. The Driver view needs demo
+ * data or admin views.
  */
 export function ViewSwitch({ current }: { current: 'client' | 'staff' }) {
-  const [options, setOptions] = useState<{ demo: boolean; show: boolean }>({ demo: false, show: false });
+  const [options, setOptions] = useState<{ driver: boolean; show: boolean }>({ driver: false, show: false });
   const [clientView, setClientView] = useState<DemoClientView>('manager');
 
   useEffect(() => {
@@ -21,15 +22,16 @@ export function ViewSwitch({ current }: { current: 'client' | 'staff' }) {
       const session = await res.json() as SessionInfo;
       const demo = session.mode === 'demo' || demoInBrowser();
       const staff = session.mode === 'database' && session.authenticated && session.user?.role !== 'CLIENT_USER';
-      setOptions({ demo, show: demo || staff });
+      const admin = session.mode === 'pilot' && Boolean(session.adminViews);
+      setOptions({ driver: demo || admin, show: demo || staff || admin });
     }).catch(() => {});
   }, []);
 
   if (!options.show) return null;
-  const active = current === 'staff' ? 'factor' : options.demo ? clientView : 'manager';
+  const active = current === 'staff' ? 'factor' : options.driver ? clientView : 'manager';
   const tabs = [
     { key: 'manager', label: 'Manager', href: '/', view: 'manager' as const },
-    ...(options.demo ? [{ key: 'driver', label: 'Driver', href: '/driver', view: 'driver' as const }] : []),
+    ...(options.driver ? [{ key: 'driver', label: 'Driver', href: '/driver', view: 'driver' as const }] : []),
     { key: 'factor', label: 'Factor', href: '/ops', view: null },
   ];
   return <nav className={`viewSwitch ${tabs.length === 3 ? 'three' : ''}`} aria-label="Portal view">

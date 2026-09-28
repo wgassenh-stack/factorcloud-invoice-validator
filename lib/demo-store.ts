@@ -354,12 +354,13 @@ function plantCleanArrivals(s: DemoState, now: number): void {
 }
 
 export interface Arrival {
-  submissionId: string;
+  /** Null without the portal database: there is no submission record to open. */
+  submissionId: string | null;
   invoiceId: string;
   invoiceNumber: string | null;
   clientId: string;
   invoiceAmount: number | null;
-  documentCount: number;
+  documentCount: number | null;
   submittedBy: string | null;
   createdAt: string;
 }

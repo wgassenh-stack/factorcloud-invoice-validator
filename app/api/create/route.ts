@@ -11,7 +11,7 @@ import {
 import { isBlank, normalizeDate, normalizeMoney } from '@/lib/normalize';
 import { apiErrorResponse, publicErrorMessage } from '@/lib/api-errors';
 import { isDefinitiveCreateFailure } from '@/lib/errors';
-import { currentPortalSession, resolveConfiguredClientId } from '@/lib/portal-auth';
+import { currentPortalSession, pilotAdminViews, resolveConfiguredClientId } from '@/lib/portal-auth';
 import { validate } from '@/lib/rules';
 import { applyCreditCheck, withoutCreditCheck } from '@/lib/credit';
 import { loadDebtorCredit } from '@/lib/debtor-credit';
@@ -21,6 +21,7 @@ import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
 import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '@/lib/types';
 import { demoClientView, demoRequest } from '@/lib/demo-request';
 import { DEMO_DRIVER } from '@/lib/demo';
+import { PORTAL_NOTE, REVIEW_NOTE, sentByNote } from '@/lib/portal-notes';
 import { explanationProblem, hardBlocks, needsExplanation, withClientExplanation } from '@/lib/override';
 
 export const runtime = 'nodejs';
@@ -143,9 +144,13 @@ export async function POST(req: Request) {
   const respond = (ok: boolean, error?: string) => NextResponse.json({ ok, invoiceId, documentIds, steps, validation: withoutCreditCheck(validation), error } satisfies CreateResponse, { status: ok ? 200 : 502 });
 
   try {
+    // Without the portal database this note is the only record of who sent the invoice (the
+    // Driver view lists what was sent from it), so admin views add the sender.
+    const sender = pilotAdminViews() ? sentByNote((await demoClientView()) === 'driver' ? 'Driver' : 'Office') : null;
     const noteParts = [
-      'Submitted through FactorCloud client portal',
-      validation.status === 'REVIEW' ? 'PORTAL REVIEW REQUIRED' : null,
+      PORTAL_NOTE,
+      validation.status === 'REVIEW' ? REVIEW_NOTE : null,
+      sender,
       payload.explanation?.trim() && validation.status === 'REVIEW' ? `Client note: ${payload.explanation.trim()}` : null,
       corrections.length ? `Client corrected after verification: ${corrections.join(', ')}` : null,
     ].filter(Boolean);
