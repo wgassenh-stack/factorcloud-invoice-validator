@@ -120,6 +120,18 @@ export function transientGeminiError(err: unknown): boolean {
 }
 
 /**
+ * Why the reader refused: its daily allowance is used up (no point retrying today), too many
+ * requests this minute, or Google's side is overloaded. Null for any other failure.
+ */
+export function readerRefusal(err: unknown): 'daily-limit' | 'rate-limit' | 'overloaded' | null {
+  if (!transientGeminiError(err)) return null;
+  const text = err instanceof Error ? err.message : String(err);
+  if (/PerDay/i.test(text)) return 'daily-limit';
+  if (/\b429\b|RESOURCE_EXHAUSTED|quota/i.test(text)) return 'rate-limit';
+  return 'overloaded';
+}
+
+/**
  * How long the reader asked us to wait before trying again, when it said so (Gemini puts a
  * `retryDelay` such as "7s" in its rate-limit errors).
  */

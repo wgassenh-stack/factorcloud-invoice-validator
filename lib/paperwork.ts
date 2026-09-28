@@ -5,7 +5,7 @@ import { scoreDebtor } from './matching';
 import { validate } from './rules';
 import { applyFactorCloudAvailability } from './validation-availability';
 import { hashFile, signAnalysisReceipt } from './submission-integrity';
-import { extractDocument, isSupportedFile, readerRetryAfterMs, transientGeminiError } from './extract';
+import { extractDocument, isSupportedFile, readerRefusal, readerRetryAfterMs, transientGeminiError } from './extract';
 import type { AnalyzeResponse, AnalyzedDocument, CompanyRecord } from './types';
 
 // Checks each group of an upload as its own invoice: match the debtor, run the checks, and sign a
@@ -39,7 +39,7 @@ export interface ReadOptions {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Longest wait we'll accept from the reader before giving up on this try. */
-const MAX_READER_WAIT_MS = 20_000;
+const MAX_READER_WAIT_MS = 30_000;
 
 type ReadResult = { fields: AnalyzedDocument['fields']; usage: AnalyzedDocument['usage'] };
 
@@ -115,8 +115,9 @@ export async function readFiles(files: File[], firstIndex: number, knownHashes: 
           const error = err instanceof Error ? err : new Error(String(err));
           const busy = transientGeminiError(error);
           const askedWait = busy ? readerRetryAfterMs(error) : null;
-          // A busy reader gets every retry; any other failure gets one more try.
-          if (attempt >= retryDelaysMs.length || (attempt >= 1 && !busy) || (askedWait ?? 0) > MAX_READER_WAIT_MS) {
+          // A busy reader gets every retry; any other failure gets one more try. A used-up daily
+          // allowance won't come back in seconds, so it isn't retried at all.
+          if (attempt >= retryDelaysMs.length || (attempt >= 1 && !busy) || (askedWait ?? 0) > MAX_READER_WAIT_MS || readerRefusal(error) === 'daily-limit') {
             console.error(`[paperwork] could not read ${file.name} after ${attempt + 1} tries:`, error.message);
             results[slot] = error;
             break;
@@ -136,12 +137,11 @@ export async function readFiles(files: File[], firstIndex: number, knownHashes: 
   results.forEach((result, slot) => {
     const i = toRead[slot];
     if (result instanceof Error) {
-      const busy = transientGeminiError(result);
       unreadable.push({
         fileName: files[i].name,
         fileIndex: firstIndex + i,
         retryable: true,
-        reason: busy ? 'The document reader was busy. Try again in a moment.' : 'We could not read this file. Try again, or upload a clearer copy.',
+        reason: REFUSAL_REASONS[readerRefusal(result) ?? 'unreadable'],
       });
     } else {
       documents.push({ ...result, fileHash: hashes[i], sourceIndex: firstIndex + i, sizeBytes: files[i].size });
@@ -150,6 +150,13 @@ export async function readFiles(files: File[], firstIndex: number, knownHashes: 
   });
   return { documents, fileIndexes, unreadable, duplicates };
 }
+
+const REFUSAL_REASONS = {
+  'daily-limit': "The document reader has used up today's allowance. It resets tomorrow; raising the Gemini limit (billing) fixes it for good.",
+  'rate-limit': 'The document reader hit its per-minute limit. Wait a minute, then try again.',
+  overloaded: "Google's document reader is overloaded right now. Try again in a moment.",
+  unreadable: 'We could not read this file. Try again, or upload a clearer copy.',
+} as const;
 
 export async function checkCards(clientId: string, documents: AnalyzedDocument[], groups: { id: string; documentIndexes: number[] }[]): Promise<{ cards: PaperworkCard[]; warnings: string[] }> {
   const warnings: string[] = [];
