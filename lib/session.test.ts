@@ -26,7 +26,10 @@ describe('portal sessions', () => {
 
   it('rejects a modified signature', async () => {
     const token = await signPortalSession(sample(), secret);
-    const tampered = `${token.slice(0, -1)}${token.endsWith('a') ? 'b' : 'a'}`;
+    // Change a character in the middle of the signature: the last base64url character carries
+    // spare bits, so changing it can leave the decoded signature unchanged (a false failure).
+    const at = token.lastIndexOf('.') + 5;
+    const tampered = `${token.slice(0, at)}${token[at] === 'A' ? 'B' : 'A'}${token.slice(at + 1)}`;
     expect(await verifyPortalSession(tampered, secret)).toBeNull();
   });
 

@@ -161,6 +161,34 @@ export default function SendPaperworkPage() {
     }
   }
 
+  /** "Try again" on a file that couldn't be read: reads it again and places it like the first read. */
+  async function retryRead(skip: SkippedFile) {
+    if (!upload) return;
+    const file = files[skip.fileIndex];
+    if (!file) return;
+    setBusy('adding');
+    setError('');
+    try {
+      const form = new FormData();
+      form.append('documentsReceipt', upload.receipt);
+      form.append('cards', JSON.stringify(cards.map((c) => ({ id: c.id, documentIndexes: c.documentIndexes }))));
+      form.append('target', 'auto');
+      form.append('firstIndex', String(skip.fileIndex));
+      form.append('files', file);
+      const res = await fetch('/api/paperwork/add', { method: 'POST', body: form });
+      const body = await res.json() as { documents: AnalyzedDocument[]; documentsReceipt: string; cards: PaperworkCard[]; unassigned: number[]; unreadable: SkippedFile[]; error?: string };
+      if (!res.ok) throw new Error(body.error || 'The file could not be read again.');
+      setUpload({ documents: body.documents, receipt: body.documentsReceipt, warnings: upload.warnings });
+      setCards(mergeCards(body.cards));
+      setUnassigned((current) => [...current, ...(body.unassigned ?? [])]);
+      setSkipped((current) => ({ ...current, unreadable: [...current.unreadable.filter((u) => u.fileIndex !== skip.fileIndex), ...body.unreadable] }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
   function updateCard(id: string, patch: Partial<Pick<Card, 'edits' | 'note'>>) {
     setCards((current) => current.map((card) => (card.id === id ? { ...card, ...patch } : card)));
   }
@@ -282,7 +310,10 @@ export default function SendPaperworkPage() {
         </section>
         {upload.warnings.map((w) => <div className="warning" key={w}>{w}</div>)}
         {(skipped.unreadable.length > 0 || skipped.duplicates.length > 0) && <section className="sendSkipped">
-          {skipped.unreadable.map((f) => <p key={`u${f.fileIndex}`} className="unreadable"><b>Couldn't read {f.fileName}.</b> Retake the photo or upload a clearer copy with “+ Add a document” on its invoice.</p>)}
+          {skipped.unreadable.map((f) => <p key={`u${f.fileIndex}`} className="unreadable">
+            <span><b>Couldn't read {f.fileName}.</b> {f.reason}</span>
+            {f.retryable && files[f.fileIndex] && <button type="button" className="linkButton" disabled={Boolean(busy)} onClick={() => void retryRead(f)}>{busy === 'adding' ? 'Reading…' : 'Try again'}</button>}
+          </p>)}
           {skipped.duplicates.map((f) => <p key={`d${f.fileIndex}`}><b>{f.fileName}</b> was uploaded twice, so we only used it once.</p>)}
         </section>}
 

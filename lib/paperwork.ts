@@ -5,7 +5,7 @@ import { scoreDebtor } from './matching';
 import { validate } from './rules';
 import { applyFactorCloudAvailability } from './validation-availability';
 import { hashFile, signAnalysisReceipt } from './submission-integrity';
-import { extractDocument, isSupportedFile } from './extract';
+import { extractDocument, isSupportedFile, transientGeminiError } from './extract';
 import type { AnalyzeResponse, AnalyzedDocument, CompanyRecord } from './types';
 
 // Checks each group of an upload as its own invoice: match the debtor, run the checks, and sign a
@@ -24,7 +24,19 @@ export interface SkippedFile {
   /** Position of the file in the browser's list. */
   fileIndex: number;
   reason: string;
+  /** The reader was busy rather than the file being unreadable: trying again may well work. */
+  retryable?: boolean;
 }
+
+export interface ReadOptions {
+  concurrency?: number;
+  /** Pauses before each retry of a file that failed to read. */
+  retryDelaysMs?: number[];
+  /** For tests: stands in for the document reader. */
+  extract?: (file: File) => Promise<{ fields: AnalyzedDocument['fields']; usage: AnalyzedDocument['usage'] }>;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface PaperworkResponse {
   documents: AnalyzedDocument[];
@@ -46,7 +58,10 @@ export interface PaperworkResponse {
  * rather than failing the whole upload. `firstIndex` is where these files start in the browser's
  * list, so each document can point back at its file.
  */
-export async function readFiles(files: File[], firstIndex: number, knownHashes: string[] = [], concurrency = 4): Promise<{ documents: AnalyzedDocument[]; fileIndexes: number[]; unreadable: SkippedFile[]; duplicates: SkippedFile[] }> {
+export async function readFiles(files: File[], firstIndex: number, knownHashes: string[] = [], options: ReadOptions = {}): Promise<{ documents: AnalyzedDocument[]; fileIndexes: number[]; unreadable: SkippedFile[]; duplicates: SkippedFile[] }> {
+  // Fewer at once and a couple of retries: the reader sometimes refuses a burst of requests
+  // ("too many requests", "busy"), which says nothing about the file itself.
+  const { concurrency = 3, retryDelaysMs = [1500, 4000], extract = extractDocument } = options;
   const hashes = await Promise.all(files.map((file) => hashFile(file)));
   const seen = new Map<string, string>(knownHashes.map((h) => [h, 'a file already uploaded']));
   const duplicates: SkippedFile[] = [];
@@ -63,11 +78,21 @@ export async function readFiles(files: File[], firstIndex: number, knownHashes: 
     while (next < toRead.length) {
       const slot = next++;
       const file = files[toRead[slot]];
-      try {
-        const read = await extractDocument(file);
-        results[slot] = { fileName: file.name, fields: read.fields, usage: read.usage };
-      } catch (err) {
-        results[slot] = err instanceof Error ? err : new Error(String(err));
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const read = await extract(file);
+          results[slot] = { fileName: file.name, fields: read.fields, usage: read.usage };
+          break;
+        } catch (err) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          // A busy reader gets every retry; any other failure gets one more try.
+          if (attempt >= retryDelaysMs.length || (attempt >= 1 && !transientGeminiError(error))) {
+            console.error(`[paperwork] could not read ${file.name} after ${attempt + 1} tries:`, error.message);
+            results[slot] = error;
+            break;
+          }
+          await sleep(retryDelaysMs[attempt]);
+        }
       }
     }
   }));
@@ -77,8 +102,18 @@ export async function readFiles(files: File[], firstIndex: number, knownHashes: 
   const unreadable: SkippedFile[] = [];
   results.forEach((result, slot) => {
     const i = toRead[slot];
-    if (result instanceof Error) unreadable.push({ fileName: files[i].name, fileIndex: firstIndex + i, reason: 'We could not read this file. Retake the photo or upload a clearer copy.' });
-    else { documents.push({ ...result, fileHash: hashes[i], sourceIndex: firstIndex + i, sizeBytes: files[i].size }); fileIndexes.push(firstIndex + i); }
+    if (result instanceof Error) {
+      const busy = transientGeminiError(result);
+      unreadable.push({
+        fileName: files[i].name,
+        fileIndex: firstIndex + i,
+        retryable: true,
+        reason: busy ? 'The document reader was busy. Try again in a moment.' : 'We could not read this file. Try again, or upload a clearer copy.',
+      });
+    } else {
+      documents.push({ ...result, fileHash: hashes[i], sourceIndex: firstIndex + i, sizeBytes: files[i].size });
+      fileIndexes.push(firstIndex + i);
+    }
   });
   return { documents, fileIndexes, unreadable, duplicates };
 }
