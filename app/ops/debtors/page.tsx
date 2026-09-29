@@ -72,6 +72,8 @@ export default function DebtorsPage() {
         <a href="/ops#clients">Clients</a>
         <a className="active" href="/ops/debtors">Debtors</a>
         <a href="/ops/reviews">Review queue</a>
+        <a href="/ops/funding">Funding</a>
+        <a href="/ops/rules">Funding rules</a>
         <a href="/connection">Connection check</a>
       </nav>
       <div className="opsSidebarFooter"><strong>Internal view</strong><span>Factor-wide access</span><OpsSignOut /></div>

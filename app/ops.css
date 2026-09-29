@@ -71,3 +71,66 @@
 .clientNote span { color:#2b1a10; font-style:italic; }
 .reviewWorkloadHero.unavailable { background:#f2f4f7; border-color:#d0d5dd; }
 .reviewWorkloadHero.unavailable strong { color:#667085; }
+
+/* Funding engine: the Funding and Funding rules pages. */
+.fundingHeaderActions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+.fundingHeaderActions .secondaryLink, .fundingHeaderActions .primaryLink { width:auto; }
+.fundingMode { font-size:12px; font-weight:800; padding:7px 11px; border-radius:999px; background:#eef1f6; color:#4b5566; }
+.fundingMode.fund { background:#e8f7ee; color:#237447; }
+.fundingMode.approve { background:#e8f1fd; color:#1e5aa8; }
+.fundingSection { margin-top:22px; display:grid; gap:10px; }
+.fundingCount { font-size:13px; color:#7b8495; font-weight:700; margin-left:6px; }
+.fundingCard { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px; background:#fff; border:1px solid var(--fc-line); border-left:4px solid #c8d0dc; border-radius:14px; padding:16px 18px; }
+.fundingCard.approved, .fundingCard.funding { border-left-color:#e3a008; }
+.fundingCard.funded { border-left-color:#2e9e5b; }
+.fundingCard.failed { border-left-color:#d64545; }
+.fundingCard.suggested.fund { border-left-color:#7fc79c; }
+.fundingCardMain { display:grid; gap:6px; min-width:0; }
+.fundingCardTop { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.fundingCardTop .muted { font-size:12px; color:#7b8495; }
+.fundingPill { font-size:11px; font-weight:800; padding:3px 9px; border-radius:999px; background:#eef1f6; color:#4b5566; }
+.fundingPill.funded { background:#e8f7ee; color:#237447; }
+.fundingPill.approved, .fundingPill.funding { background:#fff4dc; color:#8a5a00; }
+.fundingPill.failed { background:#fdecec; color:#a33030; }
+.fundingReasons { margin:2px 0 0; padding-left:18px; font-size:13px; color:#3d4656; display:grid; gap:2px; }
+.fundingDetail { margin:0; font-size:12px; color:#6b7485; }
+.fundingCard .linkButton { justify-self:start; font-size:12px; }
+.fundingRules { display:grid; gap:6px; margin-top:4px; }
+.fundingRule { display:grid; grid-template-columns:22px 1fr; gap:8px; font-size:12px; align-items:start; }
+.fundingRule b { width:20px; height:20px; border-radius:50%; display:grid; place-items:center; font-size:11px; background:#eef1f6; color:#6b7485; }
+.fundingRule.pass b { background:#e8f7ee; color:#237447; }
+.fundingRule.hold b, .fundingRule.unknown b { background:#fff4dc; color:#8a5a00; }
+.fundingRule.review b { background:#fdecec; color:#a33030; }
+.fundingRule strong { display:block; font-size:12px; }
+.fundingRule span { color:#6b7485; }
+.fundingCardSide { display:grid; gap:8px; justify-items:end; align-content:start; }
+.fundingAmount { font-size:20px; letter-spacing:-.02em; }
+.fundButton { width:auto; background:#1d6f42; color:#fff; border:0; border-radius:9px; padding:9px 14px; font-weight:800; cursor:pointer; }
+.fundButton:disabled { opacity:.6; cursor:default; }
+.fundingCardSide .small { width:auto; }
+.rulesCard { margin-top:16px; padding-bottom:16px; }
+.rulesCard > *:not(.dashCardHeader) { margin-left:20px; margin-right:20px; }
+.rulesModes { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-top:14px; }
+.rulesMode { display:grid; gap:4px; border:1px solid var(--fc-line); border-radius:12px; padding:12px; cursor:pointer; font-size:12px; color:#5b6474; }
+.rulesMode input { width:auto; justify-self:start; }
+.rulesMode strong { font-size:14px; color:#1a2130; }
+.rulesMode.active { border-color:#1e5aa8; background:#f3f7fe; }
+.rulesMode.active.fund { border-color:#1d6f42; background:#f1faf4; }
+.rulesToggle { display:grid; grid-template-columns:22px 1fr; gap:10px; align-items:start; margin-top:14px; cursor:pointer; }
+.rulesToggle input { width:auto; margin-top:3px; }
+.rulesToggle strong { display:block; font-size:14px; }
+.rulesToggle small { color:#6b7485; font-size:12px; }
+.rulesRow { display:flex; gap:16px; justify-content:space-between; align-items:flex-start; border-top:1px solid var(--fc-line); padding-top:4px; flex-wrap:wrap; }
+.rulesRow.off .rulesNumbers { opacity:.45; }
+.rulesRow .rulesToggle { flex:1 1 320px; }
+.rulesNumbers { display:flex; gap:12px; flex-wrap:wrap; margin-top:14px; }
+.rulesNumber { display:grid; gap:4px; font-size:11px; color:#7b8495; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+.rulesInput { display:flex; align-items:center; gap:6px; }
+.rulesInput input { width:110px; padding:8px 10px; }
+.rulesInput em { font-style:normal; color:#6b7485; text-transform:none; letter-spacing:0; }
+.rulesList { display:grid; gap:6px; margin-top:12px; font-size:12px; color:#6b7485; }
+@media (max-width: 900px) {
+  .rulesModes { grid-template-columns:1fr 1fr; }
+  .fundingCard { grid-template-columns:1fr; }
+  .fundingCardSide { justify-items:start; }
+}
