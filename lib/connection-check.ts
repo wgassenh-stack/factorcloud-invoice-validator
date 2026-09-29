@@ -5,7 +5,7 @@ import { allowedDebtorIds, getClientDebtor, getCompany, getInvoice, listInvoiceL
 import { findReviewLabel, reviewLabelName } from './review-label';
 import { PORTAL_NOTE } from './portal-notes';
 import { checkExtraction } from './extract';
-import { getCashReserveBalance, listFundingInstructions, pickFundingInstruction, FUNDABLE_PAYMENT_TYPES } from './funding-api';
+import { fundingInstructionsIn, fundingInstructionsRaw, getCashReserveBalance, pickFundingInstruction, FUNDABLE_PAYMENT_TYPES } from './funding-api';
 import { query } from './db';
 import { databaseAuthEnabled } from './session';
 import { adminViewsEnabled } from './demo';
@@ -151,16 +151,17 @@ export async function runConnectionCheck(opts: { clientId: string | null; scope:
 
   // What the funding engine needs to approve and fund this client's invoices.
   if (opts.clientId) {
-    const [instructions, reserve] = await Promise.all([
-      timed(() => listFundingInstructions(opts.clientId!)),
+    const [raw, reserve] = await Promise.all([
+      timed(() => fundingInstructionsRaw(opts.clientId!)),
       timed(() => getCashReserveBalance(opts.clientId!)),
     ]);
+    const instructions = { ...raw, value: raw.error ? undefined : fundingInstructionsIn(raw.value) };
     const pick = instructions.value ? pickFundingInstruction(instructions.value) : null;
     const fundable = Boolean(pick && (FUNDABLE_PAYMENT_TYPES as readonly string[]).includes(pick.paymentMethod));
     items.push(instructions.error
       ? { id: 'funding-setup', label: 'Funding engine setup', state: 'warn', detail: `Funding instructions could not be read: ${fail(instructions.error)}`, ms: instructions.ms }
       : !pick
-        ? { id: 'funding-setup', label: 'Funding engine setup', state: 'warn', detail: 'The client has no funding instruction in FactorCloud, so the engine cannot approve its invoices for funding.', ms: instructions.ms }
+        ? { id: 'funding-setup', label: 'Funding engine setup', state: 'warn', detail: `No funding instruction found for this client, so the engine cannot approve its invoices for funding. FactorCloud answered: ${clip(raw.value, 400)}`, ms: instructions.ms }
         : { id: 'funding-setup', label: 'Funding engine setup', state: fundable && !reserve.error ? 'ok' : 'warn', ms: instructions.ms,
             detail: `Pays to "${pick.name || pick.paymentMethod}" by ${pick.paymentMethod}${fundable ? '' : ' (not fundable through the API)'}. Cash reserve ${reserve.error ? `could not be read (${fail(reserve.error)}), so auto-funding will hold` : `$${reserve.value!.toLocaleString('en-US')}`}.` });
   }
