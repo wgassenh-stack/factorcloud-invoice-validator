@@ -6,6 +6,7 @@ import { apiErrorResponse } from '@/lib/api-errors';
 import { decideDemoReview, demoRequestFix } from '@/lib/demo-store';
 import { demoRequest } from '@/lib/demo-request';
 import { ensureWorkflowSchema } from '@/lib/schema';
+import { syncDecisionToFactorCloud } from '@/lib/decision-sync';
 
 export const runtime = 'nodejs';
 
@@ -82,5 +83,19 @@ export async function POST(req: Request, context: { params: Promise<{ reviewId: 
     client.release();
   }
 
-  return NextResponse.json({ ok: true, status: decision === 'REQUEST_FIX' ? 'FIX_REQUESTED' : decision === 'APPROVE' ? 'APPROVED' : 'REJECTED' });
+  // Written back to FactorCloud after the portal has saved the decision; a failure there is reported
+  // but never undoes it.
+  let factorCloud: { ok: boolean; detail: string } | null = null;
+  if (found.factorcloud_invoice_id) {
+    factorCloud = await syncDecisionToFactorCloud({ invoiceId: found.factorcloud_invoice_id, decision, reviewer: session.displayName || session.email, note });
+    try {
+      await pool().query(`
+        insert into audit_events (id, factor_id, client_id, submission_id, actor_user_id, event_type, event_data)
+        values ($1,$2,$3,$4,$5,$6,$7::jsonb)
+      `, [`audit_${randomUUID()}`, session.factorId, found.client_id, found.submission_id, session.userId,
+        factorCloud.ok ? 'FACTORCLOUD_DECISION_SYNCED' : 'FACTORCLOUD_DECISION_SYNC_FAILED', JSON.stringify({ decision, detail: factorCloud.detail })]);
+    } catch { /* the decision itself is saved */ }
+  }
+
+  return NextResponse.json({ ok: true, status: decision === 'REQUEST_FIX' ? 'FIX_REQUESTED' : decision === 'APPROVE' ? 'APPROVED' : 'REJECTED', factorCloud });
 }

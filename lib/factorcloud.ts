@@ -391,6 +391,18 @@ export async function setInvoiceLabels(invoiceId: string, labelIds: string[]): P
   return fcRequest(`/invoices/${encodeURIComponent(invoiceId)}/labels`, { method: 'PATCH', json: { labelIds } });
 }
 
+/** The labels on one invoice (GET /invoices/{id}/labels, as FactorCloud's web app reads them). */
+export async function getInvoiceLabels(invoiceId: string): Promise<InvoiceLabel[]> {
+  if (await demoRequest()) return [];
+  return labelsIn(await fcRequest(`/invoices/${encodeURIComponent(invoiceId)}/labels`));
+}
+
+/** Replaces an invoice's notes (PUT /invoices/{id}, documented). */
+export async function updateInvoiceNotes(invoiceId: string, notes: string): Promise<unknown> {
+  if (await demoRequest()) return { status: 'SUCCESS', invoiceId, notes };
+  return fcRequest(`/invoices/${encodeURIComponent(invoiceId)}`, { method: 'PUT', json: { notes } });
+}
+
 export async function attachDocuments(invoiceId: string, documentIds: string[]): Promise<unknown> {
   if (await demoRequest()) return { status: 'SUCCESS', invoiceId, documents: documentIds };
   return fcRequest(`/invoices/${encodeURIComponent(invoiceId)}`, { method: 'PUT', json: { documents: documentIds } });

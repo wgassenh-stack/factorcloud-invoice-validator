@@ -82,16 +82,19 @@ export default function ReviewQueuePage() {
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Could not save review decision.');
       const label = record.invoiceNumber || record.id.slice(0, 8);
+      const synced = body.factorCloud as { ok: boolean; detail: string } | null | undefined;
+      const fc = synced ? (synced.ok ? ' · FactorCloud updated' : ' · FactorCloud not updated') : '';
+      if (synced && !synced.ok) setError(synced.detail);
       if (decision === 'REQUEST_FIX') {
         // The item stays in the queue, now marked as waiting on the client.
-        setToast({ tone: 'pass', text: `Fix requested on ${label}` });
+        setToast({ tone: 'pass', text: `Fix requested on ${label}${fc}` });
         setTimeout(() => setToast(null), 3200);
         await load();
         return;
       }
       // Let the card play its exit before it leaves the list.
       setLeaving(record.reviewId);
-      setToast({ tone: decision === 'APPROVE' ? 'pass' : 'fail', text: `${decision === 'APPROVE' ? 'Approved' : 'Rejected'} invoice ${record.invoiceNumber || record.id.slice(0, 8)}` });
+      setToast({ tone: decision === 'APPROVE' ? 'pass' : 'fail', text: `${decision === 'APPROVE' ? 'Approved' : 'Rejected'} invoice ${label}${fc}` });
       setTimeout(() => {
         setLeaving('');
         setData((current) => current ? { ...current, records: current.records.filter((r) => r.reviewId !== record.reviewId) } : current);
