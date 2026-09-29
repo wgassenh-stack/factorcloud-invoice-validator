@@ -24,6 +24,7 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     cashReserve: 1500,
     invoices: [] as Record<string, unknown>[],
     groupSeq: 0,
+    refuseApprove: false,
   };
   const admin = { v: 1 as const, userId: 's1', email: 'admin@x.com', displayName: 'Factor Admin', role: 'FACTOR_ADMIN' as const, factorId: 'f1', clients: [], exp: Date.now() + 3600_000 };
 
@@ -63,6 +64,12 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
         fc.invoices.push({ ...body, id, invoiceBalance: body.invoiceAmount, status: 'PENDING', createdOn: new Date().toISOString() });
         return ok({ data: { id } }, 201);
       }
+      if (p.startsWith('/invoices/') && p.split('/').length === 3 && method === 'GET') {
+        const invoice = fc.invoices.find((r) => r.id === p.split('/')[2]);
+        return invoice ? ok({ status: 'SUCCESS', invoice }) : ok({ error: 'not found' }, 404);
+      }
+      if (p === '/invoices/approve-for-funding' && fc.refuseApprove) return ok({ message: 'final OpenAR calculated 36,000 exceeds the credit limit 25,000' }, 400);
+      if (p === '/invoices/approve-for-funding') for (const r of fc.invoices) if (body.invoiceIds.includes(r.id)) r.status = 'APPROVED';
       if (p === '/invoices/approve-for-funding') return ok({ status: 'SUCCESS', invoiceGroups: [{ id: `g-${++fc.groupSeq}`, code: `G${fc.groupSeq}`, status: 'NOT_FUNDED', paymentType: 'ACH', paymentAmount: 900 }] });
       if (p.startsWith('/documents')) return ok({ data: { id: `doc-${calls.length}` } });
       return ok({ status: 'SUCCESS' });
@@ -160,6 +167,49 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     const { run, writes } = await send('REV-1', 900, { documentAmount: 950, explanation: 'Lumper fee taken off at delivery.' });
     expect(run).toMatchObject({ outcome: 'REVIEW', state: 'REVIEW' });
     expect(writes).not.toContain('PATCH /invoices/approve-for-funding');
+  });
+
+  it('counts only approved or funded invoices toward the credit limit, like FactorCloud OpenAR', async () => {
+    await setRules((s) => { s.mode = 'fund'; });
+    // A pending invoice FactorCloud hasn't approved yet: not part of OpenAR.
+    fc.invoices.push({ id: 'pend-1', invoiceNumber: 'PEND-1', companyClientId: CLIENT, companyDebtorId: DEBTOR, invoiceAmount: 4000, invoiceBalance: 4000, invoiceDate: iso(2), createdOn: iso(2), status: 'PENDING' });
+    const approvedSoFar = fc.invoices.filter((r) => r.companyDebtorId === DEBTOR && r.status === 'APPROVED').reduce((s, r) => s + Number(r.invoiceBalance), 0);
+    fc.creditLimit = approvedSoFar + 1000;
+    const { run } = await send('OAR-1', 900);
+    expect(run.rules.find((r) => r.id === 'credit-limit')).toMatchObject({ status: 'PASS' });
+    expect(run).toMatchObject({ outcome: 'FUND', state: 'FUNDED' });
+    fc.invoices = fc.invoices.filter((r) => r.id !== 'pend-1');
+    fc.creditLimit = 50_000;
+  });
+
+  it('try approving again re-runs the rules: funds it once everything passes', async () => {
+    // FactorCloud refuses the approval (say its own credit limit is too low), and the cash reserve is negative.
+    fc.refuseApprove = true; fc.cashReserve = -100;
+    const { run } = await send('RETRY-1', 700);
+    expect(run).toMatchObject({ outcome: 'HOLD', state: 'FAILED' });
+    expect(run.detail).toMatch(/FactorCloud refused/);
+
+    // Both fixed in FactorCloud; one click re-checks everything and funds within the caps.
+    fc.refuseApprove = false; fc.cashReserve = 1500;
+    const { POST } = await import('../app/api/ops/funding/[runId]/route');
+    const res = await POST(new Request('http://portal.test/x', { method: 'POST', body: JSON.stringify({ action: 'approve' }) }), { params: Promise.resolve({ runId: run.id }) });
+    const out = await res.json();
+    expect(res.status, JSON.stringify(out)).toBe(200);
+    expect(out.detail).toMatch(/approved and funded/);
+    expect(out.run).toMatchObject({ outcome: 'FUND', state: 'FUNDED', autoFunded: true, reasons: [] });
+  });
+
+  it('try approving again with a rule still failing: approved and held with the current reason', async () => {
+    fc.refuseApprove = true;
+    const { run } = await send('RETRY-2', 600);
+    expect(run).toMatchObject({ outcome: 'FUND', state: 'FAILED' });
+    fc.refuseApprove = false; fc.cashReserve = -50;
+    const { POST } = await import('../app/api/ops/funding/[runId]/route');
+    const res = await POST(new Request('http://portal.test/x', { method: 'POST', body: JSON.stringify({ action: 'approve' }) }), { params: Promise.resolve({ runId: run.id }) });
+    const out = await res.json();
+    expect(out.run).toMatchObject({ outcome: 'HOLD', state: 'APPROVED' });
+    expect(out.run.reasons.join(' ')).toMatch(/Cash reserve is negative/);
+    fc.cashReserve = 1500;
   });
 
   it('suggest only: nothing done in FactorCloud until a person approves', async () => {
