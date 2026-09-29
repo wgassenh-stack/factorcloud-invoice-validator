@@ -59,5 +59,17 @@ export function readPortalNote(notes: string | null | undefined): PortalNote {
 function clientNoteIn(notes: string): string | null {
   const at = notes.indexOf(`| ${CLIENT_NOTE}`);
   const start = at >= 0 ? at + 2 : notes.startsWith(CLIENT_NOTE) ? 0 : -1;
-  return start >= 0 ? notes.slice(start + CLIENT_NOTE.length).trim() || null : null;
+  if (start < 0) return null;
+  const rest = notes.slice(start + CLIENT_NOTE.length);
+  // The factor's later decisions are appended after the client's note.
+  const end = rest.indexOf(` | ${PORTAL_UPDATE}`);
+  return (end >= 0 ? rest.slice(0, end) : rest).trim() || null;
+}
+
+export const PORTAL_UPDATE = 'Portal update: ';
+
+/** A line the portal appends to an invoice's notes when the factor decides on it. */
+export function portalUpdateNote(existing: string | null | undefined, update: string): string {
+  const line = `${PORTAL_UPDATE}${update}`;
+  return existing?.trim() ? `${existing.trim()} | ${line}` : line;
 }

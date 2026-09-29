@@ -57,7 +57,7 @@ export default function ConnectionCheckPage() {
       <div>
         <div className="dashboardHeroMeta"><span className="eyebrow">FactorCloud</span><DemoBadge /></div>
         <h1>Connection check</h1>
-        <p>A read-only check of every FactorCloud call the portal uses, and how much of your invoice data comes back filled in. Nothing is created or changed.</p>
+        <p>Run this before a demo. A read-only check of everything the portal relies on: FactorCloud, document reading, sign-in and the review label, plus how much of your invoice data comes back filled in. Nothing is created or changed.</p>
       </div>
       <div className="connectionActions">
         <button className="secondaryLink" onClick={copyReport} disabled={!data}>{copied ? 'Copied' : 'Copy report'}</button>
@@ -72,7 +72,7 @@ export default function ConnectionCheckPage() {
       <div className={`connectionVerdict ${counts.fail ? 'fail' : counts.warn ? 'warn' : 'ok'}`}>
         <b aria-hidden="true">{counts.fail ? '✕' : counts.warn ? '!' : '✓'}</b>
         <div>
-          <strong>{counts.fail ? `${counts.fail} problem${counts.fail === 1 ? '' : 's'} to fix` : counts.warn ? `Working, with ${counts.warn} thing${counts.warn === 1 ? '' : 's'} to look at` : 'Everything checks out'}</strong>
+          <strong>{counts.fail ? `${counts.fail} problem${counts.fail === 1 ? '' : 's'} to fix` : counts.warn ? `Working, with ${counts.warn} thing${counts.warn === 1 ? '' : 's'} to look at` : 'Everything checks out. Ready to demo.'}</strong>
           <span>{data.scope === 'factor' ? 'Whole factor' : 'This client'} · {data.invoiceCount} invoices · {new Date(data.generatedAt).toLocaleTimeString()}</span>
         </div>
       </div>

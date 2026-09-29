@@ -18,6 +18,15 @@ export function reviewLabelName(): string {
   return process.env.FACTORCLOUD_REVIEW_LABEL?.trim() || DEFAULT_NAME;
 }
 
+/** The label rejected invoices get instead, if the factor created one (FACTORCLOUD_REJECTED_LABEL, default "Portal rejected"). */
+export function rejectedLabelName(): string {
+  return process.env.FACTORCLOUD_REJECTED_LABEL?.trim() || 'Portal rejected';
+}
+
+export async function rejectedLabelId(): Promise<string | null> {
+  return findReviewLabel(await listInvoiceLabels(), rejectedLabelName())?.id ?? null;
+}
+
 export function findReviewLabel(labels: InvoiceLabel[], name = reviewLabelName()): InvoiceLabel | null {
   return labels.find((label) => sameLabelName(label.name, name)) ?? null;
 }
@@ -25,7 +34,7 @@ export function findReviewLabel(labels: InvoiceLabel[], name = reviewLabelName()
 let cached: { id: string | null; at: number } | null = null;
 const CACHE_MS = 10 * 60_000;
 
-async function reviewLabelId(): Promise<string | null> {
+export async function reviewLabelId(): Promise<string | null> {
   const configured = process.env.FACTORCLOUD_REVIEW_LABEL_ID?.trim();
   if (configured) return configured;
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.id;

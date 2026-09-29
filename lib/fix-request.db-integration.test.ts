@@ -11,7 +11,8 @@ const enabled = Boolean(process.env.TEST_DATABASE_URL);
 
 describe.skipIf(!enabled)('request a fix (real SQL)', () => {
   const savedEnv = { ...process.env };
-  const sent: { url: string; body: unknown }[] = [];
+  const sent: { url: string; body: unknown; method?: string }[] = [];
+  let labelsOn = ['l-review'];
   let query: typeof import('./db').query;
   let pool: typeof import('./db').pool;
   let sign: typeof import('./session').signPortalSession;
@@ -33,10 +34,17 @@ describe.skipIf(!enabled)('request a fix (real SQL)', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: URL | string, init?: RequestInit) => {
       const url = String(input);
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
-      sent.push({ url, body });
+      sent.push({ url, body, method: init?.method });
       if (url.startsWith('https://fc.test/documents')) return new Response(JSON.stringify({ document: { id: `doc-${sent.length}` } }), { status: 200 });
       if (url.includes('/documents')) return new Response(JSON.stringify({ status: 'SUCCESS' }), { status: 200 });
       if (url.includes('/companies/')) return new Response(JSON.stringify({ company: { id: 'fc-client-1', companyName: 'Client Co' } }), { status: 200 });
+      // Writing the decision back: the invoice's notes and its labels.
+      if (url === 'https://fc.test/labels?entityType=INVOICE') return new Response(JSON.stringify([{ id: 'l-review', name: 'Portal review.' }]), { status: 200 });
+      if (url === 'https://fc.test/invoices/fc-inv-77/labels') {
+        if (init?.method === 'PATCH') labelsOn = (body as { labelIds: string[] }).labelIds;
+        return new Response(JSON.stringify(labelsOn.map((id) => ({ id, name: id === 'l-review' ? 'Portal review.' : id }))), { status: 200 });
+      }
+      if (url === 'https://fc.test/invoices/fc-inv-77') return new Response(JSON.stringify({ invoice: { id: 'fc-inv-77', notes: 'Submitted through FactorCloud client portal | PORTAL REVIEW REQUIRED' } }), { status: 200 });
       return new Response('{}', { status: 404 });
     }));
     ({ query, pool } = await import('./db'));
@@ -119,8 +127,13 @@ describe.skipIf(!enabled)('request a fix (real SQL)', () => {
     const list = await (await (await import('../app/api/ops/reviews/route')).GET()).json();
     expect(list.records[0].fix).toMatchObject({ status: 'DONE', responseNote: 'Signed POD attached' });
     const { POST } = await import('../app/api/ops/reviews/[reviewId]/route');
+    const before = sent.length;
     const res = await POST(json({ decision: 'APPROVE' }), { params: Promise.resolve({ reviewId }) });
-    expect(await res.json()).toMatchObject({ status: 'APPROVED' });
+    expect(await res.json()).toMatchObject({ status: 'APPROVED', factorCloud: { ok: true } });
+    // Written back to FactorCloud: a note line, and the review label taken off.
+    const notes = sent.slice(before).find((c) => c.method === 'PUT' && c.url === 'https://fc.test/invoices/fc-inv-77');
+    expect((notes!.body as { notes: string }).notes).toMatch(/PORTAL REVIEW REQUIRED \| Portal update: approved in the portal by /);
+    expect(labelsOn).toEqual([]);
   });
 
   afterAll(async () => {

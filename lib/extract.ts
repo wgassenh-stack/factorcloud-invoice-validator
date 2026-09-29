@@ -113,6 +113,24 @@ function gemini(): GoogleGenAI {
   return client;
 }
 
+/** Pre-demo check: the key works and the reading model is available (a metadata call, nothing is read). */
+export async function checkExtraction(): Promise<{ state: 'ok' | 'warn' | 'fail'; detail: string }> {
+  if (!(process.env.GEMINI_API_KEY || process.env.AI_API_KEY)) {
+    return (await demoRequest())
+      ? { state: 'ok', detail: 'Demo data: uploads get canned readings, no key needed.' }
+      : { state: 'warn', detail: 'GEMINI_API_KEY is not set, so uploads cannot be read.' };
+  }
+  try {
+    await gemini().models.get({ model: PRIMARY_MODEL });
+    return { state: 'ok', detail: `Key works; ${PRIMARY_MODEL} is available.` };
+  } catch (err) {
+    const refusal = readerRefusal(err);
+    if (refusal === 'daily-limit') return { state: 'fail', detail: "The Gemini key has used up today's allowance, so uploads will fail until it resets. Raise the limit (billing) in Google AI Studio." };
+    if (refusal) return { state: 'warn', detail: 'Gemini is busy or rate-limited right now. Run the check again in a minute.' };
+    return { state: 'fail', detail: `Gemini refused the key or the model (${PRIMARY_MODEL}). Check GEMINI_API_KEY and EXTRACTION_MODEL.` };
+  }
+}
+
 /** A busy or overloaded reader rather than a problem with the file: worth trying again. */
 export function transientGeminiError(err: unknown): boolean {
   const text = err instanceof Error ? err.message : String(err);

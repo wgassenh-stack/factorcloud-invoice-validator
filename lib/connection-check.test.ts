@@ -19,6 +19,7 @@ describe('connection check against a fake FactorCloud', () => {
       const url = new URL(String(input));
       methods.push(`${init?.method ?? 'GET'} ${url.pathname}`);
       const page = (init?.headers as Record<string, string>)?.['X-PAGINATION-NUM'];
+      if (url.hostname.endsWith('googleapis.com')) return Response.json({ name: 'models/gemini-3.5-flash-lite' });
       if (url.pathname === '/companies/c1') return Response.json({ company: { id: 'c1', companyName: 'Client Co' } });
       if (url.pathname === '/companies/d1') return Response.json({ company: { id: 'd1', companyName: 'Acme' } });
       if (url.pathname === '/invoices') return Response.json({ invoices: page === '0' ? [
@@ -36,6 +37,7 @@ describe('connection check against a fake FactorCloud', () => {
     expect(report.invoiceCount).toBe(2);
     expect(report.items.find((i) => i.id === 'coverage')!.detail).toContain('Advance amount (0%)');
     expect(methods.every((m) => m.startsWith('GET '))).toBe(true);
+    expect(methods.some((m) => m.includes('/models/'))).toBe(true);
   });
 
   it('turns an unreachable FactorCloud into failed items instead of throwing', async () => {

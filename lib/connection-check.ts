@@ -4,6 +4,10 @@ import { publicErrorMessage } from './api-errors';
 import { allowedDebtorIds, getClientDebtor, getCompany, getInvoice, listInvoiceLabels, listInvoices } from './factorcloud';
 import { findReviewLabel, reviewLabelName } from './review-label';
 import { PORTAL_NOTE } from './portal-notes';
+import { checkExtraction } from './extract';
+import { query } from './db';
+import { databaseAuthEnabled } from './session';
+import { adminViewsEnabled } from './demo';
 import { fairCoverage, valueCounts, type FieldCoverage, type ValueCounts } from './field-coverage';
 import { collectRiskInvoiceRecords, type RiskInvoiceRecord } from './risk';
 
@@ -52,8 +56,27 @@ export async function runConnectionCheck(opts: { clientId: string | null; scope:
     !process.env.PORTAL_SIGNING_SECRET && 'PORTAL_SIGNING_SECRET',
   ].filter(Boolean) as string[];
   items.push({ id: 'settings', label: 'Portal settings', state: missing.length ? 'fail' : 'ok', detail: missing.length ? `Missing: ${missing.join(', ')}.` : 'FactorCloud and signing settings are all set.' });
-  const extraction = Boolean(process.env.GEMINI_API_KEY || process.env.AI_API_KEY);
-  items.push({ id: 'extraction', label: 'Document reading (Gemini)', state: extraction ? 'ok' : 'warn', detail: extraction ? `Key set; model ${process.env.EXTRACTION_MODEL || 'gemini-3.5-flash-lite'}. Not called by this check.` : 'GEMINI_API_KEY is not set, so uploads cannot be read.' });
+  const extraction = await timed(() => checkExtraction());
+  items.push({ id: 'extraction', label: 'Document reading (Gemini)', state: extraction.value?.state ?? 'fail', detail: extraction.value?.detail ?? fail(extraction.error), ms: extraction.ms });
+
+  // Sign-in: the portal database and the logins a demo needs (one per side).
+  if (databaseAuthEnabled()) {
+    const accounts = await timed(() => query<{ clients: number; staff: number }>(`
+      select count(*) filter (where role = 'CLIENT_USER')::int as clients, count(*) filter (where role <> 'CLIENT_USER')::int as staff
+      from portal_users where is_active
+    `));
+    const row = accounts.value?.[0];
+    items.push(!row
+      ? { id: 'database', label: 'Portal database and logins', state: 'fail', detail: `The portal database could not be read: ${fail(accounts.error)}`, ms: accounts.ms }
+      : { id: 'database', label: 'Portal database and logins', ms: accounts.ms,
+          state: row.clients && row.staff ? 'ok' : 'warn',
+          detail: `${row.staff} factor login${row.staff === 1 ? '' : 's'} and ${row.clients} client login${row.clients === 1 ? '' : 's'} active.${row.clients ? '' : ' Add a client login to show the client side on its own.'}` });
+  } else {
+    items.push({ id: 'database', label: 'Portal database and logins', state: 'skip', detail: 'Shared-password mode: no portal database, so no review queue decisions or per-person logins.' });
+  }
+  items.push(adminViewsEnabled()
+    ? { id: 'views', label: 'Driver view', state: 'ok', detail: 'Admin views are on: factor staff can switch between Manager, Driver and Factor.' }
+    : { id: 'views', label: 'Driver view', state: 'skip', detail: 'Admin views are off (NEXT_PUBLIC_ADMIN_VIEWS), so the Driver view only works with demo data.' });
 
   // 2. Sign-in and the client record.
   if (opts.clientId) {
