@@ -46,7 +46,7 @@ export default function FundingPage() {
     try {
       const res = await fetch(`/api/ops/funding/${encodeURIComponent(run.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
       const body = await res.json();
-      setToast({ tone: res.ok ? 'pass' : 'fail', text: res.ok ? `${action === 'fund' ? 'Funded' : 'Approved for funding'}: invoice ${run.invoiceNumber ?? ''}` : body.detail || body.error || 'That did not work.' });
+      setToast({ tone: res.ok ? 'pass' : 'fail', text: res.ok ? `Invoice ${run.invoiceNumber ?? ''}: ${action === 'fund' ? 'Funded.' : body.detail || 'Approved for funding.'}` : body.detail || body.error || 'That did not work.' });
       setTimeout(() => setToast(null), 4000);
       await load();
     } finally {

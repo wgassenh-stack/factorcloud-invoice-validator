@@ -1,24 +1,24 @@
 import 'server-only';
 
-import { openBalance } from './analytics';
+import { openArBalance } from './analytics';
 import type { DebtorCredit } from './credit';
 import { getClientDebtor, listInvoices } from './factorcloud';
 import { collectRiskInvoiceRecords } from './risk';
 import type { CompanyRecord } from './types';
 
 /**
- * Credit position for a client–debtor pair: FactorCloud's credit terms plus the unpaid balance the
- * debtor already owes on this client's invoices. Never throws: a lookup problem becomes
+ * Credit position for a client–debtor pair: FactorCloud's credit terms plus the debtor's share of
+ * the client's OpenAR (approved or funded, unpaid invoices), as FactorCloud counts it. Never throws: a lookup problem becomes
  * `lookupFailed`, which the check reports as skipped rather than blocking the submission.
  */
-export async function loadDebtorCredit(clientId: string, debtor: CompanyRecord, invoiceAmount: number | null): Promise<DebtorCredit> {
+export async function loadDebtorCredit(clientId: string, debtor: CompanyRecord, invoiceAmount: number | null, excludeInvoiceId?: string): Promise<DebtorCredit> {
   const noBuy = debtor.noBuy === true || (debtor as { buyStatus?: unknown }).buyStatus === false;
   const base = { debtorId: debtor.id, debtorName: debtor.companyName || debtor.compCode || 'this debtor', noBuy, thisInvoice: invoiceAmount && invoiceAmount > 0 ? invoiceAmount : 0 };
   try {
     const [terms, list] = await Promise.all([getClientDebtor(clientId, debtor.id), listInvoices({ client: clientId, debtor: debtor.id })]);
     const open = collectRiskInvoiceRecords(list.raw)
-      .filter((record) => record.companyClientId === clientId && record.companyDebtorId === debtor.id)
-      .map((record) => openBalance(record))
+      .filter((record) => record.companyClientId === clientId && record.companyDebtorId === debtor.id && record.id !== excludeInvoiceId)
+      .map((record) => openArBalance(record))
       .filter((balance) => balance > 0);
     return {
       ...base,
