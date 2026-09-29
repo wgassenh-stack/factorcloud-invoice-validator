@@ -46,3 +46,13 @@ describe('reading FactorCloud label lists', () => {
     expect(labelsIn({ data: { content: [{ id: 'c', name: 'X' }] } })).toEqual([{ id: 'c', name: 'X' }]);
   });
 });
+
+describe('reading funding instructions', () => {
+  it('finds them however the response wraps them', async () => {
+    const { fundingInstructionsIn } = await vi.importActual<typeof import('./funding-api')>('./funding-api');
+    expect(fundingInstructionsIn({ paymentInformationList: [{ id: 'a', name: 'Ops', paymentMethod: 'ACH', default: true }] })).toEqual([{ id: 'a', name: 'Ops', paymentMethod: 'ACH', isDefault: true }]);
+    expect(fundingInstructionsIn({ status: 'SUCCESS', fundingInstructions: [{ id: 'b', nickname: 'Test Check', paymentMethod: 'Check', payTo: 'X' }] })).toEqual([{ id: 'b', name: 'Test Check', paymentMethod: 'CHECK', isDefault: false }]);
+    expect(fundingInstructionsIn({ data: { id: 'c', paymentMethod: 'SAME DAY ACH' } })[0].paymentMethod).toBe('SAME_DAY_ACH');
+    expect(fundingInstructionsIn({ status: 'SUCCESS', code: 200 })).toEqual([]);
+  });
+});

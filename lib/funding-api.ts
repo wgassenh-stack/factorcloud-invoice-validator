@@ -39,10 +39,42 @@ export async function getCashReserveBalance(clientId: string): Promise<number> {
 export interface FundingInstruction { id: string; name: string; paymentMethod: string; isDefault: boolean }
 
 export async function listFundingInstructions(clientId: string): Promise<FundingInstruction[]> {
-  const body = await fcRequest<{ paymentInformationList?: Record<string, unknown>[] }>(`/companies/${encodeURIComponent(clientId)}/funding-instruction`);
-  return (body.paymentInformationList ?? [])
-    .filter((row) => typeof row.id === 'string')
-    .map((row) => ({ id: String(row.id), name: String(row.name ?? ''), paymentMethod: String(row.paymentMethod ?? ''), isDefault: row.default === true }));
+  return fundingInstructionsIn(await fundingInstructionsRaw(clientId));
+}
+
+export async function fundingInstructionsRaw(clientId: string): Promise<unknown> {
+  return fcRequest(`/companies/${encodeURIComponent(clientId)}/funding-instruction`);
+}
+
+/**
+ * Every funding instruction in a response, however it's wrapped: the docs show
+ * `{ paymentInformationList: [...] }`, but the live API may name the list differently or return one
+ * object. An instruction is anything with an id and a payment method.
+ */
+export function fundingInstructionsIn(body: unknown): FundingInstruction[] {
+  const found: FundingInstruction[] = [];
+  const seen = new Set<string>();
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 5 || !value || typeof value !== 'object') return;
+    if (Array.isArray(value)) { value.forEach((item) => visit(item, depth + 1)); return; }
+    const row = value as Record<string, unknown>;
+    const method = row.paymentMethod ?? row.paymentType ?? row.method;
+    if (typeof row.id === 'string' && typeof method === 'string') {
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        found.push({
+          id: row.id,
+          name: String(row.name ?? row.nickname ?? row.nickName ?? ''),
+          paymentMethod: method.toUpperCase().replace(/\s+/g, '_'),
+          isDefault: row.default === true || row.isDefault === true || row.defaultInstruction === true,
+        });
+      }
+      return;
+    }
+    Object.values(row).forEach((item) => visit(item, depth + 1));
+  };
+  visit(body, 0);
+  return found;
 }
 
 /** The client's default funding instruction, else its first. */
