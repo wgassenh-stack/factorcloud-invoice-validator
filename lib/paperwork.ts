@@ -171,9 +171,13 @@ export async function checkCards(clientId: string, documents: AnalyzedDocument[]
       client = await getCompany(clientId);
     } catch (err) {
       lookupFailed = true;
-      warnings.push(err instanceof FactorCloudError && err.status === 401
+      // The reason goes to the log in full; the warning carries only FactorCloud's status code, which
+      // is enough to tell an expired sign-in (401), a missing record (404) or a refusal apart.
+      console.error(`[paperwork] FactorCloud client lookup failed for ${clientId}`, err);
+      const code = err instanceof FactorCloudError ? err.status : null;
+      warnings.push(code === 401
         ? 'FactorCloud connection is unavailable. Contact your factor and try again.'
-        : 'FactorCloud is temporarily unavailable. The document checks below still hold, but check again before sending.');
+        : `FactorCloud is temporarily unavailable${code ? ` (FactorCloud error ${code} reading the client record)` : ''}. The document checks below still hold, but check again before sending.`);
     }
   }
 
