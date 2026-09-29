@@ -23,6 +23,8 @@ import { demoClientView, demoRequest } from '@/lib/demo-request';
 import { DEMO_DRIVER } from '@/lib/demo';
 import { buildPortalNote } from '@/lib/portal-notes';
 import { labelForReview } from '@/lib/review-label';
+import { engineSettingsFor, runFundingEngine } from '@/lib/funding-engine';
+import { databaseAuthEnabled } from '@/lib/session';
 import { explanationProblem, flaggedChecks, forFactorReview, hardBlocks, needsExplanation, withClientExplanation } from '@/lib/override';
 
 export const runtime = 'nodejs';
@@ -98,7 +100,12 @@ export async function POST(req: Request) {
   // The credit check runs last, with fresh balances and the amount actually being sent. It never
   // needs a note from the client and is never shown to them: if the invoice would go over the
   // limit, it goes to the factor's review queue with a warning for the approver.
-  validation = applyCreditCheck(validation, await loadDebtorCredit(clientId, debtor, amount));
+  const credit = await loadDebtorCredit(clientId, debtor, amount);
+  // With the funding engine approving invoices, the credit limit is one of its rules: a clean
+  // invoice over the limit is approved and held for funding instead of going to the review queue.
+  const engine = !(await demoRequest()) && databaseAuthEnabled() ? await engineSettingsFor((await currentPortalSession())?.factorId) : null;
+  const engineHandlesCredit = Boolean(engine && (engine.mode === 'approve' || engine.mode === 'fund') && engine.rules.creditLimit.enabled);
+  if (!engineHandlesCredit) validation = applyCreditCheck(validation, credit);
 
   let duplicateCheckComplete = true;
   try {
@@ -213,6 +220,18 @@ export async function POST(req: Request) {
   if (validation.status === 'REVIEW' && !demo) {
     const labelled = await labelForReview(invoiceId!);
     try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: labelled.ok ? 'REVIEW_LABEL_ADDED' : 'REVIEW_LABEL_FAILED', eventData: { invoiceId, detail: labelled.detail } }); } catch { /* invoice workflow should still succeed */ }
+  }
+
+  // The funding engine: the factor's money rules decide whether this invoice is funded, approved and
+  // held for a person, or left for review. Never shown to the sender; never fails the send.
+  if (engine && engine.mode !== 'off' && session && storedSubmission) {
+    const paperworkFlagged = flaggedChecks(validation.checks).some((check) => check.id !== CREDIT_CHECK_ID);
+    const run = await runFundingEngine({
+      factorId: session.factorId, portalClientId: storedSubmission.portalClientId, submissionId: storedSubmission.id,
+      invoiceId: invoiceId!, invoiceNumber: payload.invoiceNumber.trim(), clientId, debtorId: payload.debtorId, amount: amount!,
+      paperwork: paperworkFlagged ? 'REVIEW' : 'PASS', debtorCredit: credit,
+    });
+    try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: 'FUNDING_ENGINE', eventData: run ? { runId: run.id, outcome: run.outcome, state: run.state, reasons: run.reasons } : { error: 'engine did not run' } }); } catch { /* invoice workflow should still succeed */ }
   }
 
   if (demo) {

@@ -102,6 +102,35 @@ For sales demos, click **Load demo data** in the sidebar. That browser then sees
 - Without `GEMINI_API_KEY`, document reading returns canned fields for Acme Manufacturing LLC. Files in one packet share the load number in their file names (for example `invoice-LD448213.png`), so a matching packet passes. Give one file a different number to show a mismatch being caught.
 - Planted stories: Acme Manufacturing holds about 42% of the portal client's volume, the portal client had a volume spike this week, it has open invoices past 90 days, Lone Star Haulers holds about 20% of the factor's open A/R, and days to collect improve over the year.
 
+## Funding engine
+
+Runs the factor's rules on every clean invoice sent through the portal and, as far as the factor allows, verifies, approves and funds it in FactorCloud. Needs database sign-in. Set it up under **Factor → Funding rules**; see what it did under **Factor → Funding**.
+
+**Modes:**
+- **Off.**
+- **Suggest only** (the default): records what it would do; people approve and fund from the Funding page.
+- **Auto-approve:** verifies and approves for funding; a person clicks Fund.
+- **Auto-fund:** also funds invoices that pass every rule and cap. This sends money.
+
+**Lanes:**
+- **Funded:** every rule passes and the invoice is within the caps.
+- **Approved, needs a click:** a money rule tripped (or couldn't be checked).
+- **Review:** the paperwork was sent anyway, or the debtor is No Buy. It goes to the review queue as before.
+
+**Rules** (each can be switched off):
+- Debtor: credit limit, debtor pays on time, known debtor, concentration.
+- Client: cash reserve not negative, volume spike, established client, client credit limit.
+
+**Auto-funding caps:** per invoice, per client per day, all clients per day, optional business hours, optional allow-list of clients.
+
+**FactorCloud calls** (all from the published API reference):
+- `PATCH /invoices/verification` (method "ONLINE PORTAL", optional)
+- `PATCH /invoices/approve-for-funding` (uses the client's default funding instruction)
+- `PATCH /invoice-groups/fund` (transaction ID `portal-fund-{batch}`)
+- Reads: `/clients/{id}`, `/ledgers/cash-reserve`, `/companies/{client}/funding-instruction`
+
+Every decision and action is kept in `engine_runs` (`database/005_funding_engine.sql`, also created automatically). Only factor admins can change the rules or fund.
+
 ## Admin views: the Driver view on real data
 
 `NEXT_PUBLIC_ADMIN_VIEWS=true` adds the Driver view to the **Manager | Driver | Factor** switch on real FactorCloud data, for test environments:
