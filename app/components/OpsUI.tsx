@@ -14,5 +14,19 @@ export function OpsDialog({title,children,onClose}:{title:string;children:ReactN
 export async function opsFetch<T>(url:string):Promise<T> {const res=await fetch(url,{cache:'no-store'});const body=await res.json();if(!res.ok)throw new Error(body.error||'Could not load this data.');return body as T;}
 export const opsMoney=(value:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(value);
 export const opsTime=(value:string|null|undefined)=>value?new Date(value).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'—';
-/** When the page last caught up with changes made in FactorCloud directly, and what changed. */
-export function OpsSync({sync}:{sync?:{checked:number;changed:number;at:string;error?:string}|null}) {if(!sync)return null;const ago=Math.max(0,Math.round((Date.now()-Date.parse(sync.at))/1000));const when=ago<10?'just now':ago<90?ago+' seconds ago':Math.round(ago/60)+' minutes ago';return <p className="oc-note oc-sync" role="status">{sync.error?'FactorCloud could not be checked just now; showing what the portal last knew.':<>✓ Checked against FactorCloud {when}{sync.changed?' · '+sync.changed+' updated from changes made there':''}.</>}</p>;}
+/**
+ * How much of the open work was checked against FactorCloud, and when. Honest about partial
+ * coverage: failures and items left for the next turn are said, not hidden behind a green tick.
+ */
+export function OpsSync({sync}:{sync?:{checked:number;failed?:number;total?:number;changed:number;at:string;error?:string}|null}) {
+  if(!sync)return null;
+  const ago=Math.max(0,Math.round((Date.now()-Date.parse(sync.at))/1000));
+  const when=ago<10?'just now':ago<90?ago+' seconds ago':Math.round(ago/60)+' minutes ago';
+  const total=sync.total??sync.checked,failed=sync.failed??0,updated=sync.changed?' · '+sync.changed+' updated from changes made there':'';
+  if(sync.error)return <p className="oc-note oc-sync warn" role="status">FactorCloud couldn't be checked just now, so this shows what the portal last knew.</p>;
+  if(!total)return <p className="oc-note oc-sync" role="status">✓ Nothing open to check against FactorCloud.</p>;
+  const complete=!failed&&sync.checked>=total;
+  const text=complete?`✓ Checked all ${total} open item${total===1?'':'s'} against FactorCloud ${when}${updated}.`
+    :`Checked ${sync.checked} of ${total} open items against FactorCloud ${when}${updated}.${failed?` ${failed} couldn't be read and will be tried again.`:''}${sync.checked+failed<total?' The rest are checked in turns.':''}`;
+  return <p className={'oc-note oc-sync'+(complete?'':' warn')} role="status">{text}</p>;
+}

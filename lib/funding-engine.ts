@@ -14,6 +14,7 @@ import { portalUpdateNote } from './portal-notes';
 import { collectRiskInvoiceRecords, type RiskInvoiceRecord } from './risk';
 import { decide, type Decision, type RuleResult, type EngineFacts } from './rules/engine';
 import { DEFAULT_SETTINGS, normalizeSettings, settingsForClient, type RuleSettings } from './rules/settings';
+import { remoteState, type RemoteState } from './factorcloud-sync';
 import { ensureEngineSchema } from './schema';
 
 // Runs the factor's rules on a newly sent invoice and acts on the result in FactorCloud, as far as
@@ -181,6 +182,17 @@ export async function batchFor(factorId: string, invoiceId: string, knownGroupId
 
 const label = (i: BatchInvoice) => i.invoiceNumber ?? 'an invoice approved outside the portal';
 
+/** The batch holds exactly the invoices (and amounts) the person reviewed. */
+export function sameBatch(now: { invoiceId: string; amount: number | null }[], reviewed: { invoiceId: string; amount: number | null }[]): boolean {
+  if (now.length !== reviewed.length) return false;
+  const seen = new Map(reviewed.map((i) => [i.invoiceId, i.amount]));
+  return now.every((i) => {
+    if (!seen.has(i.invoiceId)) return false;
+    const before = seen.get(i.invoiceId);
+    return before == null || i.amount == null || Math.abs(before - i.amount) < 0.005;
+  });
+}
+
 /**
  * Funds the FactorCloud batch an approved invoice is in. FactorCloud pays the whole batch, so this
  * first asks what the batch holds. Automatic funding only goes ahead when every invoice in it passed
@@ -188,7 +200,7 @@ const label = (i: BatchInvoice) => i.invoiceNumber ?? 'an invoice approved outsi
  * Every portal invoice in the batch is marked funded. Only one caller gets past the APPROVED →
  * FUNDING switch, so a double click can't fund twice.
  */
-async function fund(runId: string, paymentType: string | null, auto: boolean, userId: string | null, opts: { onlyIfAlone?: boolean } = {}): Promise<{ ok: boolean; detail: string; approvedOnly?: boolean }> {
+async function fund(runId: string, paymentType: string | null, auto: boolean, userId: string | null, opts: { onlyIfAlone?: boolean; expected?: ActOptions['expected'] } = {}): Promise<ActResult> {
   if (!paymentType || !(FUNDABLE_PAYMENT_TYPES as readonly string[]).includes(paymentType)) {
     const detail = `The client's payment method (${paymentType ?? 'none'}) can't be funded through the API. Fund it in FactorCloud.`;
     await update(runId, { detail });
@@ -205,10 +217,17 @@ async function fund(runId: string, paymentType: string | null, auto: boolean, us
   }
   const others = batch.invoices.filter((i) => i.runId !== runId);
   const name = batch.code ? `batch ${batch.code}` : 'its batch';
-  if (batch.status && batch.status !== 'NOT_FUNDED') {
-    const detail = `Not funded: FactorCloud shows ${name} as ${batch.status.toLowerCase().replace(/_/g, ' ')}. Check it in FactorCloud.`;
+  if (batch.status !== 'NOT_FUNDED') {
+    const detail = batch.status
+      ? `Not funded: FactorCloud shows ${name} as ${batch.status.toLowerCase().replace(/_/g, ' ')}. Check it in FactorCloud.`
+      : `Not funded: FactorCloud didn't say whether ${name} is still unfunded. Check it in FactorCloud.`;
     await update(runId, { detail, invoice_group_id: batch.groupId });
     return { ok: false, detail };
+  }
+  if (opts.expected && !sameBatch(batch.invoices, opts.expected)) {
+    const detail = `Not funded: ${name} changed after you reviewed it. It now holds ${batch.invoices.map(label).join(', ')}. Review it again before funding.`;
+    await update(runId, { detail, invoice_group_id: batch.groupId });
+    return { ok: false, detail, batchChanged: true };
   }
   const blockers = auto ? others.filter((i) => !(i.runId && i.outcome === 'FUND' && i.mode === 'fund' && i.state === 'APPROVED')) : [];
   if (blockers.length) {
@@ -385,33 +404,106 @@ export async function listRuns(factorId: string, filter: { id?: string; limit?: 
  *   fund     an approved invoice (funds its FactorCloud batch), or an invoice held in auto-fund
  *            mode, which is approved and then funded in the same click
  */
-export async function actOnRun(factorId: string, runId: string, action: 'approve' | 'fund', userId: string | null, reviewer: string): Promise<{ ok: boolean; detail: string }> {
+export interface ActOptions {
+  /** The batch the person reviewed: funding refuses if FactorCloud's batch no longer matches it. */
+  expected?: { invoiceId: string; amount: number | null }[];
+  /** The hold reasons (rule ids) the person saw when overriding a hold. */
+  seenHolds?: string[];
+}
+export type ActResult = { ok: boolean; detail: string; approvedOnly?: boolean; batchChanged?: boolean };
+
+export async function actOnRun(factorId: string, runId: string, action: 'approve' | 'fund', userId: string | null, reviewer: string, opts: ActOptions = {}): Promise<ActResult> {
   const [run] = await listRuns(factorId, { id: runId });
   if (!run) return { ok: false, detail: 'Not found.' };
   const date = new Date().toISOString().slice(0, 10);
   if (action === 'fund' && run.state === 'SUGGESTED' && run.mode === 'fund') {
-    // The person overrides the hold: approve, then fund. If FactorCloud batched it with other
-    // invoices, stop at approved so the person sees the whole batch before paying it.
-    return withApprovalClaim(run.id, async (token) => {
-      const settings = settingsForClient(await loadSettings(factorId), run.factorCloudClientId);
-      const approved = await approve({ id: run.id, invoiceId: run.factorCloudInvoiceId, clientId: run.factorCloudClientId }, settings, token);
-      if ('error' in approved) { await query("update engine_runs set state='FAILED',detail=$2 where id=$1 and approval_token=$3 and state in ('SUGGESTED','FAILED')",[run.id,approved.error,token]); return { ok: false, detail: approved.error }; }
-      await addNote(run.factorCloudInvoiceId, `approved for funding by ${reviewer} on ${date}`);
-      const funded = await fund(run.id, approved.paymentType, false, userId, { onlyIfAlone: true });
-      if (funded.ok && !funded.approvedOnly) await addNote(run.factorCloudInvoiceId, `funded by ${reviewer} on ${date}`);
-      return funded.ok || funded.approvedOnly ? funded : { ok: false, detail: `Approved, but not funded: ${funded.detail}` };
-    });
+    return withApprovalClaim(run.id, (token) => overrideHold(factorId, run, userId, reviewer, opts.seenHolds ?? [], token));
   }
   if (action === 'approve') {
     if (run.state !== 'SUGGESTED' && run.state !== 'FAILED') return { ok: false, detail: 'Already approved.' };
     return withApprovalClaim(run.id, (token) => rerunAndApprove(factorId, run, reviewer, token));
   }
   if (run.state !== 'APPROVED') return { ok: false, detail: run.state === 'FUNDED' ? 'Already funded.' : 'Approve it for funding first.' };
-  const funded = await fund(run.id, run.paymentType, false, userId);
+  // A person funds what they reviewed: the batch shown in the dialog, not whatever it holds now.
+  if (!opts.expected?.length) return { ok: false, detail: 'Review the funding batch before funding it.' };
+  const funded = await fund(run.id, run.paymentType, false, userId, { expected: opts.expected });
   if (funded.ok) await addNote(run.factorCloudInvoiceId, `funded by ${reviewer} on ${date}`);
   return funded;
 }
 
+/** What FactorCloud says now, and the rules run again on it. */
+type Recheck = Decision & { facts: EngineFacts; amount: number; remote: RemoteState } | { error: string };
+
+/**
+ * Before anyone approves or funds by hand, read the invoice and debtor from FactorCloud again and
+ * run every rule on the current numbers: an amount, debtor, No Buy flag or status may have changed
+ * since the decision was recorded.
+ */
+async function recheck(factorId: string, run: EngineRun, settings: RuleSettings): Promise<Recheck> {
+  const fresh = await settle(async () => {
+    const raw = await getInvoice(run.factorCloudInvoiceId);
+    const record = collectRiskInvoiceRecords(raw).find((r) => r.id === run.factorCloudInvoiceId);
+    if (!record?.companyDebtorId || record.companyClientId !== run.factorCloudClientId || !Number.isFinite(record.invoiceAmount) || !record.invoiceAmount || record.invoiceAmount <= 0) return null;
+    const amount = record.invoiceAmount;
+    const debtor = await getCompany(record.companyDebtorId);
+    const debtorCredit = await loadDebtorCredit(run.factorCloudClientId, debtor, amount, run.factorCloudInvoiceId);
+    const paperwork = run.rules.some((r) => r.id === 'paperwork' && r.status === 'REVIEW') ? 'REVIEW' as const : 'PASS' as const;
+    const decision = await decideNow({ factorId, invoiceId: run.factorCloudInvoiceId, clientId: run.factorCloudClientId, debtorId: record.companyDebtorId, amount, paperwork, debtorCredit }, settings);
+    return { ...decision, amount, remote: remoteState(record) };
+  }, 're-check');
+  return fresh ?? { error: 'The invoice could not be read from FactorCloud to re-check it. Nothing was done; try again in a moment.' };
+}
+
+/** Why nothing was done: the invoice already moved on in FactorCloud. */
+function remoteStop(remote: RemoteState): string {
+  return remote === 'FUNDED' ? 'Nothing done: FactorCloud already shows this invoice funded.'
+    : remote === 'APPROVED' ? 'Nothing done: this invoice was already approved in FactorCloud. Refresh to see it ready to fund.'
+    : remote === 'REJECTED' ? 'Nothing done: this invoice was rejected in FactorCloud.'
+    : 'Nothing done: FactorCloud no longer has this invoice.';
+}
+
+/** Rules that stop automatic funding: held, or couldn't be checked. */
+const holdIds = (rules: RuleResult[]) => rules.filter((r) => r.status === 'HOLD' || r.status === 'UNKNOWN').map((r) => r.id);
+
+/**
+ * "Approve & fund" on an invoice held in auto-fund mode: a person overriding the hold. The rules
+ * run again first. Hard stops still apply (a new paperwork or No Buy reason, a changed amount, an
+ * invoice that moved on in FactorCloud), and the person may only override the reasons they saw:
+ * a new reason means another look. If FactorCloud batches it with other invoices, it stops at
+ * approved so the whole batch can be reviewed before paying it.
+ */
+async function overrideHold(factorId: string, run: EngineRun, userId: string | null, reviewer: string, seenHolds: string[], token: string): Promise<ActResult> {
+  const settings = settingsForClient(await loadSettings(factorId), run.factorCloudClientId);
+  const fresh = await recheck(factorId, run, settings);
+  if ('error' in fresh) { await update(run.id, { detail: fresh.error }); return { ok: false, detail: fresh.error }; }
+  const recorded = await query(`update engine_runs set outcome = $1, rules = $2::jsonb, reasons = $3::jsonb, settings_snapshot = $4::jsonb, facts_snapshot = $5::jsonb, updated_at = now()
+    where id = $6 and approval_token = $7 and approval_status = 'CHECKING' returning id`,
+    [fresh.outcome, JSON.stringify(fresh.rules), JSON.stringify(fresh.reasons), JSON.stringify(settings), JSON.stringify(fresh.facts), run.id, token]);
+  if (!recorded.length) return { ok: false, detail: 'Approval claim changed. Refresh before continuing.' };
+  const stop = async (detail: string, state: RunState = 'SUGGESTED') => {
+    await query('update engine_runs set state = $2, detail = $3 where id = $1 and approval_token = $4', [run.id, state, detail, token]);
+    return { ok: false, detail };
+  };
+  if (fresh.remote !== 'PENDING') return stop(remoteStop(fresh.remote));
+  if (Math.abs(fresh.amount - run.amount) >= 0.005) {
+    await query('update engine_runs set amount = $2 where id = $1 and approval_token = $3', [run.id, fresh.amount, token]);
+    return stop(`Nothing done: the invoice amount changed in FactorCloud (${money(run.amount)} → ${money(fresh.amount)}). The rules were checked again; review it before funding.`);
+  }
+  if (fresh.outcome === 'REVIEW') return stop(`Not approved: ${fresh.reasons.join('; ')}`, 'REVIEW');
+  const unseen = fresh.rules.filter((r) => holdIds([r]).length && !seenHolds.includes(r.id));
+  if (unseen.length) return stop(`Nothing done: a new reason to hold it came up (${unseen.map((r) => r.detail).join('; ')}). Review it again.`);
+
+  const approved = await approve({ id: run.id, invoiceId: run.factorCloudInvoiceId, clientId: run.factorCloudClientId }, settings, token);
+  if ('error' in approved) { await query("update engine_runs set state='FAILED',detail=$2 where id=$1 and approval_token=$3 and state in ('SUGGESTED','FAILED')",[run.id,approved.error,token]); return { ok: false, detail: approved.error }; }
+  const date = new Date().toISOString().slice(0, 10);
+  const overridden = fresh.outcome === 'HOLD' ? `; hold overridden: ${fresh.reasons.join('; ')}` : '';
+  await addNote(run.factorCloudInvoiceId, `approved for funding by ${reviewer} on ${date}${overridden}`);
+  const funded = await fund(run.id, approved.paymentType, false, userId, { onlyIfAlone: true });
+  if (funded.ok && !funded.approvedOnly) await addNote(run.factorCloudInvoiceId, `funded by ${reviewer} on ${date}`);
+  return funded.ok || funded.approvedOnly ? funded : { ok: false, detail: `Approved, but not funded: ${funded.detail}` };
+}
+
+const money = (n: number) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /**
  * "Approve" on a suggestion or "Try approving again" on a failed run: runs every rule again with
@@ -421,18 +513,13 @@ export async function actOnRun(factorId: string, runId: string, action: 'approve
  */
 async function rerunAndApprove(factorId: string, run: EngineRun, reviewer: string, token:string): Promise<{ ok: boolean; detail: string }> {
   const settings = settingsForClient(await loadSettings(factorId), run.factorCloudClientId);
-  const fresh = await settle(async () => {
-    const raw = await getInvoice(run.factorCloudInvoiceId);
-    const record = collectRiskInvoiceRecords(raw).find((r) => r.id === run.factorCloudInvoiceId);
-    if (!record?.companyDebtorId || record.companyClientId !== run.factorCloudClientId || !Number.isFinite(record.invoiceAmount) || !record.invoiceAmount || record.invoiceAmount <= 0) return null;
-    const amount = record.invoiceAmount;
-    const debtor = await getCompany(record.companyDebtorId);
-    const debtorCredit = await loadDebtorCredit(run.factorCloudClientId, debtor, amount, run.factorCloudInvoiceId);
-    const paperwork = run.rules.some((r) => r.id === 'paperwork' && r.status === 'REVIEW') ? 'REVIEW' as const : 'PASS' as const;
-    return decideNow({ factorId, invoiceId: run.factorCloudInvoiceId, clientId: run.factorCloudClientId, debtorId: record.companyDebtorId, amount, paperwork, debtorCredit }, settings);
-  }, 're-run rules');
-  if (!fresh) {
-    const detail = 'The invoice could not be read from FactorCloud to re-check the rules. Try again in a moment.';
+  const fresh = await recheck(factorId, run, settings);
+  if ('error' in fresh) {
+    await update(run.id, { detail: fresh.error });
+    return { ok: false, detail: fresh.error };
+  }
+  if (fresh.remote !== 'PENDING') {
+    const detail = remoteStop(fresh.remote);
     await update(run.id, { detail });
     return { ok: false, detail };
   }

@@ -8,6 +8,7 @@ import { openArBalance } from './analytics';
 import type { DebtorCredit } from './credit';
 import { DEMO_CLIENT_ID } from './demo';
 import type { DemoInvoice } from './demo-data';
+import { effectiveModes } from './rules/settings';
 import { addDemoInvoice, demoClientDebtor, demoCompany, demoInvoices, demoReviews } from './demo-store';
 import type { EngineRun, RunState } from './funding-engine';
 import type { FundingData, FundingSummary } from './operations-view';
@@ -203,7 +204,8 @@ function laneOf(run: EngineRun): string {
 export function demoFundingData(lane: string | null): FundingData {
   const s = state();
   const runs = lane ? s.runs.filter((r) => laneOf(r) === lane) : s.runs;
-  return { available: true, mode: s.settings.mode, runs, summary: demoSummary(s), next: null, canAct: true };
+  return { available: true, mode: s.settings.mode, runs, summary: demoSummary(s), next: null, canAct: true,
+    automation: { paused: s.settings.paused, defaultMode: s.settings.mode, clients: effectiveModes(s.settings, demoFundingClients().map((c) => c.id)) } };
 }
 
 function demoSummary(s: DemoFundingState): FundingSummary {

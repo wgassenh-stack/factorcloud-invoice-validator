@@ -23,9 +23,9 @@ export async function POST(req: Request, context: { params: Promise<{ runId: str
     if (!databaseAuthEnabled()) return NextResponse.json({ error: 'The funding engine needs database sign-in.' }, { status: 409 });
     if (session.role !== 'FACTOR_ADMIN') return NextResponse.json({ error: 'Only a factor admin can approve or fund invoices.' }, { status: 403 });
     const { runId } = await context.params;
-    const body = await req.json().catch(() => ({})) as { action?: string };
+    const body = await req.json().catch(() => ({})) as { action?: string; expected?: unknown; seenHolds?: unknown };
     if (body.action !== 'approve' && body.action !== 'fund') return NextResponse.json({ error: 'Choose approve or fund.' }, { status: 400 });
-    const result = await actOnRun(session.factorId, runId, body.action, session.userId, session.displayName || session.email);
+    const result = await actOnRun(session.factorId, runId, body.action, session.userId, session.displayName || session.email, reviewed(body));
     const [run] = await listRuns(session.factorId, { id: runId });
     return NextResponse.json({ ...result, run: run ?? null }, { status: result.ok ? 200 : 409 });
   } catch (err) {
@@ -54,4 +54,14 @@ export async function GET(_req: Request, context: { params: Promise<{ runId: str
   } catch (err) {
     return apiErrorResponse(err, 'ops-funding-batch');
   }
+}
+
+/** What the person reviewed in the dialog: the batch's invoices and the hold reasons shown. */
+function reviewed(body: { expected?: unknown; seenHolds?: unknown }) {
+  const expected = Array.isArray(body.expected)
+    ? body.expected.slice(0, 500).flatMap((i) => i && typeof i === 'object' && typeof (i as { invoiceId?: unknown }).invoiceId === 'string'
+      ? [{ invoiceId: (i as { invoiceId: string }).invoiceId, amount: typeof (i as { amount?: unknown }).amount === 'number' ? (i as { amount: number }).amount : null }] : [])
+    : undefined;
+  const seenHolds = Array.isArray(body.seenHolds) ? body.seenHolds.filter((id): id is string => typeof id === 'string').slice(0, 50) : undefined;
+  return { expected, seenHolds };
 }

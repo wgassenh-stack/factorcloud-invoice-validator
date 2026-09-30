@@ -5,6 +5,8 @@
 export type EngineMode = 'off' | 'suggest' | 'approve' | 'fund';
 
 export interface RuleSettings {
+  /** Pause all automation: every client acts as Off, whatever its own rules say. */
+  paused: boolean;
   mode: EngineMode;
   /** Mark invoices verified (method "ONLINE PORTAL") before approving them for funding. */
   markVerified: boolean;
@@ -56,6 +58,7 @@ export const DEFAULT_SETTINGS: RuleSettings = {
   },
   caps: { perInvoice: 5_000, perClientPerDay: 10_000, perFactorPerDay: 25_000, businessHoursOnly: false, autoFundClients: 'all' },
   clientOverrides: {},
+  paused: false,
 };
 
 const MODES: EngineMode[] = ['off', 'suggest', 'approve', 'fund'];
@@ -82,14 +85,22 @@ export function normalizeSettings(input: unknown): RuleSettings {
       caps: { perInvoice: clean.caps.perInvoice, perClientPerDay: clean.caps.perClientPerDay },
     };
   }
-  return { ...base, clientOverrides: overrides };
+  return { ...base, paused: bool(src.paused, false), clientOverrides: overrides };
 }
 
 /** The rules that apply to one client: its override when it has one, otherwise the factor defaults. */
 export function settingsForClient(settings: RuleSettings, clientId: string | null | undefined): RuleSettings {
   const override = clientId ? settings.clientOverrides?.[clientId] : undefined;
-  if (!override) return settings;
-  return { ...settings, mode: override.mode, rules: override.rules, caps: { ...settings.caps, ...override.caps } };
+  const merged = override ? { ...settings, mode: override.mode, rules: override.rules, caps: { ...settings.caps, ...override.caps } } : settings;
+  // Pausing wins over every client's own rules.
+  return settings.paused ? { ...merged, mode: 'off' } : merged;
+}
+
+/** How many clients each mode applies to, once client rules and the pause are taken into account. */
+export function effectiveModes(settings: RuleSettings, clientIds: string[]): Record<EngineMode, number> {
+  const counts: Record<EngineMode, number> = { off: 0, suggest: 0, approve: 0, fund: 0 };
+  for (const id of clientIds) counts[settingsForClient(settings, id).mode] += 1;
+  return counts;
 }
 
 /** A new override for a client, starting from the factor defaults. */
@@ -97,7 +108,7 @@ export function overrideFrom(settings: RuleSettings, name: string): ClientOverri
   return { name, mode: settings.mode, rules: structuredClone(settings.rules), caps: { perInvoice: settings.caps.perInvoice, perClientPerDay: settings.caps.perClientPerDay } };
 }
 
-function normalizeBase(src: Record<string, any>): Omit<RuleSettings, 'clientOverrides'> {
+function normalizeBase(src: Record<string, any>): Omit<RuleSettings, 'clientOverrides' | 'paused'> {
   const d = DEFAULT_SETTINGS;
   const r = (src.rules ?? {}) as Record<string, any>;
   const c = (src.caps ?? {}) as Record<string, any>;

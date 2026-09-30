@@ -104,7 +104,7 @@ export async function POST(req: Request) {
   // limit, it goes to the factor's review queue with a warning for the approver.
   const credit = await loadDebtorCredit(clientId, debtor, amount);
   // With the funding engine approving invoices, the credit limit is one of its rules: a clean
-  // invoice over the limit is approved and held for funding instead of going to the review queue.
+  // invoice over the limit is held for one click instead of going to the paperwork review queue.
   const engine = !(await demoRequest()) && databaseAuthEnabled() ? await engineSettingsFor((await currentPortalSession())?.factorId, clientId) : null;
   const engineHandlesCredit = Boolean(engine && (engine.mode === 'approve' || engine.mode === 'fund') && engine.rules.creditLimit.enabled);
   if (!engineHandlesCredit) validation = applyCreditCheck(validation, credit);

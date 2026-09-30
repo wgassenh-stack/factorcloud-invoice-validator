@@ -5,14 +5,14 @@ import { RulePreview } from '@/app/components/RulePreview';
 import { OpsSidebar } from '@/app/components/OpsSidebar';
 import { Skeleton } from '@/app/components/CommandCharts';
 import {OpsDialog,OpsNotice} from '@/app/components/OpsUI';
-import { normalizeSettings, overrideFrom, type ClientOverride, type EngineMode, type RuleSettings } from '@/lib/rules/settings';
+import { normalizeSettings, overrideFrom, settingsForClient, type ClientOverride, type EngineMode, type RuleSettings } from '@/lib/rules/settings';
 import styles from './Rules.module.css';
 
 const MODES: { value: EngineMode; title: string; detail: string }[] = [
   { value: 'off', title: 'Off', detail: 'The engine does nothing. Clean invoices wait in FactorCloud as before.' },
   { value: 'suggest', title: 'Suggest only', detail: 'The engine records what it would do. People approve and fund from the Funding page.' },
   { value: 'approve', title: 'Auto-approve', detail: 'Clean invoices are verified and approved for funding automatically. A person clicks Fund.' },
-  { value: 'fund', title: 'Auto-fund', detail: 'Invoices that pass every rule and cap are funded automatically. Anything held waits for a click. This sends money.' },
+  { value: 'fund', title: 'Auto-fund', detail: 'Invoices that pass every rule and cap are approved and funded automatically. Anything held waits, unapproved, for one click. This sends money.' },
 ];
 
 type RuleKey = keyof RuleSettings['rules'];
@@ -77,6 +77,8 @@ export default function RulesPage() {
   const s = settings;
   const disabled = (!editable&&!demo) || saving;
   const changes=baseline&&s?settingChanges(baseline,s):[];
+  // Effective automation per client, before and after this change (client rules and pause included).
+  const effects=baseline&&s?clients.map(c=>({id:c.id,name:c.name,before:settingsForClient(baseline,c.id).mode,after:settingsForClient(s,c.id).mode})).filter(e=>e.before!==e.after):[];
   const numberField = (label: string, value: number, set: (n: number) => void, suffix = '') => <label className="rulesNumber"><span>{label}</span><span className="rulesInput"><input type="number" value={value} disabled={disabled} onChange={(e) => set(Number(e.target.value))} />{suffix && <em>{suffix}</em>}</span></label>;
 
   type Editable = { mode: EngineMode; rules: RuleSettings['rules']; caps: { perInvoice: number; perClientPerDay: number } };
@@ -96,7 +98,7 @@ export default function RulesPage() {
       </section>
 
       {(['Debtor', 'Client'] as const).map((group) => <section key={group} className="dashCard rulesCard">
-        <div className="dashCardHeader"><div><h2>{group} rules</h2><p>Switch each rule on or off and set its threshold. When a rule trips, the invoice is approved and held for one click instead of funded.</p></div></div>
+        <div className="dashCardHeader"><div><h2>{group} rules</h2><p>Switch each rule on or off and set its threshold. When a rule trips, the invoice waits for one click instead of being funded automatically.</p></div></div>
         {RULES.filter((r) => r.group === group).map((rule) => {
           const cfg = t.rules[rule.key] as Record<string, number | boolean>;
           return <div key={rule.key} className={`rulesRow ${cfg.enabled ? '' : 'off'}`}>
@@ -112,7 +114,7 @@ export default function RulesPage() {
       </section>)}
 
       <section className="dashCard rulesCard">
-        <div className="dashCardHeader"><div><h2>Automatic funding limits</h2><p>Anything over a limit is approved and waits for one click.</p></div></div>
+        <div className="dashCardHeader"><div><h2>Automatic funding limits</h2><p>Anything over a limit isn't funded automatically; it waits for one click.</p></div></div>
         <div className="rulesNumbers wide">
           {numberField('Per invoice', t.caps.perInvoice, (v) => edit((n) => { n.caps.perInvoice = v; }), '$')}
           {numberField(factor ? 'Per client per day' : 'This client per day', t.caps.perClientPerDay, (v) => edit((n) => { n.caps.perClientPerDay = v; }), '$')}
@@ -146,6 +148,10 @@ export default function RulesPage() {
       {s && <>
         <div className="oc-tabs" role="tablist" aria-label="Rule scope"><button className="oc-tab" role="tab" aria-selected={tab==='factor'} onClick={()=>setTab('factor')}>Factor defaults</button><button className="oc-tab" role="tab" aria-selected={tab==='clients'} onClick={()=>setTab('clients')}>Client rules<span>{Object.keys(s.clientOverrides).length}</span></button></div>
         <div className="oc-savebar"><span>{changes.length?changes.length+' unsaved changes':'No unsaved changes'}{demo?' · demo':''}</span><button className="oc-button" disabled={disabled||!changes.length} onClick={()=>{setSettings(structuredClone(baseline!));setError('');}}>Discard changes</button></div>
+        <section className={styles.pause+' '+(s.paused?styles.paused:'')}>
+          <div><strong>{s.paused?'All automation is paused':'Pause all automation'}</strong><span>{s.paused?'Nothing is approved or funded automatically for any client, whatever its own rules say. People can still approve and fund by hand.':'One switch that stops every automatic approval and funding, for all clients, including clients with their own rules.'}</span></div>
+          <button type="button" className={s.paused?'primaryLink':'oc-button'} disabled={disabled} onClick={()=>change((n)=>{n.paused=!n.paused;})}>{s.paused?'Resume automation':'Pause all'}</button>
+        </section>
         {tab==='factor'&&editor(s,(fn)=>change((n)=>fn(n)),true)}
         {tab==='clients'&&<div className={styles.clients}>
           <nav className={styles.clientList} aria-label="Clients">
@@ -162,11 +168,12 @@ export default function RulesPage() {
         </div>}
         {!demo&&<RulePreview settings={s}/>}
       </>}
-      {confirm&&s&&<OpsDialog title='Review rule changes' onClose={()=>{if(!saving)setConfirm(false);}}><div className="oc-table-wrap"><table className="oc-table"><thead><tr><th>Setting</th><th>Before</th><th>After</th></tr></thead><tbody>{changes.map(c=><tr key={c.label}><td>{c.label}</td><td>{c.before}</td><td><strong>{c.after}</strong></td></tr>)}</tbody></table></div><OpsNotice tone={s.mode==='fund'?'warn':'info'}>{demo?'This changes the demo rules. New demo invoices use them.':s.mode==='fund'?'Auto-fund can send money without a person clicking, within these rules and caps. Saving publishes these factor-wide settings.':'Saving publishes these factor-wide settings for new decisions.'}</OpsNotice>{s.mode==='fund'&&!demo&&<label className="oc-rule-toggle"><input type="checkbox" checked={ack} disabled={saving} onChange={e=>setAck(e.target.checked)}/>I reviewed the automation scope and financial limits.</label>}{error&&<OpsNotice tone="bad">{error}</OpsNotice>}<div className="oc-actions"><button className="oc-button" disabled={saving} onClick={()=>setConfirm(false)}>Cancel</button><button className="oc-button primary" disabled={saving||(!demo&&s.mode==='fund'&&!ack)} onClick={()=>void save()}>{saving?'Saving…':'Save rules'}</button></div></OpsDialog>}
+      {confirm&&s&&<OpsDialog title='Review rule changes' onClose={()=>{if(!saving)setConfirm(false);}}><div className="oc-table-wrap"><table className="oc-table"><thead><tr><th>Setting</th><th>Before</th><th>After</th></tr></thead><tbody>{changes.map(c=><tr key={c.label}><td>{c.label}</td><td>{c.before}</td><td><strong>{c.after}</strong></td></tr>)}</tbody></table></div>{effects.length>0&&<><div className="oc-section-label">What changes for each client</div><div className="oc-table-wrap"><table className="oc-table"><thead><tr><th>Client</th><th>Before</th><th>After</th></tr></thead><tbody>{effects.map(e=><tr key={e.id}><td>{e.name}</td><td>{MODE_NAME[e.before]}</td><td><strong>{MODE_NAME[e.after]}</strong>{e.after==='fund'&&<> · <span className={styles.startsFunding}>starts funding automatically</span></>}</td></tr>)}</tbody></table></div></>}
+      <OpsNotice tone={effects.some(e=>e.after==='fund')||s.mode==='fund'?'warn':'info'}>{demo?'This changes the demo rules. New demo invoices use them.':s.mode==='fund'?'Auto-fund can send money without a person clicking, within these rules and caps. Saving publishes these factor-wide settings.':'Saving publishes these factor-wide settings for new decisions.'}</OpsNotice>{s.mode==='fund'&&!demo&&<label className="oc-rule-toggle"><input type="checkbox" checked={ack} disabled={saving} onChange={e=>setAck(e.target.checked)}/>I reviewed the automation scope and financial limits.</label>}{error&&<OpsNotice tone="bad">{error}</OpsNotice>}<div className="oc-actions"><button className="oc-button" disabled={saving} onClick={()=>setConfirm(false)}>Cancel</button><button className="oc-button primary" disabled={saving||(!demo&&s.mode==='fund'&&!ack)} onClick={()=>void save()}>{saving?'Saving…':'Save rules'}</button></div></OpsDialog>}
     </section>
   </main>;
 }
-function settingChanges(before:RuleSettings,after:RuleSettings){const out:{label:string;before:string;after:string}[]=[];const labels:Record<string,string>={mode:'Automation mode',markVerified:'Mark invoices verified',creditLimit:'Debtor credit limit',clientCreditLimit:'Client credit limit',slowDebtor:'Debtor payment behavior',newDebtor:'Known debtor',concentration:'Debtor concentration',cashReserve:'Cash reserve',volumeSpike:'Unusual volume',newClient:'Established client',enabled:'Enabled',maxPastDuePct:'Maximum aged balance (%)',pastDueDays:'Invoice age (days)',maxPct:'Maximum share (%)',maxMultiple:'Maximum vs normal',minDays:'Minimum history (days)',minInvoices:'Minimum invoices',perInvoice:'Per-invoice cap',perClientPerDay:'Daily client cap',perFactorPerDay:'Daily factor cap',businessHoursOnly:'Business hours only',autoFundClients:'Automatic funding clients'};function walk(a:Record<string,unknown>|undefined,b:Record<string,unknown>,path:string[],prefix=''){a=a||{};for(const key of Object.keys(b)){if(key==='clientOverrides'||key==='name')continue;const v=b[key],prior=a[key];if(v&&typeof v==='object'&&!Array.isArray(v))walk(prior as Record<string,unknown>,v as Record<string,unknown>,[...path,key],prefix);else if(JSON.stringify(prior)!==JSON.stringify(v))out.push({label:prefix+[...path,key].filter(k=>k!=='rules'&&k!=='caps').map(k=>labels[k]||k).join(' · '),before:display(prior),after:display(v)});}}
+function settingChanges(before:RuleSettings,after:RuleSettings){const out:{label:string;before:string;after:string}[]=[];const labels:Record<string,string>={paused:'Pause all automation',mode:'Automation mode',markVerified:'Mark invoices verified',creditLimit:'Debtor credit limit',clientCreditLimit:'Client credit limit',slowDebtor:'Debtor payment behavior',newDebtor:'Known debtor',concentration:'Debtor concentration',cashReserve:'Cash reserve',volumeSpike:'Unusual volume',newClient:'Established client',enabled:'Enabled',maxPastDuePct:'Maximum aged balance (%)',pastDueDays:'Invoice age (days)',maxPct:'Maximum share (%)',maxMultiple:'Maximum vs normal',minDays:'Minimum history (days)',minInvoices:'Minimum invoices',perInvoice:'Per-invoice cap',perClientPerDay:'Daily client cap',perFactorPerDay:'Daily factor cap',businessHoursOnly:'Business hours only',autoFundClients:'Automatic funding clients'};function walk(a:Record<string,unknown>|undefined,b:Record<string,unknown>,path:string[],prefix=''){a=a||{};for(const key of Object.keys(b)){if(key==='clientOverrides'||key==='name')continue;const v=b[key],prior=a[key];if(v&&typeof v==='object'&&!Array.isArray(v))walk(prior as Record<string,unknown>,v as Record<string,unknown>,[...path,key],prefix);else if(JSON.stringify(prior)!==JSON.stringify(v))out.push({label:prefix+[...path,key].filter(k=>k!=='rules'&&k!=='caps').map(k=>labels[k]||k).join(' · '),before:display(prior),after:display(v)});}}
 walk(before as unknown as Record<string,unknown>,after as unknown as Record<string,unknown>,[]);
 for(const id of new Set([...Object.keys(before.clientOverrides||{}),...Object.keys(after.clientOverrides||{})])){const was=before.clientOverrides?.[id],now=after.clientOverrides?.[id],name=(now||was)!.name;
   if(!was)out.push({label:name,before:'Factor defaults',after:'Custom rules'});else if(!now)out.push({label:name,before:'Custom rules',after:'Factor defaults'});
@@ -177,4 +184,5 @@ function summary(o:ClientOverride){const mode=MODES.find(m=>m.value===o.mode)?.t
 /** How a client's rules differ from the factor defaults. */
 function differences(s:RuleSettings,o:ClientOverride){const out:string[]=[];if(o.mode!==s.mode)out.push((MODES.find(m=>m.value===o.mode)?.title||o.mode)+' (default: '+(MODES.find(m=>m.value===s.mode)?.title||s.mode)+')');if(o.caps.perInvoice!==s.caps.perInvoice)out.push(money(o.caps.perInvoice)+' per invoice (default '+money(s.caps.perInvoice)+')');if(o.caps.perClientPerDay!==s.caps.perClientPerDay)out.push(money(o.caps.perClientPerDay)+' a day (default '+money(s.caps.perClientPerDay)+')');for(const r of RULES){const a=o.rules[r.key] as Record<string,unknown>,b=s.rules[r.key] as Record<string,unknown>;if(a.enabled!==b.enabled)out.push(r.title+(a.enabled?' on':' off'));else if(JSON.stringify(a)!==JSON.stringify(b))out.push(r.title+' threshold changed');}return out.length?out:['Same as the factor defaults so far'];}
 const money=(n:number)=>'$'+Math.round(n).toLocaleString('en-US');
+const MODE_NAME:Record<EngineMode,string>={off:'Off',suggest:'Suggest only',approve:'Auto-approve',fund:'Auto-fund'};
 function display(value:unknown){return typeof value==='boolean'?value?'On':'Off':Array.isArray(value)?value.join(', ')||'None':String(value);}
