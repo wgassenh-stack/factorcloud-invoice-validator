@@ -9,6 +9,11 @@ import { FactorCloudError, fcRequest } from './factorcloud';
 //   PATCH /invoices/verification                      mark invoices verified
 //   PATCH /invoices/approve-for-funding               approve: creates a funding batch (invoice group)
 //   PATCH /invoice-groups/fund                        fund the batch: this moves money
+//   GET   /invoices/{id}/invoice-funding             which batch an invoice is in
+//   GET   /invoice-groups/{id}                       a batch's status
+//   GET   /invoice-groups/{id}/invoice-funding       every invoice in a batch
+// FactorCloud funds whole batches, and approving an invoice adds it to the client's open batch.
+// So before money moves, the engine checks what is really in the batch.
 
 const num = (value: unknown) => (typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN);
 
@@ -114,3 +119,46 @@ export async function fundInvoiceGroups(invoiceGroupIds: string[], paymentType: 
   await fcRequest('/invoice-groups/fund', { method: 'PATCH', json: { action: 'fund', invoiceGroups: invoiceGroupIds, paymentType, transactionId } });
 }
 
+
+const PAGE = 200;
+const pageHeaders = (page: number) => ({ 'X-PAGINATION-NUM': String(page), 'X-PAGINATION-LIMIT': String(PAGE), pageNumber: String(page), pageLimit: String(PAGE) });
+type InvoiceFunding = { invoiceId?: unknown; invoiceGroupId?: unknown; createdOn?: unknown };
+const fundingsIn = (body: unknown): InvoiceFunding[] => {
+  const list = (body as { invoiceFundings?: unknown })?.invoiceFundings;
+  if (!Array.isArray(list)) throw new FactorCloudError('The funding batch response was not recognized.', 502, null);
+  return list as InvoiceFunding[];
+};
+
+/** The batch FactorCloud put an invoice in: the most recent one, or null if it is in none. */
+export async function invoiceGroupOf(invoiceId: string): Promise<string | null> {
+  const rows = fundingsIn(await fcRequest(`/invoices/${encodeURIComponent(invoiceId)}/invoice-funding`, { headers: pageHeaders(0) }));
+  const latest = rows.filter((r) => typeof r.invoiceGroupId === 'string')
+    .sort((a, b) => String(b.createdOn ?? '').localeCompare(String(a.createdOn ?? '')))[0];
+  return latest ? String(latest.invoiceGroupId) : null;
+}
+
+/** Every invoice in a batch. Funding the batch funds all of them. */
+export async function groupInvoiceIds(groupId: string): Promise<string[]> {
+  const ids = new Set<string>();
+  for (let page = 0; page < 25; page++) {
+    const rows = fundingsIn(await fcRequest(`/invoice-groups/${encodeURIComponent(groupId)}/invoice-funding`, { headers: pageHeaders(page) }));
+    const before = ids.size;
+    for (const row of rows) if (typeof row.invoiceId === 'string') ids.add(row.invoiceId);
+    // Stop at a short page, or if the API ignores paging and repeats the same rows.
+    if (rows.length < PAGE || ids.size === before) return [...ids];
+  }
+  throw new FactorCloudError('The funding batch is too large to check.', 502, null);
+}
+
+/** A batch's code and status (NOT_FUNDED until it is funded). */
+export async function getInvoiceGroup(groupId: string): Promise<InvoiceGroup> {
+  const body = await fcRequest<{ invoiceGroup?: Record<string, unknown> }>(`/invoice-groups/${encodeURIComponent(groupId)}`);
+  const g = body.invoiceGroup;
+  if (!g || typeof g.id !== 'string') throw new FactorCloudError('The funding batch response was not recognized.', 502, null);
+  return {
+    id: g.id, code: typeof g.code === 'string' ? g.code : null, status: typeof g.status === 'string' ? g.status : null,
+    paymentAmount: Number.isFinite(num(g.paymentAmount)) ? num(g.paymentAmount) : null,
+    reserveAmount: Number.isFinite(num(g.reserveAmount)) ? num(g.reserveAmount) : null,
+    paymentType: typeof g.paymentType === 'string' ? g.paymentType : null,
+  };
+}

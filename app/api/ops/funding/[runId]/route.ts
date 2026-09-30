@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { demoRequest } from '@/lib/demo-request';
-import { actOnRun, listRuns } from '@/lib/funding-engine';
+import { actOnRun, batchFor, listRuns } from '@/lib/funding-engine';
 import { actOnDemoRun, demoRun } from '@/lib/demo-funding';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { databaseAuthEnabled } from '@/lib/session';
@@ -30,5 +30,28 @@ export async function POST(req: Request, context: { params: Promise<{ runId: str
     return NextResponse.json({ ...result, run: run ?? null }, { status: result.ok ? 200 : 409 });
   } catch (err) {
     return apiErrorResponse(err, 'ops-funding-action');
+  }
+}
+
+/**
+ * What funding this invoice would pay: its FactorCloud batch and everything in it. Shown in the
+ * confirm dialog, because FactorCloud funds the whole batch.
+ */
+export async function GET(_req: Request, context: { params: Promise<{ runId: string }> }) {
+  try {
+    const session = await requireFactorSession();
+    const { runId } = await context.params;
+    if (await demoRequest()) {
+      const run = demoRun(runId);
+      if (!run) return NextResponse.json({ error: 'Not found.' }, { status: 404 });
+      return NextResponse.json({ batch: { groupId: run.invoiceGroupId, code: null, status: 'NOT_FUNDED', invoices: [{ runId: run.id, invoiceId: run.factorCloudInvoiceId, invoiceNumber: run.invoiceNumber, clientName: run.clientName, amount: run.amount, state: run.state, outcome: run.outcome, mode: run.mode }] } });
+    }
+    if (!databaseAuthEnabled()) return NextResponse.json({ error: 'The funding engine needs database sign-in.' }, { status: 409 });
+    const [run] = await listRuns(session.factorId, { id: runId });
+    if (!run) return NextResponse.json({ error: 'Not found.' }, { status: 404 });
+    if (run.state !== 'APPROVED') return NextResponse.json({ batch: null });
+    return NextResponse.json({ batch: await batchFor(session.factorId, run.factorCloudInvoiceId, run.invoiceGroupId) });
+  } catch (err) {
+    return apiErrorResponse(err, 'ops-funding-batch');
   }
 }

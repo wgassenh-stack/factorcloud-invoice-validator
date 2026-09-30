@@ -11,7 +11,7 @@
     "db:migrate": "node scripts/run-migrations.mjs",
     "db:bootstrap": "node scripts/bootstrap-dev.mjs",
     "user:create": "node scripts/create-portal-user.mjs",
-    "test:db": "vitest run --no-file-parallelism lib/db-integration.test.ts lib/fix-request.db-integration.test.ts lib/driver-view.db-integration.test.ts lib/funding-engine.db-integration.test.ts lib/pilot-workflows.db-integration.test.ts"
+    "test:db": "vitest run --no-file-parallelism lib/db-integration.test.ts lib/fix-request.db-integration.test.ts lib/driver-view.db-integration.test.ts lib/funding-engine.db-integration.test.ts lib/pilot-workflows.db-integration.test.ts lib/funding-batch-safety.db-integration.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",
