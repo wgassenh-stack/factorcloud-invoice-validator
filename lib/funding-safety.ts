@@ -19,6 +19,24 @@ export async function claimFunding(runId: string, auto: boolean, settings: RuleS
       await db.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [`funding:${run.factor_id}`]);
       // Share the settings writer's lock so a queued claim observes the latest committed policy.
       await db.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [`rules:${run.factor_id}`]);
+
+      // FactorCloud funds invoice groups, not individual invoices. Its approve endpoint can put a
+      // newly approved invoice into an existing open group. Never auto-fund that group if another
+      // portal-managed invoice in it is waiting for a person or was funded manually. Otherwise one
+      // safe invoice could sweep a held invoice into the same money-moving request.
+      if (run.invoice_group_id) {
+        const { rows: [sharedBatch] } = await db.query(`
+          select count(*)::int as blockers
+          from engine_runs
+          where factor_id=$1 and invoice_group_id=$2 and id<>$3
+            and not (outcome='FUND' and mode='fund' and state='FUNDED' and auto_funded)
+        `, [run.factor_id, run.invoice_group_id, run.id]);
+        if (Number(sharedBatch?.blockers ?? 0) > 0) {
+          await db.query("update engine_runs set detail='Automatic funding held: FactorCloud grouped this invoice with another invoice that requires a person.' where id=$1", [runId]);
+          await db.query('commit'); return false;
+        }
+      }
+
       const { rows: [policy] } = await db.query('select settings from rule_settings where factor_id=$1', [run.factor_id]);
       if (policy) settings = settingsForClient(normalizeSettings(policy.settings), run.factorcloud_client_id);
       const timezone = process.env.FACTOR_TIMEZONE || 'America/Chicago';
