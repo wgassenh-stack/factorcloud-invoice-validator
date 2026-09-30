@@ -17,7 +17,6 @@ const GROUPS = [
   {
     label: 'Portfolio',
     links: [
-      { key: 'clients', href: '/ops#clients', label: 'Clients', icon: 'C' },
       { key: 'debtors', href: '/ops/debtors', label: 'Debtors', icon: 'D' },
       { key: 'reports', href: '/ops/reports', label: 'Reports', icon: '↗' },
     ],
