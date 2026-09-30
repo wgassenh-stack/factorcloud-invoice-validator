@@ -14,3 +14,6 @@
 .diffs { display:flex; flex-wrap:wrap; gap:6px; }
 .diffs span { font-size:12px; font-weight:600; color:#1e5aa8; background:#eef4fd; border-radius:999px; padding:4px 10px; }
 @media (max-width: 860px) { .clients { grid-template-columns:1fr; } .clientList { position:static; max-height:none; } }
+/* Beat the site-wide button hover (dark fill), which hid the client's name. */
+.clientList .client:not(:disabled):hover { background:#f5f7fa; }
+.clientList .client.selected:not(:disabled):hover { background:#eaf1fc; }

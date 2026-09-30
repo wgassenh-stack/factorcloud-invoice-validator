@@ -45,7 +45,7 @@ function Paperwork({rows,data}:{rows:ReviewData['records'];data:ReviewData|null}
 const kind=(run:EngineRun)=>run.state==='FUNDED'?'funded':run.state==='REVIEW'?'review':run.state==='FAILED'||run.state==='FUNDING'?'problem':'held';
 const lane:Record<string,string>={funded:'funded',held:'decision',review:'review',problem:'exceptions'};
 function AutomationToday({data}:{data:FundingData}) {
-  const t=data.summary!.today!,parts=[{key:'funded',label:'Funded automatically',n:t.autoFunded,href:'/ops/funding?lane=funded'},{key:'held',label:'Approved, waiting for one click',n:t.held,href:'/ops/funding?lane=decision'},{key:'review',label:'Paperwork needs a person',n:t.review,href:'/ops/reviews'},{key:'problem',label:'Needs attention',n:t.problems,href:'/ops/funding?lane=exceptions'}];
+  const t=data.summary!.today!,parts=[{key:'funded',label:'Funded automatically',n:t.autoFunded,href:'/ops/funding?lane=funded'},{key:'held',label:'Waiting for one click',n:t.held,href:'/ops/funding?lane=decision'},{key:'review',label:'Paperwork needs a person',n:t.review,href:'/ops/reviews'},{key:'problem',label:'Needs attention',n:t.problems,href:'/ops/funding?lane=exceptions'}];
   const speed=t.secondsToFund==null?null:t.secondsToFund<90?Math.max(1,Math.round(t.secondsToFund))+' seconds':Math.round(t.secondsToFund/60)+' minutes';
   return <section className={styles.hero} aria-label="Automation today"><div><span className={styles.eyebrow}><i className={styles.live} aria-hidden="true"/>Automation today · {modeLabels[data.mode]}</span>
     <p className={styles.headline}>{t.received?<><em>{t.autoFunded} of {t.received}</em> invoices funded with no one touching them</>:'No invoices sent in yet today'}</p>
