@@ -1,0 +1,15 @@
+'use client';
+import { useEffect,useState } from 'react';
+import { OpsSidebar } from '@/app/components/OpsSidebar';
+type Item={id:string;kind:string;detail:string;created_at:string;submission_id:string|null;invoice_number:string|null;factorcloud_invoice_id:string|null};
+export default function RecoveryPage(){
+  const [items,setItems]=useState<Item[]>([]),[editable,setEditable]=useState(false),[error,setError]=useState(''),[loading,setLoading]=useState(true);
+  async function load(){setLoading(true);try{const r=await fetch('/api/ops/recovery');const b=await r.json();if(!r.ok)throw Error(b.error);setItems(b.items);setEditable(b.editable);setError(b.note??'');}catch(e){setError(String(e));}finally{setLoading(false);}}
+  useEffect(()=>{void load();},[]);
+  return <main className="opsShell"><OpsSidebar active="recovery"/><section className="opsContent"><header className="opsHeader"><div><span className="eyebrow">Operations</span><h1>Recovery queue</h1><p>Check the existing invoice or funding batch in FactorCloud, repair it there, then record the outcome here.</p></div><button disabled={loading} onClick={()=>void load()}>Refresh</button></header>{error&&<p role="alert">{error}</p>}{loading?<p>Loading…</p>:items.length===0?<p>No open recovery items.</p>:items.map(item=><RecoveryCard key={item.id} item={item} editable={editable} onDone={load}/>)}</section></main>;
+}
+function RecoveryCard({item,editable,onDone}:{item:Item;editable:boolean;onDone:()=>Promise<void>}){
+  const [evidence,setEvidence]=useState(''),[outcome,setOutcome]=useState(item.kind==='FUNDING_UNKNOWN'?'funded':'repaired'),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  async function resolve(){setBusy(true);try{const r=await fetch('/api/ops/recovery',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id,evidence,outcome})});const b=await r.json();if(!r.ok)throw Error(b.error);await onDone();}catch(e){setError(String(e));}finally{setBusy(false);}}
+  return <section className="dashCard"><h2>{item.invoice_number??'Invoice recovery'}</h2><p>{item.detail}</p><p>Opened {new Date(item.created_at).toLocaleString()} · FactorCloud invoice: {item.factorcloud_invoice_id??'Not confirmed'}</p>{item.submission_id&&<a href={`/ops/submissions/${encodeURIComponent(item.submission_id)}`}>View invoice timeline</a>}{editable&&<><label className="field"><span>Verified outcome</span><select value={outcome} onChange={e=>setOutcome(e.target.value)}>{item.kind==='FUNDING_UNKNOWN'?<><option value="funded">Batch is funded in FactorCloud</option><option value="not-funded">Batch is definitely not funded</option></>:<option value="repaired">Repaired and checked in FactorCloud</option>}</select></label><label className="field"><span>Evidence / reference</span><textarea value={evidence} maxLength={2000} onChange={e=>setEvidence(e.target.value)} placeholder="Batch status, reference, and what you checked"/></label><button disabled={busy||evidence.trim().length<15} onClick={()=>void resolve()}>{busy?'Saving…':'Record reconciliation'}</button></>}{error&&<p role="alert">{error}</p>}</section>;
+}

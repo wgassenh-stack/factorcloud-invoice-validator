@@ -37,8 +37,8 @@ export async function POST(req: Request) {
     }
     await clearLoginFailures(buckets);
 
-    const clients = user.role === 'CLIENT_USER' ? await userClients(user.id) : [];
-    if (user.role === 'CLIENT_USER' && clients.length !== 1) {
+    const clients = (user.role === 'CLIENT_USER' || user.role === 'DRIVER') ? await userClients(user.id) : [];
+    if ((user.role === 'CLIENT_USER' || user.role === 'DRIVER') && clients.length !== 1) {
       return NextResponse.json({ error: 'This account is not assigned to exactly one active client portal.' }, { status: 403 });
     }
 
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
     const res = NextResponse.json({
       ok: true,
       user: { email: user.email, displayName: user.display_name, role: user.role },
-      redirectTo: user.role === 'CLIENT_USER' ? '/' : '/ops',
+      redirectTo: user.role === 'DRIVER' ? '/driver' : user.role === 'CLIENT_USER' ? '/' : '/ops',
     });
     res.cookies.set(PORTAL_SESSION_COOKIE, token, {
       httpOnly: true,

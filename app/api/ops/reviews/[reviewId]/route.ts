@@ -54,6 +54,7 @@ export async function POST(req: Request, context: { params: Promise<{ reviewId: 
     if (decision === 'REQUEST_FIX') {
       // The review stays open: the reviewer decides once the client has answered.
       await client.query(`update client_tasks set status='CANCELED', resolved_at=now() where submission_id=$1 and status='OPEN'`, [found.submission_id]);
+
       await client.query(`
         insert into client_tasks (id, factor_id, client_id, submission_id, review_id, message, requested_by_user_id)
         values ($1,$2,$3,$4,$5,$6,$7)
@@ -63,6 +64,13 @@ export async function POST(req: Request, context: { params: Promise<{ reviewId: 
     } else {
       const status = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
       await client.query(`update review_items set status=$1, decided_by_user_id=$2, decision_note=$3, decided_at=now() where id=$4`, [status, session.userId, note, reviewId]);
+      if (decision === 'APPROVE') {
+        // Clearing paperwork puts an existing review run back before an admin. It never moves money.
+        await client.query(`update engine_runs set state='SUGGESTED',outcome='HOLD',
+          rules=(select jsonb_agg(case when r->>'id'='paperwork' then r||'{"status":"PASS","detail":"Paperwork cleared by a reviewer; funding rules will be rechecked on approval."}'::jsonb else r end) from jsonb_array_elements(rules) r),
+          detail='Paperwork cleared. An admin must recheck and approve funding.',updated_at=now()
+          where submission_id=$1 and factor_id=$2 and state='REVIEW'`,[found.submission_id,session.factorId]);
+      }
       await client.query('update submissions set workflow_status=$1, updated_at=now() where id=$2', [status, found.submission_id]);
       await client.query(`update client_tasks set status='CANCELED', resolved_at=now() where submission_id=$1 and status='OPEN'`, [found.submission_id]);
     }

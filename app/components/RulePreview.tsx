@@ -1,0 +1,10 @@
+'use client';
+import {useState} from 'react';
+import type {RuleSettings} from '@/lib/rules/settings';
+type Result={id:string;invoice:string;before:string;after:string;reasons:string[]};
+export function RulePreview({settings}:{settings:RuleSettings}){
+  const [results,setResults]=useState<Result[]|null>(null),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[versions,setVersions]=useState<{id:number;created_at:string;settings:RuleSettings}[]>([]);
+  async function preview(){setBusy(true);try{const r=await fetch('/api/ops/rules/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({settings})});const b=await r.json();if(!r.ok)throw Error(b.error);setResults(b.results);setMessage(`${b.note} ${b.skipped} older decisions have no saved facts.`);}catch(e){setMessage(String(e));}finally{setBusy(false);}}
+  async function history(){try{const r=await fetch('/api/ops/rules/preview');const b=await r.json();if(!r.ok)throw Error(b.error);setVersions(b.versions);}catch(e){setMessage(String(e));}}
+  return <section className="dashCard rulesCard"><h2>Test changes before saving</h2><p>Compare your current edits against up to 100 recent decisions. This does not change invoices or send money.</p><button disabled={busy} onClick={()=>void preview()}>{busy?'Comparing…':'Preview these rules'}</button> <button onClick={()=>void history()}>Show saved versions</button>{message&&<p role="status">{message}</p>}{results&&<><p>{results.filter(r=>r.before!==r.after).length} of {results.length} decisions would change.</p><table><thead><tr><th>Invoice</th><th>Recorded</th><th>Proposed</th><th>Reason</th></tr></thead><tbody>{results.map(r=><tr key={r.id}><td>{r.invoice}</td><td>{r.before}</td><td>{r.after}</td><td>{r.reasons.join('; ')||'Every rule passes'}</td></tr>)}</tbody></table></>}{versions.map(v=><details key={v.id}><summary>Version {v.id} · {new Date(v.created_at).toLocaleString()} · {v.settings.mode}</summary><pre>{JSON.stringify(v.settings,null,2)}</pre></details>)}</section>;
+}

@@ -46,7 +46,7 @@ export default function FundingPage() {
     try {
       const res = await fetch(`/api/ops/funding/${encodeURIComponent(run.id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
       const body = await res.json();
-      setToast({ tone: res.ok ? 'pass' : 'fail', text: res.ok ? `${action === 'fund' ? 'Funded' : 'Approved for funding'}: invoice ${run.invoiceNumber ?? ''}` : body.detail || body.error || 'That did not work.' });
+      setToast({ tone: res.ok ? 'pass' : 'fail', text: res.ok ? `Invoice ${run.invoiceNumber ?? ''}: ${action === 'fund' ? 'Funded.' : body.detail || 'Approved for funding.'}` : body.detail || body.error || 'That did not work.' });
       setTimeout(() => setToast(null), 4000);
       await load();
     } finally {
@@ -92,7 +92,7 @@ export default function FundingPage() {
         </section>
 
         <FundingSection title="Needs a click" hint="Approved for funding in FactorCloud. A rule held back automatic funding, or the engine only approves." runs={waiting} empty="Nothing waiting to be funded."
-          action={(run) => data.canAct && run.state === 'APPROVED' ? <button className="fundButton" disabled={Boolean(busy)} onClick={() => void act(run, 'fund')}>{busy === run.id ? 'Funding…' : `Fund ${money(run.amount)}`}</button> : run.state === 'FUNDING' ? <span className="muted">Funding…</span> : null} />
+          action={(run) => data.canAct && run.state === 'APPROVED' ? <button className="fundButton" disabled={Boolean(busy)} onClick={() => void act(run, 'fund')}>{busy === run.id ? 'Funding…' : `Fund ${money(run.amount)}`}</button> : run.state === 'FUNDING' ? <a href="/ops/recovery">Funding pending · check recovery</a> : null} />
         {suggested.length > 0 && <FundingSection title="Suggestions" hint="Suggest-only mode: what the engine would do. Nothing has been done in FactorCloud." runs={suggested} empty=""
           action={(run) => data.canAct ? <button className="small" disabled={Boolean(busy)} onClick={() => void act(run, 'approve')}>{busy === run.id ? 'Approving…' : 'Approve for funding'}</button> : null} />}
         {failed.length > 0 && <FundingSection title="Couldn't be approved" hint="FactorCloud refused, or something was missing. The invoice is still pending in FactorCloud." runs={failed} empty=""

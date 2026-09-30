@@ -1,13 +1,16 @@
 import 'server-only';
 
 import { randomUUID } from 'crypto';
-import { query } from './db';
+import { claimFunding, fundingReservationResult } from './funding-safety';
+import { openRecovery } from './recovery';
+import { query, pool } from './db';
 import type { DebtorCredit } from './credit';
-import { getInvoice, listInvoices, updateInvoiceNotes } from './factorcloud';
+import { loadDebtorCredit } from './debtor-credit';
+import { getCompany, getInvoice, listInvoices, updateInvoiceNotes } from './factorcloud';
 import { approveForFunding, FUNDABLE_PAYMENT_TYPES, fundInvoiceGroups, getCashReserveBalance, getClientCreditLimit, listFundingInstructions, pickFundingInstruction, verifyInvoices } from './funding-api';
 import { portalUpdateNote } from './portal-notes';
 import { collectRiskInvoiceRecords, type RiskInvoiceRecord } from './risk';
-import { decide, type Decision, type RuleResult } from './rules/engine';
+import { decide, type Decision, type RuleResult, type EngineFacts } from './rules/engine';
 import { DEFAULT_SETTINGS, normalizeSettings, type RuleSettings } from './rules/settings';
 import { ensureEngineSchema } from './schema';
 
@@ -57,10 +60,15 @@ export async function engineSettingsFor(factorId: string | null | undefined): Pr
 export async function saveSettings(factorId: string, userId: string | null, settings: unknown): Promise<RuleSettings> {
   await ensureEngineSchema();
   const clean = normalizeSettings(settings);
-  await query(`
-    insert into rule_settings (factor_id, settings, updated_by_user_id, updated_at) values ($1, $2::jsonb, $3, now())
-    on conflict (factor_id) do update set settings = excluded.settings, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()
-  `, [factorId, JSON.stringify(clean), userId && userId !== 'pilot-admin' ? userId : null]);
+  const db=await pool().connect();
+  try {
+    await db.query('begin');
+    await db.query('select pg_advisory_xact_lock(hashtextextended($1,0))', ['rules:'+factorId]);
+    await db.query(`insert into rule_settings(factor_id,settings,updated_by_user_id,updated_at) values($1,$2::jsonb,$3,now())
+      on conflict(factor_id) do update set settings=excluded.settings,updated_by_user_id=excluded.updated_by_user_id,updated_at=now()`,[factorId,JSON.stringify(clean),userId]);
+    await db.query('insert into rule_versions(factor_id,settings,actor_id) values($1,$2::jsonb,$3)',[factorId,JSON.stringify(clean),userId]);
+    await db.query('commit');
+  } catch(err) {await db.query('rollback');throw err;} finally {db.release();}
   return clean;
 }
 
@@ -126,16 +134,19 @@ async function fund(runId: string, groupId: string, paymentType: string | null, 
     await update(runId, { detail });
     return { ok: false, detail };
   }
-  const claimed = await query<{ id: string }>(`update engine_runs set state = 'FUNDING', updated_at = now() where id = $1 and state = 'APPROVED' returning id`, [runId]);
-  if (!claimed.length) return { ok: false, detail: 'Already funded, or being funded.' };
+  const [owner] = await query<{factor_id:string;submission_id:string|null}>('select factor_id,submission_id from engine_runs where id=$1',[runId]);
+  if (!owner || !await claimFunding(runId, auto, await loadSettings(owner.factor_id))) return { ok: false, detail: 'Already funded, being reconciled, or held by the current funding cap.' };
   try {
     // The same batch always gets the same transaction ID, so FactorCloud can refuse a repeat.
     await fundInvoiceGroups([groupId], paymentType, `portal-fund-${groupId}`);
+    await fundingReservationResult(runId, 'CONFIRMED');
     await update(runId, { state: 'FUNDED', auto_funded: auto, funded: true, funded_by_user_id: auto ? null : userId, detail: auto ? 'Funded automatically: every rule passed.' : 'Funded.' });
     return { ok: true, detail: 'Funded.' };
   } catch (err) {
     const detail = `Funding failed: ${err instanceof Error ? err.message : String(err)}. Check the batch in FactorCloud before trying again.`;
-    await update(runId, { state: 'APPROVED', detail });
+    await update(runId, { state: 'FUNDING', detail });
+    await fundingReservationResult(runId, 'UNKNOWN');
+    await openRecovery({factorId:owner.factor_id,submissionId:owner.submission_id,runId,kind:'FUNDING_UNKNOWN',detail});
     return { ok: false, detail };
   }
 }
@@ -153,30 +164,36 @@ export interface EngineInput {
   debtorCredit: DebtorCredit | null;
 }
 
+/** Reads fresh numbers from FactorCloud and runs the rules on them. */
+async function decideNow(input: Omit<EngineInput, 'portalClientId' | 'submissionId' | 'invoiceNumber'>, settings: RuleSettings): Promise<Decision & { facts: EngineFacts }> {
+  const [clientRecords, debtorRecords, clientCreditLimit, cashReserve, today] = await Promise.all([
+    settle(() => records({ client: input.clientId }), 'client invoices'),
+    settle(() => records({ debtor: input.debtorId }), 'debtor invoices'),
+    getClientCreditLimit(input.clientId).catch((err) => { console.error('[funding-engine] client', err); return undefined; }),
+    settle(() => getCashReserveBalance(input.clientId), 'cash reserve'),
+    settle(() => fundedToday(input.factorId, input.clientId), 'funded today'),
+  ]);
+  const facts: EngineFacts = {
+    invoice: { id: input.invoiceId, amount: input.amount, clientId: input.clientId, debtorId: input.debtorId },
+    paperwork: input.paperwork,
+    debtorCredit: input.debtorCredit,
+    clientCreditLimit,
+    clientRecords,
+    debtorRecords,
+    cashReserve,
+    fundedToday: today,
+    now: new Date(),
+    timeZone: process.env.FACTOR_TIMEZONE || 'America/Chicago',
+  };
+  return { ...decide(facts, settings), facts };
+}
+
 /** Runs after an invoice is created. Returns the run, or null when the engine is off. Never throws. */
 export async function runFundingEngine(input: EngineInput): Promise<EngineRun | null> {
   try {
     const settings = await loadSettings(input.factorId);
     if (settings.mode === 'off') return null;
-    const [clientRecords, debtorRecords, clientCreditLimit, cashReserve, today] = await Promise.all([
-      settle(() => records({ client: input.clientId }), 'client invoices'),
-      settle(() => records({ debtor: input.debtorId }), 'debtor invoices'),
-      getClientCreditLimit(input.clientId).catch((err) => { console.error('[funding-engine] client', err); return undefined; }),
-      settle(() => getCashReserveBalance(input.clientId), 'cash reserve'),
-      settle(() => fundedToday(input.factorId, input.clientId), 'funded today'),
-    ]);
-    const decision = decide({
-      invoice: { id: input.invoiceId, amount: input.amount, clientId: input.clientId, debtorId: input.debtorId },
-      paperwork: input.paperwork,
-      debtorCredit: input.debtorCredit,
-      clientCreditLimit,
-      clientRecords,
-      debtorRecords,
-      cashReserve,
-      fundedToday: today,
-      now: new Date(),
-      timeZone: process.env.FACTOR_TIMEZONE || 'America/Chicago',
-    }, settings);
+    const decision = await decideNow(input, settings);
 
     const runId = `run_${randomUUID()}`;
     const initial: RunState = decision.outcome === 'REVIEW' ? 'REVIEW' : settings.mode === 'suggest' ? 'SUGGESTED' : 'FAILED';
@@ -184,6 +201,8 @@ export async function runFundingEngine(input: EngineInput): Promise<EngineRun | 
       insert into engine_runs (id, factor_id, client_id, submission_id, factorcloud_invoice_id, factorcloud_client_id, invoice_number, amount, mode, outcome, state, rules, reasons)
       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)
     `, [runId, input.factorId, input.portalClientId, input.submissionId, input.invoiceId, input.clientId, input.invoiceNumber, input.amount, settings.mode, decision.outcome, initial, JSON.stringify(decision.rules), JSON.stringify(decision.reasons)]);
+
+    await query('update engine_runs set settings_snapshot=$2::jsonb,facts_snapshot=$3::jsonb where id=$1',[runId,JSON.stringify(settings),JSON.stringify(decision.facts)]);
 
     if (decision.outcome !== 'REVIEW' && settings.mode !== 'suggest') {
       const approved = await approve({ id: runId, invoiceId: input.invoiceId, clientId: input.clientId }, settings);
@@ -235,12 +254,7 @@ export async function actOnRun(factorId: string, runId: string, action: 'approve
   if (!run) return { ok: false, detail: 'Not found.' };
   if (action === 'approve') {
     if (run.state !== 'SUGGESTED' && run.state !== 'FAILED') return { ok: false, detail: 'Already approved.' };
-    const settings = await loadSettings(factorId);
-    const approved = await approve({ id: run.id, invoiceId: run.factorCloudInvoiceId, clientId: run.factorCloudClientId }, settings);
-    if ('error' in approved) { await update(run.id, { state: 'FAILED', detail: approved.error }); return { ok: false, detail: approved.error }; }
-    await update(run.id, { state: 'APPROVED', invoice_group_id: approved.groupId, payment_type: approved.paymentType, detail: `Approved for funding by ${reviewer}.` });
-    await addNote(run.factorCloudInvoiceId, `approved for funding by ${reviewer} on ${new Date().toISOString().slice(0, 10)}`);
-    return { ok: true, detail: 'Approved for funding.' };
+    return rerunAndApprove(factorId, run, reviewer);
   }
   if (run.state !== 'APPROVED' || !run.invoiceGroupId) return { ok: false, detail: run.state === 'FUNDED' ? 'Already funded.' : 'Approve it for funding first.' };
   const funded = await fund(run.id, run.invoiceGroupId, run.paymentType, false, userId);
@@ -248,3 +262,56 @@ export async function actOnRun(factorId: string, runId: string, action: 'approve
   return funded;
 }
 
+
+/**
+ * "Approve" on a suggestion or "Try approving again" on a failed run: runs every rule again with
+ * fresh numbers first, since limits, balances and the cash reserve may have changed. If everything
+ * now passes and the factor auto-funds, it is funded within the caps; otherwise it is approved and
+ * held with up-to-date reasons. A new review reason (say the debtor went No Buy) stops it.
+ */
+async function rerunAndApprove(factorId: string, run: EngineRun, reviewer: string): Promise<{ ok: boolean; detail: string }> {
+  const settings = await loadSettings(factorId);
+  const fresh = await settle(async () => {
+    const raw = await getInvoice(run.factorCloudInvoiceId);
+    const record = collectRiskInvoiceRecords(raw).find((r) => r.id === run.factorCloudInvoiceId);
+    if (!record?.companyDebtorId) return null;
+    const amount = record.invoiceAmount && record.invoiceAmount > 0 ? record.invoiceAmount : run.amount;
+    const debtor = await getCompany(record.companyDebtorId);
+    const debtorCredit = await loadDebtorCredit(run.factorCloudClientId, debtor, amount, run.factorCloudInvoiceId);
+    const paperwork = run.rules.some((r) => r.id === 'paperwork' && r.status === 'REVIEW') ? 'REVIEW' as const : 'PASS' as const;
+    return decideNow({ factorId, invoiceId: run.factorCloudInvoiceId, clientId: run.factorCloudClientId, debtorId: record.companyDebtorId, amount, paperwork, debtorCredit }, settings);
+  }, 're-run rules');
+  if (!fresh) {
+    const detail = 'The invoice could not be read from FactorCloud to re-check the rules. Try again in a moment.';
+    await update(run.id, { detail });
+    return { ok: false, detail };
+  }
+  await query('update engine_runs set outcome = $1, rules = $2::jsonb, reasons = $3::jsonb, updated_at = now() where id = $4',
+    [fresh.outcome, JSON.stringify(fresh.rules), JSON.stringify(fresh.reasons), run.id]);
+  await query('update engine_runs set settings_snapshot=$2::jsonb,facts_snapshot=$3::jsonb,amount=$4 where id=$1',[run.id,JSON.stringify(settings),JSON.stringify(fresh.facts),fresh.facts.invoice.amount]);
+  if (fresh.outcome === 'REVIEW') {
+    const detail = `Not approved: ${fresh.reasons.join('; ')}`;
+    await update(run.id, { state: 'REVIEW', detail });
+    return { ok: false, detail };
+  }
+
+  const approved = await approve({ id: run.id, invoiceId: run.factorCloudInvoiceId, clientId: run.factorCloudClientId }, settings);
+  if ('error' in approved) { await update(run.id, { state: 'FAILED', detail: approved.error }); return { ok: false, detail: approved.error }; }
+  const autoFund = fresh.outcome === 'FUND' && settings.mode === 'fund';
+  await update(run.id, {
+    state: 'APPROVED', invoice_group_id: approved.groupId, payment_type: approved.paymentType,
+    detail: fresh.outcome === 'HOLD' ? `Approved for funding by ${reviewer}; waiting for a person to fund it.` : `Approved for funding by ${reviewer}.`,
+  });
+  const date = new Date().toISOString().slice(0, 10);
+  if (autoFund) {
+    const funded = await fund(run.id, approved.groupId, approved.paymentType, true, null);
+    await addNote(run.factorCloudInvoiceId, funded.ok
+      ? `approved for funding by ${reviewer} on ${date} and funded automatically: every funding rule passed on a fresh check`
+      : `approved for funding by ${reviewer} on ${date}; funding did not go through: ${funded.detail}`);
+    return funded.ok ? { ok: true, detail: 'Every rule passes now: approved and funded.' } : { ok: false, detail: `Approved, but funding did not go through: ${funded.detail}` };
+  }
+  await addNote(run.factorCloudInvoiceId, fresh.outcome === 'HOLD'
+    ? `approved for funding by ${reviewer} on ${date}; funding on hold: ${fresh.reasons.join('; ')}`
+    : `approved for funding by ${reviewer} on ${date}`);
+  return { ok: true, detail: fresh.outcome === 'HOLD' ? `Approved for funding. Held for a person to fund: ${fresh.reasons.join('; ')}` : 'Approved for funding.' };
+}

@@ -7,6 +7,8 @@ const LINKS = [
   { key: 'overview', href: '/ops', label: 'Overview' },
   { key: 'debtors', href: '/ops/debtors', label: 'Debtors' },
   { key: 'reviews', href: '/ops/reviews', label: 'Review queue' },
+  { key: 'recovery', href: '/ops/recovery', label: 'Recovery queue' },
+  { key: 'team', href: '/ops/team', label: 'Drivers & invitations' },
   { key: 'funding', href: '/ops/funding', label: 'Funding' },
   { key: 'rules', href: '/ops/rules', label: 'Funding rules' },
   { key: 'connection', href: '/connection', label: 'Connection check' },

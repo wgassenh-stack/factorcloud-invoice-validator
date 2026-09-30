@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { currentPortalSession } from './portal-auth';
 import { query } from './db';
 import { ensureWorkflowSchema } from './schema';
 
@@ -66,8 +67,9 @@ export async function listClientTasks(factorId: string, factorCloudClientId: str
 /** One task, only if it belongs to this client. */
 export async function clientTask(taskId: string, factorId: string, factorCloudClientId: string): Promise<(ClientTask & { clientRowId: string }) | null> {
   await ensureWorkflowSchema();
+  const session=await currentPortalSession();
   const rows = await query<TaskRow & { client_id: string }>(`${TASK_SELECT.replace('select t.id,', 'select t.client_id, t.id,')}
-    where t.id = $1 and t.factor_id = $2 and c.factorcloud_client_id = $3`, [taskId, factorId, factorCloudClientId]);
+    where t.id = $1 and t.factor_id = $2 and c.factorcloud_client_id = $3 and ($4::text is null or s.submitted_by_user_id=$4)`, [taskId, factorId, factorCloudClientId,session?.role==='DRIVER'?session.userId:null]);
   return rows[0] ? { ...toTask(rows[0]), clientRowId: rows[0].client_id } : null;
 }
 
@@ -84,3 +86,4 @@ export async function latestTasksBySubmission(submissionIds: string[]): Promise<
     order by t.submission_id, t.created_at desc`, [submissionIds]);
   return Object.fromEntries(rows.map((row) => [row.submission_id, toTask(row)]));
 }
+

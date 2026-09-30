@@ -6,7 +6,7 @@
 //   REVIEW  the paperwork needs a person (sent anyway), or the debtor is No Buy: leave it pending.
 // Pure: the facts are gathered elsewhere, so every rule can be tested with plain data.
 
-import { isClosedOut, openBalance } from '../analytics';
+import { isClosedOut, openArBalance } from '../analytics';
 import { creditAfter, type DebtorCredit } from '../credit';
 import type { RiskInvoiceRecord } from '../risk';
 import type { RuleSettings } from './settings';
@@ -85,9 +85,9 @@ export function decide(facts: EngineFacts, settings: RuleSettings): Decision {
   else if (!debtorRecords) add({ id: 'slow-debtor', label: 'Debtor pays on time', status: 'UNKNOWN', detail: "The debtor's invoices could not be read." });
   else {
     const cutoff = facts.now.getTime() - cfg.slowDebtor.pastDueDays * DAY;
-    const open = debtorRecords.filter((r) => openBalance(r) > 0);
-    const total = open.reduce((s, r) => s + openBalance(r), 0);
-    const late = open.filter((r) => dateOf(r) < cutoff).reduce((s, r) => s + openBalance(r), 0);
+    const open = debtorRecords.filter((r) => openArBalance(r) > 0);
+    const total = open.reduce((s, r) => s + openArBalance(r), 0);
+    const late = open.filter((r) => dateOf(r) < cutoff).reduce((s, r) => s + openArBalance(r), 0);
     const pct = total > 0 ? (late / total) * 100 : 0;
     add(pct > cfg.slowDebtor.maxPastDuePct
       ? { id: 'slow-debtor', label: 'Debtor pays on time', status: 'HOLD', detail: `${Math.round(pct)}% of what this debtor owes is over ${cfg.slowDebtor.pastDueDays} days old (limit ${cfg.slowDebtor.maxPastDuePct}%).` }
@@ -104,8 +104,8 @@ export function decide(facts: EngineFacts, settings: RuleSettings): Decision {
   if (!cfg.concentration.enabled) off('concentration', 'Debtor concentration');
   else if (!clientRecords || !withDebtor) add({ id: 'concentration', label: 'Debtor concentration', status: 'UNKNOWN', detail: "The client's invoices could not be read." });
   else {
-    const all = clientRecords.reduce((s, r) => s + openBalance(r), 0) + amount;
-    const mine = withDebtor.reduce((s, r) => s + openBalance(r), 0) + amount;
+    const all = clientRecords.reduce((s, r) => s + openArBalance(r), 0) + amount;
+    const mine = withDebtor.reduce((s, r) => s + openArBalance(r), 0) + amount;
     const pct = all > 0 ? (mine / all) * 100 : 0;
     add(pct > cfg.concentration.maxPct
       ? { id: 'concentration', label: 'Debtor concentration', status: 'HOLD', detail: `This debtor would be ${Math.round(pct)}% of the client's open A/R (limit ${cfg.concentration.maxPct}%).` }
@@ -117,7 +117,7 @@ export function decide(facts: EngineFacts, settings: RuleSettings): Decision {
   else if (facts.clientCreditLimit === undefined || !clientRecords) add({ id: 'client-credit', label: 'Client credit limit', status: 'UNKNOWN', detail: "The client's credit limit or invoices could not be read." });
   else if (!facts.clientCreditLimit) add({ id: 'client-credit', label: 'Client credit limit', status: 'SKIP', detail: 'No client-level limit set in FactorCloud.' });
   else {
-    const after = clientRecords.reduce((s, r) => s + openBalance(r), 0) + amount;
+    const after = clientRecords.reduce((s, r) => s + openArBalance(r), 0) + amount;
     add(after > facts.clientCreditLimit
       ? { id: 'client-credit', label: 'Client credit limit', status: 'HOLD', detail: `Client would owe ${money(after)} against a ${money(facts.clientCreditLimit)} limit.` }
       : { id: 'client-credit', label: 'Client credit limit', status: 'PASS', detail: `${money(after)} of ${money(facts.clientCreditLimit)}.` });
