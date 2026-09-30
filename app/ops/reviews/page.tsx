@@ -2,11 +2,11 @@
 
 import { clientExplanation, flaggedChecks } from '@/lib/override';
 import { useEffect, useMemo, useState } from 'react';
-import { OpsSignOut } from '../../components/OpsSignOut';
+import { OpsSidebar } from '@/app/components/OpsSidebar';
 import { CountUp, Skeleton, StatusFlag, VizEmpty } from '@/app/components/CommandCharts';
 import { DemoBadge } from '@/app/components/DemoBadge';
 import type { CheckResult } from '@/lib/types';
-import { ViewSwitch } from '@/app/components/ViewSwitch';
+import styles from './ReviewQueue.module.css';
 
 type ReviewRecord = {
   id: string;
@@ -86,13 +86,11 @@ export default function ReviewQueuePage() {
       const fc = synced ? (synced.ok ? ' · FactorCloud updated' : ' · FactorCloud not updated') : '';
       if (synced && !synced.ok) setError(synced.detail);
       if (decision === 'REQUEST_FIX') {
-        // The item stays in the queue, now marked as waiting on the client.
         setToast({ tone: 'pass', text: `Fix requested on ${label}${fc}` });
         setTimeout(() => setToast(null), 3200);
         await load();
         return;
       }
-      // Let the card play its exit before it leaves the list.
       setLeaving(record.reviewId);
       setToast({ tone: decision === 'APPROVE' ? 'pass' : 'fail', text: `${decision === 'APPROVE' ? 'Approved' : 'Rejected'} invoice ${label}${fc}` });
       setTimeout(() => {
@@ -117,60 +115,55 @@ export default function ReviewQueuePage() {
     });
   }, [data, query]);
 
-  return <main className="opsShell">
-    <aside className="opsSidebar">
-      <a className="opsBrand" href="/ops"><img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" /></a>
-      <div className="opsRole">Factor Operations</div>
-      <ViewSwitch current="staff" />
-      <nav className="opsNav">
-        <a href="/ops">Overview</a>
-        <a href="/ops">Clients</a>
-        <a href="/ops/debtors">Debtors</a>
-        <a className="active" href="/ops/reviews">Review queue</a>
-        <a href="/ops/funding">Funding</a>
-        <a href="/ops/rules">Funding rules</a>
-        <a href="/connection">Connection check</a>
-      </nav>
-      <div className="opsSidebarFooter"><strong>Internal view</strong><span>Factor-wide access</span><OpsSignOut /></div>
-    </aside>
+  const waitingOnClient = data?.records.filter((record) => record.fix?.status === 'OPEN').length ?? 0;
+  const clientResponded = data?.records.filter((record) => record.fix?.status === 'DONE').length ?? 0;
+
+  return <main className={`opsShell ${styles.page}`}>
+    <OpsSidebar active="reviews" />
 
     <section className="opsContent">
-      <header className="opsHeader">
-        <div><span className="eyebrow">Factor operations</span><h1>Review Queue</h1><p>Client submissions that require a factor decision before the portal treats them as cleared.</p></div>
-        <button className="small opsRefresh" onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
+      <header className={styles.header}>
+        <div>
+          <div className={styles.meta}><span className="eyebrow">Workspace</span><span className={styles.queuePill}>Exception queue</span></div>
+          <h1>Review Queue</h1>
+          <p>Resolve paperwork and validation exceptions before an invoice can continue into approval and funding.</p>
+        </div>
+        <button className={styles.refresh} onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
       </header>
 
-      {error && <div className="attentionSummary fail"><strong>Could not load review queue</strong><span>{error}</span></div>}
+      {error && <div className={styles.alert}><strong>Could not load review queue.</strong> {error}</div>}
 
       {loading && !data && <Skeleton height={120} lines={4} />}
 
       {data && <>
-        <section className="opsMetrics opsReviewMetrics">
-          <Metric label="Needs review" value={<CountUp value={data.records.length} />} />
-          <Metric label="Invoice amount" value={<CountUp value={data.records.reduce((sum, record) => sum + (record.invoiceAmount ?? 0), 0)} format={money} />} />
-          <Metric label="Oldest waiting" value={oldestWait(data.records, now)} detail="Target: decide within 4 hours" />
-          <Metric label="Clients affected" value={new Set(data.records.map((record) => record.companyClientId).filter(Boolean)).size} detail="Decisions are audited" />
+        <section className={styles.metricGrid}>
+          <Metric label="Needs review" value={<CountUp value={data.records.length} />} detail="Open exceptions" tone={data.records.length ? 'review' : 'good'} />
+          <Metric label="Invoice amount" value={<CountUp value={data.records.reduce((sum, record) => sum + (record.invoiceAmount ?? 0), 0)} format={money} />} detail="Value waiting on review" />
+          <Metric label="Oldest waiting" value={oldestWait(data.records, now)} detail="Target: decide within 4 hours" tone={oldestWaitHours(data.records, now) >= 4 ? 'review' : 'good'} />
+          <Metric label="Waiting on client" value={waitingOnClient} detail={clientResponded ? `${clientResponded} client response${clientResponded === 1 ? '' : 's'} ready` : 'Fix requests still open'} tone={waitingOnClient ? 'review' : 'good'} />
         </section>
 
-        <div className="opsPanelHeader reviewQueueHeader">
-          <div><h2>Items requiring factor review <DemoBadge /></h2><p>{data.source.note}</p></div>
-          <label className="opsSearch"><span>Search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Invoice, client, or debtor" /></label>
-        </div>
+        <section className={styles.queuePanel}>
+          <div className={styles.panelHeader}>
+            <div><span>Human decisions</span><h2>Items requiring factor review <DemoBadge /></h2><p>{data.source.note}</p></div>
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search invoice, client, or debtor" />
+          </div>
 
-        <section className="reviewCards">
-          {filtered.map((record, index) => <ReviewCard
-            key={record.reviewId || record.id}
-            record={record}
-            index={index}
-            now={now}
-            clientName={record.companyClientId ? data.clientNames[record.companyClientId] || record.companyClientId : '-'}
-            debtorName={record.companyDebtorId ? data.debtorNames[record.companyDebtorId] || record.companyDebtorId : '-'}
-            busy={deciding === record.reviewId}
-            disabled={Boolean(deciding)}
-            leaving={leaving === record.reviewId}
-            onDecide={(decision, note) => void decide(record, decision, note)}
-          />)}
-          {!loading && !filtered.length && <div className="reviewCardEmpty"><VizEmpty title={query ? 'No matching review items' : 'Queue is clear'} detail={query ? 'Try a different invoice, client or debtor.' : 'New client submissions that need a decision will appear here.'} /></div>}
+          <div className={styles.reviewList}>
+            {filtered.map((record, index) => <ReviewCard
+              key={record.reviewId || record.id}
+              record={record}
+              index={index}
+              now={now}
+              clientName={record.companyClientId ? data.clientNames[record.companyClientId] || record.companyClientId : '-'}
+              debtorName={record.companyDebtorId ? data.debtorNames[record.companyDebtorId] || record.companyDebtorId : '-'}
+              busy={deciding === record.reviewId}
+              disabled={Boolean(deciding)}
+              leaving={leaving === record.reviewId}
+              onDecide={(decision, note) => void decide(record, decision, note)}
+            />)}
+            {!loading && !filtered.length && <div className={styles.empty}><VizEmpty title={query ? 'No matching review items' : 'Queue is clear'} detail={query ? 'Try a different invoice, client or debtor.' : 'New submissions needing a human decision will appear here.'} /></div>}
+          </div>
         </section>
       </>}
       {toast && <div className={`reviewToast ${toast.tone}`} role="status"><b>{toast.tone === 'pass' ? '✓' : '✕'}</b>{toast.text}</div>}
@@ -231,7 +224,7 @@ function ReviewCard({ record, index, now, clientName, debtorName, busy, disabled
             </div>
           </div>
         : <div className="reviewActions">
-            <button className="reviewApprove" disabled={disabled} onClick={() => onDecide('APPROVE', null)}>{busy ? 'Saving...' : '✓ Approve'}</button>
+            <button className="reviewApprove" disabled={disabled} onClick={() => onDecide('APPROVE', null)}>{busy ? 'Saving...' : 'Clear review'}</button>
             {record.fix?.status !== 'OPEN' && <button className="tinyButton fixButton" disabled={disabled} onClick={() => setMode('fix')}>Request fix…</button>}
             <button className="tinyButton dangerButton" disabled={disabled} onClick={() => setMode('reject')}>Reject…</button>
           </div>)
@@ -260,8 +253,13 @@ function oldestWait(records: ReviewRecord[], now: number): string {
   return oldest ? waitCopy((now - Date.parse(oldest)) / 3_600_000) : '-';
 }
 
-function Metric({ label, value, detail }: { label: string; value: React.ReactNode; detail?: string }) {
-  return <div className="opsMetric"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div>;
+function oldestWaitHours(records: ReviewRecord[], now: number): number {
+  const oldest = records.map((r) => r.createdAt).filter((d): d is string => Boolean(d)).sort()[0];
+  return oldest ? (now - Date.parse(oldest)) / 3_600_000 : 0;
+}
+
+function Metric({ label, value, detail, tone = '' }: { label: string; value: React.ReactNode; detail?: string; tone?: string }) {
+  return <div className={styles.metric} data-tone={tone}><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div>;
 }
 
 function money(value: number): string {
