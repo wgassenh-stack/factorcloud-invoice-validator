@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { OpsSignOut } from '../../../components/OpsSignOut';
-import { ViewSwitch } from '@/app/components/ViewSwitch';
+import {OpsSidebar} from '@/app/components/OpsSidebar';
+
 
 type InvoiceRecord = {
   id: string;
@@ -58,24 +58,10 @@ export default function FactorClientDetailPage() {
   const topDebtor = data?.summary.concentrations[0];
 
   return <main className="opsShell">
-    <aside className="opsSidebar">
-      <a className="opsBrand" href="/ops"><img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" /></a>
-      <div className="opsRole">Factor Operations</div>
-      <ViewSwitch current="staff" />
-      <nav className="opsNav">
-        <a href="/ops">Overview</a>
-        <a className="active" href="/ops">Clients</a>
-        <a href="/ops/debtors">Debtors</a>
-        <a href="/ops/reviews">Review queue</a>
-        <a href="/ops/funding">Funding</a>
-        <a href="/ops/rules">Funding rules</a>
-        <a href="/connection">Connection check</a>
-      </nav>
-      <div className="opsSidebarFooter"><strong>Internal view</strong><span>Factor-wide access</span><OpsSignOut /></div>
-    </aside>
+    <OpsSidebar active="reports"/>
 
     <section className="opsContent">
-      <a className="opsBack" href="/ops">← All clients</a>
+      <a className="opsBack" href="/ops/reports?tab=clients">← All clients</a>
       <header className="opsHeader">
         <div>
           <span className="eyebrow">Client account</span>

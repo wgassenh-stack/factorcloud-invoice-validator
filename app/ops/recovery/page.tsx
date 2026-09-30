@@ -49,11 +49,11 @@ export default function RecoveryPage() {
 
   return <main className={`opsShell ${styles.page}`}>
     <OpsSidebar active="recovery" />
-    <section className="opsContent">
+    <section className="opsContent"><div className="oc-topbar"><span>Factor workspace / <strong>Recovery</strong></span></div>
       <header className={styles.header}>
         <div>
           <span className="eyebrow">Automation center</span>
-          <h1>Recovery & reconciliation</h1>
+          <h1>Recovery</h1>
           <p>This queue is for the small number of cases where the portal cannot safely tell whether a remote FactorCloud action finished. Nothing here should be blindly retried.</p>
         </div>
         <button className="small opsRefresh" disabled={loading} onClick={() => void load()}>{loading ? 'Refreshing…' : 'Refresh'}</button>
@@ -67,14 +67,14 @@ export default function RecoveryPage() {
       {error && <div className="attentionSummary fail"><strong>Could not load recovery</strong><span>{error}</span></div>}
       {note && <div className="attentionSummary review"><strong>Recovery note</strong><span>{note}</span></div>}
 
-      {!loading && <section className={styles.summary}>
+      {!loading && !note && !error && <section className={styles.summary}>
         <Metric label="Open recovery" value={items.length} detail="Items that still need reconciliation" />
         <Metric label="Approval uncertain" value={approvalUnknown} detail="Confirm whether approval completed" />
         <Metric label="Funding uncertain" value={fundingUnknown} detail="Confirm whether the batch funded" />
         <Metric label="Invoice / document" value={otherRecovery} detail={oldest ? `Oldest opened ${when(oldest.created_at)}` : 'No invoice or document repairs'} />
       </section>}
 
-      {loading ? <div className={styles.empty}><strong>Loading recovery queue…</strong><span>Checking unresolved automation outcomes.</span></div> : items.length === 0 ? <div className={styles.empty}><strong>Recovery queue is clear</strong><span>No uncertain automation outcomes need a person right now.</span></div> : <div className={styles.list}>
+      {error || note ? <div className={styles.empty}><strong>Recovery data unavailable</strong><span>Connection or database access must be restored before the queue can be assessed.</span></div> : loading ? <div className={styles.empty}><strong>Loading recovery queue…</strong><span>Checking unresolved automation outcomes.</span></div> : items.length === 0 ? <div className={styles.empty}><strong>Recovery queue is clear</strong><span>No uncertain automation outcomes need a person right now.</span></div> : <div className={styles.list}>
         {items.map((item) => <RecoveryCard key={item.id} item={item} editable={editable} onDone={load} />)}
       </div>}
     </section>
@@ -87,7 +87,7 @@ function Metric({ label, value, detail }: { label: string; value: number; detail
 
 function RecoveryCard({ item, editable, onDone }: { item: Item; editable: boolean; onDone: () => Promise<void> }) {
   const [evidence, setEvidence] = useState('');
-  const [outcome, setOutcome] = useState(defaultOutcome(item));
+  const [outcome, setOutcome] = useState('');
   const [invoiceId, setInvoiceId] = useState(item.factorcloud_invoice_id ?? '');
   const [invoiceGroupId, setInvoiceGroupId] = useState('');
   const [paymentType, setPaymentType] = useState('');
@@ -137,26 +137,20 @@ function RecoveryCard({ item, editable, onDone }: { item: Item; editable: boolea
       <div className={styles.checks}>{checklist(item.kind).map((step) => <span key={step}>{step}</span>)}</div>
 
       {editable ? <div className={styles.form}>
-        <label><span>Verified outcome</span><select value={outcome} onChange={(event) => setOutcome(event.target.value)}>{outcomeOptions(item).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+        <label><span>Verified outcome</span><select value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="">Choose the verified outcome</option>{outcomeOptions(item).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
         {needsInvoiceId && <label><span>FactorCloud invoice ID</span><input value={invoiceId} onChange={(event) => setInvoiceId(event.target.value)} placeholder="Paste the verified FactorCloud invoice ID" /></label>}
         {needsApprovalDetails && <>
           <label><span>Invoice group / batch ID</span><input value={invoiceGroupId} onChange={(event) => setInvoiceGroupId(event.target.value)} placeholder="Paste the verified invoice group ID" /></label>
           <label><span>Payment type</span><input value={paymentType} onChange={(event) => setPaymentType(event.target.value)} placeholder="Example: ACH" /></label>
         </>}
         <label><span>Evidence / reference</span><textarea value={evidence} maxLength={2000} onChange={(event) => setEvidence(event.target.value)} placeholder={evidencePlaceholder(item.kind)} /></label>
-        <button disabled={busy || evidence.trim().length < 15 || requiredDetailsMissing} onClick={() => void resolve()}>{busy ? 'Saving…' : 'Record reconciliation'}</button>
+        <button disabled={busy || !outcome || evidence.trim().length < 15 || requiredDetailsMissing} onClick={() => void resolve()}>{busy ? 'Saving…' : 'Record reconciliation'}</button>
         {error && <p className={styles.error} role="alert">{error}</p>}
       </div> : <div className={styles.readOnly}>A factor admin must record the reconciliation. You can still inspect the invoice timeline and verify the FactorCloud state.</div>}
     </div>
   </article>;
 }
 
-function defaultOutcome(item: Item): string {
-  if (item.kind === 'FUNDING_UNKNOWN') return 'funded';
-  if (item.kind === 'APPROVAL_UNKNOWN') return 'approved';
-  if (item.kind === 'CREATE_UNKNOWN') return item.factorcloud_invoice_id ? 'created' : 'created';
-  return 'repaired';
-}
 
 function outcomeOptions(item: Item): Array<{ value: string; label: string }> {
   if (item.kind === 'FUNDING_UNKNOWN') return [

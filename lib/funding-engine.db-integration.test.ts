@@ -254,6 +254,23 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     expect(outcomes.filter(r=>r.ok)).toHaveLength(1);expect(calls.filter(c=>c.path==='/invoices/approve-for-funding')).toHaveLength(count+1);
   });
 
+  it('lane pagination retains older unresolved work and totals ignore history limits and other factors',async()=>{
+    await query("insert into factors(id,factorcloud_factor_id,name) values('f-pagination','fc-pagination','Pagination')");
+    await query("insert into portal_clients(id,factor_id,factorcloud_client_id,name) values('pc-pagination','f-pagination','fc-client-pagination','Pagination client')");
+    await query("insert into engine_runs(id,factor_id,client_id,factorcloud_invoice_id,factorcloud_client_id,amount,mode,outcome,state,rules,reasons,created_at) select 'pagination-approved-'||n,'f-pagination','pc-pagination','invoice-'||n,'fc-client-pagination',100,'approve','HOLD','APPROVED','[]','[]',now()-interval '10 days' from generate_series(1,105) n");
+    await query("insert into engine_runs(id,factor_id,client_id,factorcloud_invoice_id,factorcloud_client_id,amount,mode,outcome,state,rules,reasons,auto_funded,funded_at,created_at) select 'pagination-funded-'||n,'f-pagination','pc-pagination','funded-'||n,'fc-client-pagination',50,'fund','FUND','FUNDED','[]','[]',true,now(),now() from generate_series(1,250) n");
+    await query("insert into engine_runs(id,factor_id,client_id,factorcloud_invoice_id,factorcloud_client_id,amount,mode,outcome,state,rules,reasons,auto_funded,funded_at) values('pagination-manual','f-pagination','pc-pagination','manual','fc-client-pagination',900,'approve','FUND','FUNDED','[]','[]',false,now())");
+    const {listRuns}=await import('./funding-engine'),{fundingSummary}=await import('./ops-funding');
+    const first=await listRuns('f-pagination',{states:['APPROVED'],limit:100});
+    expect(first).toHaveLength(100);expect(first.every(r=>r.state==='APPROVED')).toBe(true);
+    const last=first.at(-1)!;
+    const second=await listRuns('f-pagination',{states:['APPROVED'],before:{createdAt:last.createdAt,id:last.id},limit:100});
+    expect(second).toHaveLength(5);expect(new Set([...first,...second].map(r=>r.id)).size).toBe(105);
+    const summary=await fundingSummary('f-pagination');
+    expect(summary.approved).toBe(105);expect(summary.approvedAmount).toBe(10500);
+    expect(summary.autoToday).toBe(250);expect(summary.autoTodayAmount).toBe(12500);expect(summary.funded).toBe(251);
+  });
+
   afterAll(async () => {
     await pool?.().end();
     vi.unstubAllGlobals();
