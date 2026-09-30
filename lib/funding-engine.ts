@@ -75,8 +75,9 @@ export async function saveSettings(factorId: string, userId: string | null, sett
 async function fundedToday(factorId: string, clientId: string): Promise<{ client: number; factor: number }> {
   const [row] = await query<{ client: string | number | null; factor: string | number | null }>(`
     select coalesce(sum(amount) filter (where factorcloud_client_id = $2), 0) as client, coalesce(sum(amount), 0) as factor
-    from engine_runs where factor_id = $1 and auto_funded and funded_at >= date_trunc('day', now())
-  `, [factorId, clientId]);
+    from engine_runs where factor_id = $1 and auto_funded
+      and (funded_at at time zone $3)::date = (now() at time zone $3)::date
+  `, [factorId, clientId, process.env.FACTOR_TIMEZONE || 'America/Chicago']);
   return { client: Number(row?.client ?? 0), factor: Number(row?.factor ?? 0) };
 }
 

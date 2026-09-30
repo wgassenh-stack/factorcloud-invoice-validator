@@ -18,9 +18,9 @@ export class FactorCloudError extends Error {
 
 /**
  * True when FactorCloud definitively refused to create the invoice, so no invoice exists and the
- * submission can safely be retried. A 4xx response is a refusal. Network errors, timeouts, 5xx
+ * submission can safely be retried. A 4xx response other than 408 is a refusal. Network errors, timeouts, 5xx
  * responses and "created but no id in the response" are uncertain: the invoice may exist.
  */
 export function isDefinitiveCreateFailure(err: unknown): boolean {
-  return err instanceof FactorCloudError && err.status >= 400 && err.status < 500;
+  return err instanceof FactorCloudError && err.status >= 400 && err.status < 500 && err.status !== 408;
 }
