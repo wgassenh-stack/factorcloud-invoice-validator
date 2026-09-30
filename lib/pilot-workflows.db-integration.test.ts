@@ -34,6 +34,39 @@ describe.skipIf(!enabled)('pilot workflows against PostgreSQL',()=>{
     expect(Number((await query('select sum(amount) as total from funding_reservations'))[0].total)).toBe(600);
   });
   it('double clicks claim only one funding operation',async()=>{await run('one');const {claimFunding}=await import('./funding-safety');const s=await settings();expect((await Promise.all([claimFunding('one',true,s),claimFunding('one',true,s)])).filter(Boolean)).toHaveLength(1);});
+  it('a stored policy change overrides stale automatic funding settings',async()=>{
+    await run('one'); const stale=await settings();
+    const {saveSettings}=await import('./funding-engine');
+    await saveSettings('factor','admin',{...stale,mode:'off'});
+    const {claimFunding}=await import('./funding-safety');
+    expect(await claimFunding('one',true,stale)).toBe(false);
+    expect(await query('select * from funding_reservations')).toHaveLength(0);
+  });
+  it('an unresolved reservation blocks automatic and manual retries even if the run was reset',async()=>{
+    await run('one'); const {claimFunding,fundingReservationResult}=await import('./funding-safety');
+    const s=await settings(); expect(await claimFunding('one',true,s)).toBe(true);
+    await fundingReservationResult('one','UNKNOWN');
+    await query("update engine_runs set state='APPROVED' where id='one'");
+    expect(await claimFunding('one',true,s)).toBe(false);
+    expect(await claimFunding('one',false,s)).toBe(false);
+  });
+  it('invalid invoice amounts cannot be claimed even manually',async()=>{
+    await run('one',0); const {claimFunding}=await import('./funding-safety');
+    expect(await claimFunding('one',false,await settings())).toBe(false);
+  });
+  it('a later failure preserves the known invoice and keeps its retry key blocked',async()=>{
+    await submission(); const {markSubmissionFactorCloudResult}=await import('./submission-store');
+    await markSubmissionFactorCloudResult({submission:{id:'sub',portalClientId:'client'},session:admin,validationStatus:'REVIEW',error:'late failure',retryable:true});
+    const [row]=await query("select factorcloud_invoice_id,idempotency_key,idempotency_released_at from submissions where id='sub'");
+    expect(row).toEqual({factorcloud_invoice_id:'sub',idempotency_key:'sub',idempotency_released_at:null});
+    const [event]=await query("select event_data from audit_events where event_type='FACTORCLOUD_CREATE_FAILED'");
+    expect(event.event_data).toMatchObject({invoiceId:'sub',retryAllowed:false});
+  });
+  it('result and audit roll back together when the actor is invalid',async()=>{
+    await submission(); const {markSubmissionFactorCloudResult}=await import('./submission-store');
+    await expect(markSubmissionFactorCloudResult({submission:{id:'sub',portalClientId:'client'},session:{...admin,userId:'missing'},validationStatus:'PASS'})).rejects.toThrow();
+    expect((await query("select workflow_status from submissions where id='sub'"))[0].workflow_status).toBe('SUBMITTED');
+  });
   it('an unresolved previous-day reservation still consumes allowance',async()=>{await run('one');await run('two');const {claimFunding,fundingReservationResult}=await import('./funding-safety');const s=await settings();await claimFunding('one',true,s);await fundingReservationResult('one','UNKNOWN');await query("update funding_reservations set business_day=current_date-1");expect(await claimFunding('two',true,s)).toBe(false);});
   it('a funding timeout blocks a second send and opens recovery',async()=>{
     await run('one');const {saveSettings,actOnRun}=await import('./funding-engine');await saveSettings('factor','admin',await settings());

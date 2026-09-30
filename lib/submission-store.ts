@@ -175,19 +175,28 @@ export async function markSubmissionFactorCloudResult(args: {
   const status = args.error ? 'ERROR' : args.validationStatus === 'REVIEW' ? 'REVIEW_REQUIRED' : 'CREATED_IN_FACTORCLOUD';
   const release = Boolean(args.error && args.retryable && !args.invoiceId);
   await ensureSecuritySchema();
-  await pool().query(`
-    update submissions
-    set factorcloud_invoice_id=$1, workflow_status=$2, updated_at=now(),
-      idempotency_key = case when $4 then idempotency_key || $5 || id else idempotency_key end,
-      idempotency_released_at = case when $4 then now() else idempotency_released_at end
-    where id=$3
-  `, [args.invoiceId ?? null, status, args.submission.id, release, RELEASED_KEY_MARKER]);
-  await recordSubmissionAudit({
-    submission: args.submission,
-    session: args.session,
-    eventType: args.error ? 'FACTORCLOUD_CREATE_FAILED' : 'FACTORCLOUD_INVOICE_CREATED',
-    eventData: { invoiceId: args.invoiceId ?? null, error: args.error ?? null, ...(args.error ? { retryAllowed: release } : {}) },
-  });
+  const db = await pool().connect();
+  try {
+    await db.query('begin');
+    const { rows: [updated] } = await db.query(`
+      update submissions
+      set factorcloud_invoice_id=coalesce(factorcloud_invoice_id,$1), workflow_status=$2, updated_at=now(),
+        idempotency_key = case when $4 and factorcloud_invoice_id is null and idempotency_released_at is null then idempotency_key || $5 || id else idempotency_key end,
+        idempotency_released_at = case when $4 and factorcloud_invoice_id is null then coalesce(idempotency_released_at,now()) else idempotency_released_at end
+      where id=$3 and factor_id=$6
+      returning factorcloud_invoice_id, idempotency_released_at
+    `, [args.invoiceId ?? null, status, args.submission.id, release, RELEASED_KEY_MARKER, args.session.factorId]);
+    if (!updated) throw new Error('Submission result could not be recorded.');
+    await insertAudit(db, {
+      factorId: args.session.factorId,
+      clientId: args.submission.portalClientId,
+      submissionId: args.submission.id,
+      actorUserId: args.session.userId,
+      eventType: args.error ? 'FACTORCLOUD_CREATE_FAILED' : 'FACTORCLOUD_INVOICE_CREATED',
+      eventData: { invoiceId: updated.factorcloud_invoice_id, error: args.error ?? null, ...(args.error ? { retryAllowed: Boolean(updated.idempotency_released_at) } : {}) },
+    });
+    await db.query('commit');
+  } catch (err) { await db.query('rollback'); throw err; } finally { db.release(); }
 }
 
 export async function recordSubmissionAudit(args: {

@@ -186,10 +186,12 @@ export async function POST(req: Request) {
   } catch (err) {
     const detail = publicErrorMessage(err, 'create');
     // Only a definite FactorCloud refusal means no invoice exists, so only then may the client retry.
-    const retryable = isDefinitiveCreateFailure(err);
-    if (!retryable) await recover('CREATE_UNKNOWN', 'Invoice creation result is unknown. Check FactorCloud before any further submission.');
+    const retryable = !invoiceId && isDefinitiveCreateFailure(err);
+    if (!retryable) await recover('CREATE_UNKNOWN', invoiceId
+      ? `Invoice ${invoiceId} was created, but recording the result failed. Check FactorCloud and finish the document uploads before proceeding.`
+      : 'Invoice creation result is unknown. Check FactorCloud before any further submission.');
     steps.push({ step: 'Create invoice', ok: false, detail });
-    try { await markSubmissionFactorCloudResult({ submission: storedSubmission, session, validationStatus: validation.status, error: detail, retryable }); } catch { /* original error remains primary */ }
+    try { await markSubmissionFactorCloudResult({ submission: storedSubmission, session, invoiceId: invoiceId ?? undefined, validationStatus: validation.status, error: detail, retryable }); } catch { /* original error remains primary */ }
     return respond(false, retryable
       ? `FactorCloud did not accept the invoice, so nothing was created: ${detail} You can correct the problem and submit again.`
       : `The FactorCloud result is uncertain: ${detail} Do not resubmit. Your factor needs to check FactorCloud first.`);
