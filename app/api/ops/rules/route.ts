@@ -12,8 +12,9 @@ export const runtime = 'nodejs';
 export async function GET() {
   try {
     const session = await requireFactorSession();
-    if (await demoRequest() || !databaseAuthEnabled()) {
-      return NextResponse.json({ settings: DEFAULT_SETTINGS, editable: false, note: 'The funding engine needs database sign-in: these are the defaults.' });
+    const demo=await demoRequest();
+    if (demo || !databaseAuthEnabled()) {
+      return NextResponse.json({ settings: DEFAULT_SETTINGS, editable: false, demo, note: 'The funding engine needs database sign-in: these are the defaults.' });
     }
     return NextResponse.json({ settings: await loadSettings(session.factorId), editable: session.role === 'FACTOR_ADMIN' });
   } catch (err) {

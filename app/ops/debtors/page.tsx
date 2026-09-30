@@ -1,173 +1,26 @@
 'use client';
-
-import { useEffect, useMemo, useState } from 'react';
-import { OpsSidebar } from '@/app/components/OpsSidebar';
-import { DemoBadge } from '@/app/components/DemoBadge';
-import { DashboardSkeleton, StatusFlag, compactMoney, money } from '@/app/components/CommandCharts';
-import type { AgingSummary, ExposureItem } from '@/lib/analytics';
-import type { DebtorSummary } from '@/lib/debtors';
-import styles from './Debtors.module.css';
-
-type Response = {
-  today: string;
-  debtors: DebtorSummary[];
-  aging: AgingSummary;
-  exposure: ExposureItem[];
-  complete: boolean;
-  incompleteReason: string | null;
-  demo?: boolean;
-  error?: string;
-};
-
-type SortKey = 'risk' | 'openBalance' | 'over90' | 'daysToPay' | 'oldestOpenDays' | 'name';
-const SLOW_DAYS = 55;
-
-export default function DebtorsPage() {
-  const [data, setData] = useState<Response | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'risk', desc: true });
-
-  async function load() {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/ops/debtors', { cache: 'no-store' });
-      const body = await res.json() as Response;
-      if (!res.ok) throw new Error(body.error || 'Could not load debtors.');
-      setData(body);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => { void load(); }, []);
-
-  const rows = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const value = (d: DebtorSummary): number | string => {
-      if (sort.key === 'risk') return attentionScore(d);
-      if (sort.key === 'over90') return d.buckets[3];
-      if (sort.key === 'name') return d.name.toLowerCase();
-      return d[sort.key] ?? -1;
-    };
-    return (data?.debtors ?? [])
-      .filter((d) => !needle || d.name.toLowerCase().includes(needle) || (d.topClient ?? '').toLowerCase().includes(needle))
-      .sort((a, b) => {
-        const x = value(a);
-        const y = value(b);
-        const cmp = typeof x === 'string' ? String(x).localeCompare(String(y)) : (x as number) - (y as number);
-        return sort.desc ? -cmp : cmp;
-      });
-  }, [data, query, sort]);
-
-  const totals = useMemo(() => {
-    const list = data?.debtors ?? [];
-    const open = list.reduce((sum, debtor) => sum + debtor.openBalance, 0);
-    const over90 = list.reduce((sum, debtor) => sum + debtor.buckets[3], 0);
-    const concentrated = list.filter((debtor) => debtor.share >= .15 && debtor.openBalance > 0);
-    const slow = list.filter((debtor) => (debtor.daysToPay ?? 0) > SLOW_DAYS && debtor.paidCount >= 2);
-    const disputed = list.reduce((sum, debtor) => sum + debtor.disputedCount, 0);
-    const attention = list.filter((debtor) => attentionScore(debtor) > 0);
-    return { open, over90, over90Share: open ? over90 / open : 0, concentrated, slow, disputed, attention };
-  }, [data]);
-
-  const header = (key: SortKey, label: string, num = true) => <th className={num ? styles.num : ''}>
-    <button type="button" className={sort.key === key ? styles.sortActive : ''} onClick={() => setSort((current) => ({ key, desc: current.key === key ? !current.desc : key !== 'name' }))}>
-      {label}{sort.key === key ? (sort.desc ? ' ↓' : ' ↑') : ''}
-    </button>
-  </th>;
-
-  return <main className={`opsShell ${styles.page}`}>
-    <OpsSidebar active="debtors" />
-    <section className="opsContent">
-      <header className={styles.header}>
-        <div>
-          <div className={styles.meta}><span className="eyebrow">Portfolio risk</span>{data?.demo ? <DemoBadge /> : <span className={styles.live}>Live FactorCloud data</span>}</div>
-          <h1>Debtors</h1>
-          <p>Focus on the account debtors that can change a funding decision: concentration, aging, payment speed, and disputes.</p>
-        </div>
-        <div className={styles.headerActions}>
-          <a href="/ops/reports">Full reports</a>
-          <button onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
-        </div>
-      </header>
-
-      {error && <div className={styles.alert}><strong>Could not load debtors.</strong> {error}</div>}
-      {data && !data.complete && <div className={styles.alert}><strong>Totals may be incomplete.</strong> {data.incompleteReason}</div>}
-      {loading && !data && <DashboardSkeleton metrics={4} />}
-
-      {data && <>
-        <section className={styles.metricGrid}>
-          <Metric label="Open exposure" value={compactMoney(totals.open)} detail={`${data.debtors.filter((d) => d.openBalance > 0).length} debtors with open funded invoices`} />
-          <Metric label="90+ past due" value={compactMoney(totals.over90)} detail={`${Math.round(totals.over90Share * 100)}% of open exposure`} tone={totals.over90 > 0 ? 'danger' : 'good'} />
-          <Metric label="Concentration alerts" value={totals.concentrated.length} detail="Debtors at 15%+ of open exposure" tone={totals.concentrated.length ? 'review' : 'good'} />
-          <Metric label="Payment issues" value={totals.slow.length + totals.disputed} detail={`${totals.slow.length} slow payer${totals.slow.length === 1 ? '' : 's'} · ${totals.disputed} dispute${totals.disputed === 1 ? '' : 's'}`} tone={totals.slow.length || totals.disputed ? 'review' : 'good'} />
-        </section>
-
-        <section className={styles.card}>
-          <div className={styles.tableHeader}>
-            <div><span>Risk watch</span><h2>{totals.attention.length} debtor{totals.attention.length === 1 ? '' : 's'} need attention</h2><p>Operational view only. Charts and broader portfolio analysis live in Reports.</p></div>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search debtor or client" />
-          </div>
-
-          {rows.length ? <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead><tr>{header('name', 'Debtor', false)}{header('openBalance', 'Exposure')}<th>Signals</th>{header('over90', '90+')} {header('daysToPay', 'Avg pay')}{header('oldestOpenDays', 'Oldest')}</tr></thead>
-              <tbody>
-                {rows.map((debtor) => {
-                  const signals = debtorSignals(debtor);
-                  return <tr key={debtor.debtorId}>
-                    <td>
-                      <div className={styles.debtorName}><strong>{debtor.name}</strong><span>{debtor.clientCount ? `${debtor.clientCount} client${debtor.clientCount === 1 ? '' : 's'}${debtor.topClient ? ` · mostly ${debtor.topClient}` : ''}` : 'No open invoices'}</span></div>
-                    </td>
-                    <td className={styles.num}><strong>{money(debtor.openBalance)}</strong><small>{Math.round(debtor.share * 100)}% of portfolio · {debtor.openCount} inv</small></td>
-                    <td><div className={styles.flags}>
-                      {!signals.length && <StatusFlag level="GOOD">Clear</StatusFlag>}
-                      {debtor.share >= .15 && <StatusFlag level={debtor.share >= .25 ? 'HIGH' : 'REVIEW'}>{Math.round(debtor.share * 100)}% concentration</StatusFlag>}
-                      {debtor.buckets[3] > 0 && <StatusFlag level="HIGH">90+ past due</StatusFlag>}
-                      {(debtor.daysToPay ?? 0) > SLOW_DAYS && debtor.paidCount >= 2 && <StatusFlag level="REVIEW">Slow payer</StatusFlag>}
-                      {debtor.disputedCount > 0 && <StatusFlag level="REVIEW">{debtor.disputedCount} disputed</StatusFlag>}
-                    </div></td>
-                    <td className={styles.num}>{debtor.buckets[3] ? money(debtor.buckets[3]) : '–'}</td>
-                    <td className={styles.num}>{debtor.daysToPay == null ? '–' : `${Math.round(debtor.daysToPay)}d`}</td>
-                    <td className={styles.num}>{debtor.oldestOpenDays == null ? '–' : `${debtor.oldestOpenDays}d`}</td>
-                  </tr>;
-                })}
-              </tbody>
-            </table>
-          </div> : <div className={styles.empty}>{query ? 'No debtors match that search.' : 'No debtors yet.'}</div>}
-        </section>
-
-        <p className={styles.note}>This screen is for funding-risk triage. The next useful addition is FactorCloud debtor credit status/headroom so staff can see whether a debtor is eligible before funding. Exposure charts and aging analysis remain in Reports.</p>
-      </>}
-    </section>
-  </main>;
-}
-
-function debtorSignals(debtor: DebtorSummary): string[] {
-  const signals: string[] = [];
-  if (debtor.share >= .15) signals.push('concentration');
-  if (debtor.buckets[3] > 0) signals.push('90+');
-  if ((debtor.daysToPay ?? 0) > SLOW_DAYS && debtor.paidCount >= 2) signals.push('slow');
-  if (debtor.disputedCount > 0) signals.push('disputed');
-  return signals;
-}
-
-function attentionScore(debtor: DebtorSummary): number {
-  let score = 0;
-  if (debtor.share >= .25) score += 4;
-  else if (debtor.share >= .15) score += 2;
-  if (debtor.buckets[3] > 0) score += 4;
-  if ((debtor.daysToPay ?? 0) > SLOW_DAYS && debtor.paidCount >= 2) score += 2;
-  if (debtor.disputedCount > 0) score += 2;
-  if ((debtor.oldestOpenDays ?? 0) > 60) score += 1;
-  return score;
-}
-
-function Metric({ label, value, detail, tone = '' }: { label: string; value: React.ReactNode; detail: string; tone?: string }) {
-  return <div className={styles.metric} data-tone={tone}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>;
+import {useEffect,useState} from 'react';
+import {OpsSidebar} from '@/app/components/OpsSidebar';
+import {DemoBadge} from '@/app/components/DemoBadge';
+import {OpsHeader,OpsPanel,OpsMetric,OpsNotice,OpsStatus,OpsEmpty,OpsDialog,opsFetch,opsMoney} from '@/app/components/OpsUI';
+import type {DebtorSummary} from '@/lib/debtors';
+type Data={today:string;debtors:DebtorSummary[];complete:boolean;incompleteReason:string|null;demo?:boolean};
+function signals(d:DebtorSummary){const flags:{label:string;tone:'bad'|'warn'}[]=[];if(d.share>=.15)flags.push({label:'15%+ exposure',tone:'warn'});if(d.buckets[3]>0)flags.push({label:'90+ invoice age',tone:'bad'});else if((d.oldestOpenDays||0)>60)flags.push({label:'60+ invoice age',tone:'warn'});if((d.daysToPay||0)>55&&d.paidCount>=2)flags.push({label:'Slow payer',tone:'warn'});if(d.disputedCount>0)flags.push({label:d.disputedCount+' disputed',tone:'bad'});return flags;}
+export default function Debtors(){
+  const [data,setData]=useState<Data|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState(''),[query,setQuery]=useState(''),[all,setAll]=useState(false),[sort,setSort]=useState('risk'),[selected,setSelected]=useState<DebtorSummary|null>(null);
+  async function load(){setLoading(true);setError('');try{setData(await opsFetch<Data>('/api/ops/debtors'));}catch(err){setError(err instanceof Error?err.message:String(err));}finally{setLoading(false);}}
+  useEffect(()=>{void load();},[]);
+  const debtors=data?.debtors||[],attention=debtors.filter(d=>signals(d).length>0);
+  const rows=(all?debtors:attention).filter(d=>(d.name+' '+(d.topClient||'')).toLowerCase().includes(query.toLowerCase())).sort((a,b)=>sort==='name'?a.name.localeCompare(b.name):sort==='exposure'?b.openBalance-a.openBalance:sort==='age'?(b.oldestOpenDays||0)-(a.oldestOpenDays||0):signals(b).length-signals(a).length||b.openBalance-a.openBalance);
+  return <main className="opsShell"><OpsSidebar active="debtors"/><section className="opsContent"><OpsHeader title="Debtors" description="Inspect payer exposure and behavior before taking more risk." actions={<button className="oc-button" disabled={loading} onClick={()=>void load()}>{loading?'Refreshing…':'Refresh'}</button>}>{data?.demo&&<DemoBadge/>}</OpsHeader>
+    {error&&<OpsNotice tone="bad">{error}</OpsNotice>}{data&&!data.complete&&<OpsNotice tone="warn"><strong>Partial portfolio.</strong> {data.incompleteReason}</OpsNotice>}
+    {!data?<OpsEmpty>{loading?'Loading debtor risk…':'Debtor data unavailable.'}</OpsEmpty>:<>
+      <div className="oc-metrics"><OpsMetric label="Open funded exposure" value={opsMoney(debtors.reduce((s,d)=>s+d.openBalance,0))} detail={debtors.filter(d=>d.openBalance>0).length+' payers with open exposure'}/><OpsMetric label="Needs attention" value={attention.length} detail="Payers with one or more watch flags"/><OpsMetric label="Balance aged 90+ days" value={opsMoney(debtors.reduce((s,d)=>s+d.buckets[3],0))} detail="Age from invoice date"/><OpsMetric label="Purchase eligibility" value="Unknown" detail="Credit and No Buy not supplied here"/></div>
+      <div className="oc-tabs" role="tablist" aria-label="Debtor watch"><button className="oc-tab" role="tab" aria-selected={!all} onClick={()=>setAll(false)}>Needs attention<span>{attention.length}</span></button><button className="oc-tab" role="tab" aria-selected={all} onClick={()=>setAll(true)}>All debtors<span>{debtors.length}</span></button></div>
+      <div className="oc-toolbar"><input type="search" aria-label="Search debtors" placeholder="Search payer or exposed client" value={query} onChange={e=>setQuery(e.target.value)}/><select aria-label="Sort debtor table" value={sort} onChange={e=>setSort(e.target.value)}><option value="risk">Watch flags first</option><option value="exposure">Largest exposure</option><option value="age">Oldest invoice</option><option value="name">Payer name</option></select></div>
+      <OpsPanel title="Payer risk watch" description="Watch signals supply context; they do not establish purchase eligibility.">{rows.length?<div className="oc-table-wrap"><table className="oc-table"><thead><tr><th>Payer / clients exposed</th><th className="num">Open exposure</th><th className="num">Portfolio share</th><th>Watch signals</th><th className="num">90+ age balance</th><th className="num">Avg days to pay</th><th className="num">Oldest invoice</th></tr></thead><tbody>{rows.map(d=><tr key={d.debtorId}><td className="oc-identity"><button className="oc-link" onClick={()=>setSelected(d)}>{d.name}</button><small>{d.clientCount} exposed clients · {d.topClient||'No exposed client'}</small></td><td className="num"><strong>{opsMoney(d.openBalance)}</strong></td><td className="num">{(d.share*100).toFixed(1)}%</td><td><div className="oc-actions">{signals(d).length?signals(d).map(flag=><OpsStatus key={flag.label} tone={flag.tone}>{flag.label}</OpsStatus>):<OpsStatus>No listed risk flags</OpsStatus>}</div></td><td className="num">{opsMoney(d.buckets[3])}</td><td className="num">{d.daysToPay==null?'—':Math.round(d.daysToPay)+'d'}<div className="oc-reason">{d.paidCount} paid invoices</div></td><td className="num">{d.oldestOpenDays==null?'—':d.oldestOpenDays+'d'}</td></tr>)}</tbody></table></div>:<OpsEmpty>{query?'No matching payers.':'No payers in this view.'}</OpsEmpty>}</OpsPanel>
+      <p className="oc-note">Watch policy: 15%+ of portfolio exposure, 90+ invoice age (or oldest invoice over 60 days), average payment time over 55 days with at least two paid invoices, or disputed invoices. These are watch thresholds, separate from configurable funding rules. Payment averages use paid invoices from the last 180 days.</p>
+    </>}
+    {selected&&<OpsDialog title={selected.name} onClose={()=>setSelected(null)}><dl className="oc-facts"><div><dt>Open funded exposure</dt><dd>{opsMoney(selected.openBalance)}</dd></div><div><dt>Share of portfolio exposure</dt><dd>{(selected.share*100).toFixed(1)}%</dd></div><div><dt>Credit limit / headroom</dt><dd>Not supplied in this view</dd></div><div><dt>No Buy / purchase eligibility</dt><dd>Not supplied in this view</dd></div><div><dt>Average payment time · 180d cohort</dt><dd>{selected.daysToPay==null?'Unavailable':Math.round(selected.daysToPay)+' days · '+selected.paidCount+' invoices'}</dd></div><div><dt>Clients exposed</dt><dd>{selected.clientCount}</dd></div><div><dt>Largest exposed client</dt><dd>{selected.topClient||'Not available'}</dd></div><div><dt>Invoice value · 90d</dt><dd>{opsMoney(selected.recentVolume)}</dd></div></dl><div className="oc-section-label">Open balance by invoice age</div>{selected.buckets.map((value,i)=><div className="oc-figure-row" key={i}><span>{['0–30d','31–60d','61–90d','90+d'][i]}</span><div className="oc-bar"><i style={{width:(selected.openBalance?value/selected.openBalance*100:0)+'%'}}/></div><strong className="oc-num">{opsMoney(value)}</strong></div>)}<OpsNotice tone="warn">No listed watch flags does not establish purchase eligibility. Confirm current credit and No Buy at the correct client/debtor scope.</OpsNotice><div className="oc-actions"><button className="oc-button" onClick={()=>setSelected(null)}>Close</button></div></OpsDialog>}
+  </section></main>;
 }

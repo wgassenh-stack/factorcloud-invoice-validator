@@ -37,6 +37,7 @@ export interface EngineRun {
   mode: string;
   outcome: Decision['outcome'];
   state: RunState;
+  approvalStatus?: string;
   rules: RuleResult[];
   reasons: string[];
   detail: string | null;
@@ -246,21 +247,26 @@ export async function runFundingEngine(input: EngineInput): Promise<EngineRun | 
 type RunRow = {
   id: string; factorcloud_invoice_id: string; factorcloud_client_id: string; client_name: string | null; invoice_number: string | null; submission_id: string | null;
   amount: string | number; mode: string; outcome: Decision['outcome']; state: RunState; rules: RuleResult[]; reasons: string[]; detail: string | null;
-  invoice_group_id: string | null; payment_type: string | null; auto_funded: boolean; funded_at: Date | string | null; created_at: Date | string;
+  invoice_group_id: string | null; payment_type: string | null; auto_funded: boolean; funded_at: Date | string | null; created_at: Date | string; created_cursor?: string; approval_status?: string;
 };
 
-export async function listRuns(factorId: string, filter: { id?: string; limit?: number } = {}): Promise<EngineRun[]> {
+export async function listRuns(factorId: string, filter: { id?: string; limit?: number; states?: RunState[]; before?: {createdAt:string;id:string} } = {}): Promise<EngineRun[]> {
   await ensureEngineSchema();
+  const params:unknown[]=[factorId];
+  let extra='';
+  if(filter.id){params.push(filter.id);extra+=' and r.id = $'+params.length;}
+  if(filter.states?.length){params.push(filter.states);extra+=' and r.state = any($'+params.length+'::text[])';}
+  if(filter.before){params.push(filter.before.createdAt,filter.before.id);extra+=' and (r.created_at,r.id) < ($'+(params.length-1)+'::timestamptz,$'+params.length+'::text)';}
   const rows = await query<RunRow>(`
-    select r.*, c.name as client_name from engine_runs r join portal_clients c on c.id = r.client_id
-    where r.factor_id = $1 ${filter.id ? 'and r.id = $2' : ''}
-    order by r.created_at desc limit ${Math.min(filter.limit ?? 200, 500)}
-  `, filter.id ? [factorId, filter.id] : [factorId]);
+    select r.*, to_char(r.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as created_cursor, c.name as client_name from engine_runs r join portal_clients c on c.id = r.client_id
+    where r.factor_id = $1 ${extra}
+    order by r.created_at desc, r.id desc limit ${Math.min(filter.limit ?? 200, 500)}
+  `, params);
   return rows.map((r) => ({
     id: r.id, factorCloudInvoiceId: r.factorcloud_invoice_id, factorCloudClientId: r.factorcloud_client_id, clientName: r.client_name,
-    invoiceNumber: r.invoice_number, submissionId: r.submission_id, amount: Number(r.amount), mode: r.mode, outcome: r.outcome, state: r.state,
+    invoiceNumber: r.invoice_number, submissionId: r.submission_id, amount: Number(r.amount), mode: r.mode, outcome: r.outcome, state: r.state, approvalStatus:r.approval_status,
     rules: r.rules, reasons: r.reasons, detail: r.detail, invoiceGroupId: r.invoice_group_id, paymentType: r.payment_type, autoFunded: r.auto_funded,
-    fundedAt: r.funded_at ? new Date(r.funded_at).toISOString() : null, createdAt: new Date(r.created_at).toISOString(),
+    fundedAt: r.funded_at ? new Date(r.funded_at).toISOString() : null, createdAt: r.created_cursor || new Date(r.created_at).toISOString(),
   }));
 }
 
