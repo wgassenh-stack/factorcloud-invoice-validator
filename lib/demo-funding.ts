@@ -77,7 +77,7 @@ function record(s: DemoFundingState, invoice: DemoInvoice, decision: Decision, m
     factorCloudInvoiceId: invoice.id, factorCloudClientId: invoice.companyClientId, clientName: invoice.companyClientName,
     debtorName: invoice.companyDebtorName, debtorId: invoice.companyDebtorId, invoiceNumber: invoice.invoiceNumber, submissionId: null,
     amount: invoice.invoiceAmount, mode, outcome: decision.outcome, state, rules: decision.rules, reasons: decision.reasons,
-    detail: state === 'FUNDED' ? 'Funded automatically: every rule passed.' : state === 'APPROVED' ? 'Approved for funding; waiting for a person to fund it.' : state === 'REVIEW' ? 'Paperwork needs a person before approval.' : state === 'SUGGESTED' ? 'Suggest only for this client: a person approves.' : null,
+    detail: state === 'FUNDED' ? 'Funded automatically: every rule passed.' : state === 'APPROVED' ? 'Approved for funding; waiting for a person to fund it.' : state === 'REVIEW' ? 'Paperwork needs a person before approval.' : state === 'SUGGESTED' ? (mode === 'fund' ? 'Held for one click. Not approved in FactorCloud yet, so it stays out of other invoices\' funding batches.' : 'Suggest only for this client: a person approves.') : null,
     invoiceGroupId: state === 'APPROVED' || funded ? `demo-group-${s.seq}` : null, paymentType: 'ACH', autoFunded: funded,
     fundedAt: funded ? new Date(createdAt.getTime() + (45 + (s.seq * 37) % 150) * 1000).toISOString() : null,
     createdAt: createdAt.toISOString(), ...extra,
@@ -91,7 +91,9 @@ function record(s: DemoFundingState, invoice: DemoInvoice, decision: Decision, m
 function laneFor(decision: Decision, mode: RuleSettings['mode']): RunState {
   if (decision.outcome === 'REVIEW') return 'REVIEW';
   if (mode === 'suggest') return 'SUGGESTED';
-  return decision.outcome === 'FUND' && mode === 'fund' ? 'FUNDED' : 'APPROVED';
+  // Like live: in auto-fund mode a held invoice waits in the portal, not approved in FactorCloud.
+  if (mode === 'fund') return decision.outcome === 'FUND' ? 'FUNDED' : 'SUGGESTED';
+  return 'APPROVED';
 }
 
 /**
@@ -192,11 +194,15 @@ function syncInvoice(run: EngineRun): void {
   else if (run.state === 'APPROVED') { invoice.status = 'APPROVED'; invoice.verificationStatus = 'VERIFIED'; }
 }
 
-const LANES: Record<string, RunState[]> = { decision: ['APPROVED'], suggestions: ['SUGGESTED'], exceptions: ['FAILED', 'FUNDING'], funded: ['FUNDED'], review: ['REVIEW'] };
+/** The Funding Center lane, as the live engine's laneOf(). */
+function laneOf(run: EngineRun): string {
+  if (run.state === 'SUGGESTED') return run.mode === 'fund' ? 'decision' : 'suggestions';
+  return run.state === 'APPROVED' ? 'decision' : run.state === 'FUNDED' ? 'funded' : run.state === 'REVIEW' ? 'review' : 'exceptions';
+}
 
 export function demoFundingData(lane: string | null): FundingData {
   const s = state();
-  const runs = lane && LANES[lane] ? s.runs.filter((r) => LANES[lane].includes(r.state)) : s.runs;
+  const runs = lane ? s.runs.filter((r) => laneOf(r) === lane) : s.runs;
   return { available: true, mode: s.settings.mode, runs, summary: demoSummary(s), next: null, canAct: true };
 }
 
@@ -207,8 +213,8 @@ function demoSummary(s: DemoFundingState): FundingSummary {
   const today = s.runs.filter((r) => dayOf(r.createdAt) === day);
   const seconds = autoToday.map((r) => (Date.parse(r.fundedAt!) - Date.parse(r.createdAt)) / 1000);
   return {
-    approved: count(['APPROVED']).length, approvedAmount: count(['APPROVED']).reduce((t, r) => t + r.amount, 0),
-    suggested: count(['SUGGESTED']).length, failed: count(['FAILED']).length, uncertain: count(['FUNDING']).length,
+    approved: s.runs.filter((r) => laneOf(r) === 'decision').length, approvedAmount: s.runs.filter((r) => laneOf(r) === 'decision').reduce((t, r) => t + r.amount, 0),
+    suggested: s.runs.filter((r) => laneOf(r) === 'suggestions').length, failed: count(['FAILED']).length, uncertain: count(['FUNDING']).length,
     funded: count(['FUNDED']).length, review: count(['REVIEW']).length, autoToday: autoToday.length,
     autoTodayAmount: autoToday.reduce((t, r) => t + r.amount, 0), timeZone: TIME_ZONE,
     today: {
@@ -231,8 +237,9 @@ export function actOnDemoRun(id: string, action: 'approve' | 'fund', reviewer: s
   const run = s.runs.find((r) => r.id === id);
   if (!run) return { ok: false, detail: 'Not found.' };
   if (action === 'fund') {
-    if (run.state !== 'APPROVED') return { ok: false, detail: run.state === 'FUNDED' ? 'Already funded.' : 'Approve it for funding first.' };
-    Object.assign(run, { state: 'FUNDED', autoFunded: false, fundedAt: new Date().toISOString(), detail: `Funded by ${reviewer}.` });
+    const held = run.state === 'SUGGESTED' && run.mode === 'fund';
+    if (run.state !== 'APPROVED' && !held) return { ok: false, detail: run.state === 'FUNDED' ? 'Already funded.' : 'Approve it for funding first.' };
+    Object.assign(run, { state: 'FUNDED', autoFunded: false, fundedAt: new Date().toISOString(), detail: held ? `Approved and funded by ${reviewer}.` : `Funded by ${reviewer}.` });
     syncInvoice(run);
     return { ok: true, detail: 'Funded.' };
   }
@@ -246,6 +253,10 @@ export function actOnDemoRun(id: string, action: 'approve' | 'fund', reviewer: s
     Object.assign(run, { state: 'FUNDED', autoFunded: true, fundedAt: new Date().toISOString(), detail: `Approved by ${reviewer} and funded automatically: every rule passes now.` });
     syncInvoice(run);
     return { ok: true, detail: 'Every rule passes now: approved and funded.' };
+  }
+  if (decision.outcome === 'HOLD' && settings.mode === 'fund') {
+    Object.assign(run, { state: 'SUGGESTED', mode: 'fund', detail: `Still held: ${decision.reasons.join('; ')}. Use Approve & fund to fund it anyway.` });
+    return { ok: true, detail: run.detail! };
   }
   Object.assign(run, { state: 'APPROVED', detail: `Approved for funding by ${reviewer}.` });
   syncInvoice(run);
