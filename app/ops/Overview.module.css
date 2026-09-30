@@ -1,0 +1,34 @@
+.hero { background:#fff; border:1px solid var(--oc-line, #dfe5ec); border-radius:8px; padding:20px 22px; margin-bottom:20px; display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr); gap:24px; align-items:center; }
+.eyebrow { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#1d6f42; display:flex; align-items:center; gap:6px; }
+.live { width:7px; height:7px; border-radius:50%; background:#1d6f42; box-shadow:0 0 0 3px rgba(29,111,66,.18); }
+.headline { font-size:30px; line-height:1.15; font-weight:700; letter-spacing:-.6px; margin:8px 0 6px; color:var(--oc-ink, #17202c); font-variant-numeric:tabular-nums; }
+.headline em { font-style:normal; color:#1d6f42; }
+.sub { font-size:13.5px; color:var(--oc-muted, #5b6676); margin:0; }
+.sub strong { color:var(--oc-ink, #17202c); }
+.bar { display:flex; gap:2px; height:14px; border-radius:4px; overflow:hidden; background:#eef1f5; }
+.bar span { display:block; min-width:4px; }
+.funded { background:#2f8a57; }
+.held { background:#2f6db5; }
+.review { background:#c98a1b; }
+.problem { background:#b0413e; }
+.legend { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 18px; margin-top:12px; }
+.legend a { display:grid; grid-template-columns:10px 1fr auto; align-items:center; gap:8px; font-size:13px; color:var(--oc-ink, #17202c) !important; text-decoration:none; padding:4px 6px; margin:-4px -6px; border-radius:6px; }
+.legend a:hover { background:#f3f6f9; }
+.legend i { width:10px; height:10px; border-radius:3px; }
+.legend b { font-variant-numeric:tabular-nums; }
+.feed { display:grid; }
+.item { display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:10px; align-items:start; padding:12px 18px; border-top:1px solid var(--oc-line, #e6ebf0); color:inherit !important; text-decoration:none; }
+.item:hover { background:#f8fafc; }
+.item:first-child { border-top:0; }
+.icon { width:26px; height:26px; border-radius:50%; display:grid; place-items:center; font-size:13px; font-weight:800; }
+.icon.funded { background:#e7f4ec; color:#1d6f42; }
+.icon.held { background:#e9f0fa; color:#1e5aa8; }
+.icon.review { background:#fbf1de; color:#8a5a0a; }
+.icon.problem { background:#f8e6e6; color:#a73544; }
+.what { font-size:13.5px; }
+.what strong { font-weight:650; }
+.why { display:block; font-size:12.5px; color:var(--oc-muted, #5b6676); margin-top:2px; }
+.meta { text-align:right; font-size:12px; color:var(--oc-muted, #5b6676); white-space:nowrap; }
+.meta b { display:block; font-size:13.5px; color:var(--oc-ink, #17202c); font-variant-numeric:tabular-nums; }
+@media (max-width: 1000px) { .hero { grid-template-columns:1fr; } }
+@media (max-width: 560px) { .legend { grid-template-columns:1fr; } .headline { font-size:24px; } }

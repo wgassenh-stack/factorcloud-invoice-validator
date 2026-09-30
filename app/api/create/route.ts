@@ -16,7 +16,8 @@ import { adminDriverViewAllowed, currentPortalSession, resolveConfiguredClientId
 import { validate } from '@/lib/rules';
 import { applyCreditCheck, CREDIT_CHECK_ID, withoutCreditCheck } from '@/lib/credit';
 import { loadDebtorCredit } from '@/lib/debtor-credit';
-import { recordDemoSubmission } from '@/lib/demo-store';
+import { demoInvoice, recordDemoSubmission } from '@/lib/demo-store';
+import { runDemoFundingEngine } from '@/lib/demo-funding';
 import { persistSubmissionStart, markSubmissionFactorCloudResult, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
 import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
 import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '@/lib/types';
@@ -104,7 +105,7 @@ export async function POST(req: Request) {
   const credit = await loadDebtorCredit(clientId, debtor, amount);
   // With the funding engine approving invoices, the credit limit is one of its rules: a clean
   // invoice over the limit is approved and held for funding instead of going to the review queue.
-  const engine = !(await demoRequest()) && databaseAuthEnabled() ? await engineSettingsFor((await currentPortalSession())?.factorId) : null;
+  const engine = !(await demoRequest()) && databaseAuthEnabled() ? await engineSettingsFor((await currentPortalSession())?.factorId, clientId) : null;
   const engineHandlesCredit = Boolean(engine && (engine.mode === 'approve' || engine.mode === 'fund') && engine.rules.creditLimit.enabled);
   if (!engineHandlesCredit) validation = applyCreditCheck(validation, credit);
 
@@ -247,6 +248,8 @@ export async function POST(req: Request) {
   }
 
   if (demo) {
+    const created = demoInvoice(invoiceId!);
+    if (created) runDemoFundingEngine(created, flaggedChecks(validation.checks).some((check) => check.id !== CREDIT_CHECK_ID) ? 'REVIEW' : 'PASS');
     recordDemoSubmission({
       submittedBy: (await demoClientView()) === 'driver' ? DEMO_DRIVER : 'Office',
       invoiceId: invoiceId!,

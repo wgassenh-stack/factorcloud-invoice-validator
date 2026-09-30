@@ -1,7 +1,8 @@
 import type {EngineRun} from './funding-engine';
 import type {EngineMode} from './rules/settings';
 import type {CheckResult} from './types';
-export type FundingSummary={approved:number;approvedAmount:number;suggested:number;failed:number;uncertain:number;funded:number;review:number;autoToday:number;autoTodayAmount:number;timeZone:string};
+export type TodaySummary={received:number;autoFunded:number;autoAmount:number;held:number;review:number;problems:number;secondsToFund:number|null};
+export type FundingSummary={today?:TodaySummary;approved:number;approvedAmount:number;suggested:number;failed:number;uncertain:number;funded:number;review:number;autoToday:number;autoTodayAmount:number;timeZone:string};
 export type FundingData={available:boolean;mode:EngineMode;runs:EngineRun[];summary?:FundingSummary;next?:{createdAt:string;id:string}|null;canAct:boolean;note?:string};
 export type ReviewRecord={id:string;reviewId?:string;submissionId?:string;invoiceNumber:string|null;companyClientId:string|null;companyDebtorId:string|null;invoiceAmount:number|null;invoiceDate:string|null;status:string|null;reviewStatus?:string;reason?:string;notes?:string|null;createdAt?:string;checks?:CheckResult[];fix?:{status:'OPEN'|'DONE';message:string;requestedAt:string;answeredAt:string|null;responseNote:string|null;fileCount:number|null}|null};
 export type ReviewData={records:ReviewRecord[];clientNames:Record<string,string>;debtorNames:Record<string,string>;source?:{note:string};demo?:boolean};

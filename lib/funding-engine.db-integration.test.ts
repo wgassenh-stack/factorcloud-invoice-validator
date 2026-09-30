@@ -154,6 +154,21 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     expect(run.reasons.join(' ')).toMatch(/over the \$5,000 auto-funding cap/);
   });
 
+  it('a client with its own rules: a higher cap funds a larger invoice; suggest-only does nothing in FactorCloud', async () => {
+    await setRules((s) => { s.clientOverrides = { [CLIENT]: { name: 'Test Trucking LLC', mode: 'fund', rules: s.rules, caps: { perInvoice: 8_000, perClientPerDay: 50_000 } } }; });
+    const { run, writes } = await send('BIG-2', 6000);
+    expect(run).toMatchObject({ outcome: 'FUND', state: 'FUNDED', autoFunded: true });
+    expect(writes).toContain('PATCH /invoice-groups/fund');
+
+    await setRules((s) => { s.clientOverrides[CLIENT].mode = 'suggest'; });
+    const quiet = await send('SUG-2', 700);
+    expect(quiet.run).toMatchObject({ state: 'SUGGESTED', mode: 'suggest' });
+    expect(quiet.writes.filter((w) => /verification|approve-for-funding|invoice-groups/.test(w))).toEqual([]);
+    await setRules((s) => { s.clientOverrides = {}; });
+    // Keep the later tests' volume and credit figures as they were.
+    fc.invoices = fc.invoices.filter((r) => !['BIG-2', 'SUG-2'].includes(String(r.invoiceNumber)));
+  });
+
   it('negative cash reserve: held', async () => {
     fc.cashReserve = -200;
     const { run } = await send('RES-1', 500);

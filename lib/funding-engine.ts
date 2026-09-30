@@ -13,7 +13,7 @@ import { approveForFunding, FUNDABLE_PAYMENT_TYPES, fundInvoiceGroups, getCashRe
 import { portalUpdateNote } from './portal-notes';
 import { collectRiskInvoiceRecords, type RiskInvoiceRecord } from './risk';
 import { decide, type Decision, type RuleResult, type EngineFacts } from './rules/engine';
-import { DEFAULT_SETTINGS, normalizeSettings, type RuleSettings } from './rules/settings';
+import { DEFAULT_SETTINGS, normalizeSettings, settingsForClient, type RuleSettings } from './rules/settings';
 import { ensureEngineSchema } from './schema';
 
 // Runs the factor's rules on a newly sent invoice and acts on the result in FactorCloud, as far as
@@ -31,6 +31,9 @@ export interface EngineRun {
   factorCloudInvoiceId: string;
   factorCloudClientId: string;
   clientName: string | null;
+  /** From the facts recorded at the decision; null for runs recorded before that. */
+  debtorName?: string | null;
+  debtorId?: string | null;
   invoiceNumber: string | null;
   submissionId: string | null;
   amount: number;
@@ -54,10 +57,10 @@ export async function loadSettings(factorId: string): Promise<RuleSettings> {
   return row ? normalizeSettings(row.settings) : normalizeSettings(DEFAULT_SETTINGS);
 }
 
-/** The settings for the signed-in factor, or null when the engine can't run (no database sign-in). */
-export async function engineSettingsFor(factorId: string | null | undefined): Promise<RuleSettings | null> {
+/** The settings for the signed-in factor (and one client, when given), or null when the engine can't run (no database sign-in). */
+export async function engineSettingsFor(factorId: string | null | undefined, clientId?: string): Promise<RuleSettings | null> {
   if (!factorId) return null;
-  try { return await loadSettings(factorId); } catch (err) { console.error('[funding-engine] settings', err); return null; }
+  try { return settingsForClient(await loadSettings(factorId), clientId); } catch (err) { console.error('[funding-engine] settings', err); return null; }
 }
 
 export async function saveSettings(factorId: string, userId: string | null, settings: unknown): Promise<RuleSettings> {
@@ -149,8 +152,8 @@ async function fund(runId: string, groupId: string, paymentType: string | null, 
     await update(runId, { detail });
     return { ok: false, detail };
   }
-  const [owner] = await query<{factor_id:string;submission_id:string|null}>('select factor_id,submission_id from engine_runs where id=$1',[runId]);
-  if (!owner || !await claimFunding(runId, auto, await loadSettings(owner.factor_id))) return { ok: false, detail: 'Already funded, being reconciled, or held by the current funding cap.' };
+  const [owner] = await query<{factor_id:string;submission_id:string|null;factorcloud_client_id:string}>('select factor_id,submission_id,factorcloud_client_id from engine_runs where id=$1',[runId]);
+  if (!owner || !await claimFunding(runId, auto, settingsForClient(await loadSettings(owner.factor_id), owner.factorcloud_client_id))) return { ok: false, detail: 'Already funded, being reconciled, or held by the current funding cap.' };
   try {
     // The same batch always gets the same transaction ID, so FactorCloud can refuse a repeat.
     await fundInvoiceGroups([groupId], paymentType, `portal-fund-${groupId}`);
@@ -206,7 +209,8 @@ async function decideNow(input: Omit<EngineInput, 'portalClientId' | 'submission
 /** Runs after an invoice is created. Returns the run, or null when the engine is off. Never throws. */
 export async function runFundingEngine(input: EngineInput): Promise<EngineRun | null> {
   try {
-    const settings = await loadSettings(input.factorId);
+    // The client's own rules when the factor has set some, otherwise the factor defaults.
+    const settings = settingsForClient(await loadSettings(input.factorId), input.clientId);
     if (settings.mode === 'off') return null;
     const decision = await decideNow(input, settings);
 
@@ -247,7 +251,7 @@ export async function runFundingEngine(input: EngineInput): Promise<EngineRun | 
 type RunRow = {
   id: string; factorcloud_invoice_id: string; factorcloud_client_id: string; client_name: string | null; invoice_number: string | null; submission_id: string | null;
   amount: string | number; mode: string; outcome: Decision['outcome']; state: RunState; rules: RuleResult[]; reasons: string[]; detail: string | null;
-  invoice_group_id: string | null; payment_type: string | null; auto_funded: boolean; funded_at: Date | string | null; created_at: Date | string; created_cursor?: string; approval_status?: string;
+  invoice_group_id: string | null; payment_type: string | null; auto_funded: boolean; funded_at: Date | string | null; created_at: Date | string; created_cursor?: string; approval_status?: string; debtor_name?: string | null; debtor_id?: string | null;
 };
 
 export async function listRuns(factorId: string, filter: { id?: string; limit?: number; states?: RunState[]; before?: {createdAt:string;id:string} } = {}): Promise<EngineRun[]> {
@@ -258,12 +262,13 @@ export async function listRuns(factorId: string, filter: { id?: string; limit?: 
   if(filter.states?.length){params.push(filter.states);extra+=' and r.state = any($'+params.length+'::text[])';}
   if(filter.before){params.push(filter.before.createdAt,filter.before.id);extra+=' and (r.created_at,r.id) < ($'+(params.length-1)+'::timestamptz,$'+params.length+'::text)';}
   const rows = await query<RunRow>(`
-    select r.*, to_char(r.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as created_cursor, c.name as client_name from engine_runs r join portal_clients c on c.id = r.client_id
+    select r.*, to_char(r.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as created_cursor, c.name as client_name,
+      r.facts_snapshot->'debtorCredit'->>'debtorName' as debtor_name, r.facts_snapshot->'invoice'->>'debtorId' as debtor_id from engine_runs r join portal_clients c on c.id = r.client_id
     where r.factor_id = $1 ${extra}
     order by r.created_at desc, r.id desc limit ${Math.min(filter.limit ?? 200, 500)}
   `, params);
   return rows.map((r) => ({
-    id: r.id, factorCloudInvoiceId: r.factorcloud_invoice_id, factorCloudClientId: r.factorcloud_client_id, clientName: r.client_name,
+    id: r.id, factorCloudInvoiceId: r.factorcloud_invoice_id, factorCloudClientId: r.factorcloud_client_id, clientName: r.client_name, debtorName: r.debtor_name ?? null, debtorId: r.debtor_id ?? null,
     invoiceNumber: r.invoice_number, submissionId: r.submission_id, amount: Number(r.amount), mode: r.mode, outcome: r.outcome, state: r.state, approvalStatus:r.approval_status,
     rules: r.rules, reasons: r.reasons, detail: r.detail, invoiceGroupId: r.invoice_group_id, paymentType: r.payment_type, autoFunded: r.auto_funded,
     fundedAt: r.funded_at ? new Date(r.funded_at).toISOString() : null, createdAt: r.created_cursor || new Date(r.created_at).toISOString(),
@@ -292,7 +297,7 @@ export async function actOnRun(factorId: string, runId: string, action: 'approve
  * held with up-to-date reasons. A new review reason (say the debtor went No Buy) stops it.
  */
 async function rerunAndApprove(factorId: string, run: EngineRun, reviewer: string, token:string): Promise<{ ok: boolean; detail: string }> {
-  const settings = await loadSettings(factorId);
+  const settings = settingsForClient(await loadSettings(factorId), run.factorCloudClientId);
   const fresh = await settle(async () => {
     const raw = await getInvoice(run.factorCloudInvoiceId);
     const record = collectRiskInvoiceRecords(raw).find((r) => r.id === run.factorCloudInvoiceId);

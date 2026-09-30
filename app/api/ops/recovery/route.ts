@@ -14,7 +14,8 @@ import { RELEASED_KEY_MARKER } from '@/lib/submission-store';
 export async function GET() {
   try {
     const session=await requireFactorSession();
-    if (await demoRequest() || !databaseAuthEnabled()) return NextResponse.json({items:[],editable:false,note:'Recovery requires database sign-in.'});
+    if (await demoRequest()) return NextResponse.json({items:[],editable:false});
+    if (!databaseAuthEnabled()) return NextResponse.json({items:[],editable:false,note:'Recovery requires database sign-in.'});
     return NextResponse.json({items:await recoveryQueue(session.factorId),editable:session.role==='FACTOR_ADMIN'});
   } catch(err) {return apiErrorResponse(err,'recovery');}
 }

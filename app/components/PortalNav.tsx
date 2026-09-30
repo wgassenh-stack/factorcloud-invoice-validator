@@ -35,7 +35,7 @@ export function PortalNav({ active }: { active: NavKey }) {
 
   return <nav className="portalNav">
     <a className="portalBrand" href={driver ? '/driver' : '/'} aria-label="FactorCloud client portal home">
-      <img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" />
+      <img src="/factorcloud-logo.svg" alt="FactorCloud" />
     </a>
 
     <ViewSwitch current="client" />
