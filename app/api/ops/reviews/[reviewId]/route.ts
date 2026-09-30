@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
+import { demoPaperworkCleared } from '@/lib/demo-funding';
 import { pool } from '@/lib/db';
 import { pilotAdminViews, requireFactorSession } from '@/lib/portal-auth';
 import { apiErrorResponse } from '@/lib/api-errors';
@@ -27,6 +28,7 @@ export async function POST(req: Request, context: { params: Promise<{ reviewId: 
 
   if (await demoRequest()) {
     const done = decision === 'REQUEST_FIX' ? demoRequestFix(reviewId, note!) : decideDemoReview(reviewId, decision, note);
+    if (done && decision === 'APPROVE' && 'invoiceId' in done) demoPaperworkCleared(done.invoiceId);
     return done ? NextResponse.json({ ok: true, status: decision === 'REQUEST_FIX' ? 'FIX_REQUESTED' : done.status }) : NextResponse.json({ error: 'Open review item not found.' }, { status: 404 });
   }
 

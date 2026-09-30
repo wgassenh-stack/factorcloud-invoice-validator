@@ -26,6 +26,19 @@ export interface RuleSettings {
     /** Clients the engine may fund on its own: "all", or a list of FactorCloud client IDs. */
     autoFundClients: 'all' | string[];
   };
+  /**
+   * Per-client rules, keyed by FactorCloud client ID. A client with an entry uses its own mode, rule
+   * switches and thresholds, and per-invoice and daily client caps; the factor-wide cap, business
+   * hours and the auto-fund allow-list always come from the factor defaults.
+   */
+  clientOverrides: Record<string, ClientOverride>;
+}
+
+export interface ClientOverride {
+  name: string;
+  mode: EngineMode;
+  rules: RuleSettings['rules'];
+  caps: { perInvoice: number; perClientPerDay: number };
 }
 
 export const DEFAULT_SETTINGS: RuleSettings = {
@@ -42,6 +55,7 @@ export const DEFAULT_SETTINGS: RuleSettings = {
     newClient: { enabled: true, minDays: 30, minInvoices: 10 },
   },
   caps: { perInvoice: 5_000, perClientPerDay: 10_000, perFactorPerDay: 25_000, businessHoursOnly: false, autoFundClients: 'all' },
+  clientOverrides: {},
 };
 
 const MODES: EngineMode[] = ['off', 'suggest', 'approve', 'fund'];
@@ -54,6 +68,36 @@ const bool = (value: unknown, fallback: boolean) => (typeof value === 'boolean' 
 /** Stored or submitted settings, made whole and safe: unknown keys dropped, numbers kept in range. */
 export function normalizeSettings(input: unknown): RuleSettings {
   const src = (input && typeof input === 'object' ? input : {}) as Record<string, any>;
+  const base = normalizeBase(src);
+  const overrides: Record<string, ClientOverride> = {};
+  const raw = src.clientOverrides && typeof src.clientOverrides === 'object' && !Array.isArray(src.clientOverrides) ? src.clientOverrides as Record<string, any> : {};
+  for (const [id, value] of Object.entries(raw).slice(0, 500)) {
+    const key = id.trim();
+    if (!key || !value || typeof value !== 'object') continue;
+    const clean = normalizeBase(value);
+    overrides[key] = {
+      name: typeof value.name === 'string' ? value.name.slice(0, 200) : key,
+      mode: clean.mode,
+      rules: clean.rules,
+      caps: { perInvoice: clean.caps.perInvoice, perClientPerDay: clean.caps.perClientPerDay },
+    };
+  }
+  return { ...base, clientOverrides: overrides };
+}
+
+/** The rules that apply to one client: its override when it has one, otherwise the factor defaults. */
+export function settingsForClient(settings: RuleSettings, clientId: string | null | undefined): RuleSettings {
+  const override = clientId ? settings.clientOverrides?.[clientId] : undefined;
+  if (!override) return settings;
+  return { ...settings, mode: override.mode, rules: override.rules, caps: { ...settings.caps, ...override.caps } };
+}
+
+/** A new override for a client, starting from the factor defaults. */
+export function overrideFrom(settings: RuleSettings, name: string): ClientOverride {
+  return { name, mode: settings.mode, rules: structuredClone(settings.rules), caps: { perInvoice: settings.caps.perInvoice, perClientPerDay: settings.caps.perClientPerDay } };
+}
+
+function normalizeBase(src: Record<string, any>): Omit<RuleSettings, 'clientOverrides'> {
   const d = DEFAULT_SETTINGS;
   const r = (src.rules ?? {}) as Record<string, any>;
   const c = (src.caps ?? {}) as Record<string, any>;

@@ -6,6 +6,7 @@ import { requireFactorSession } from '@/lib/portal-auth';
 import { databaseAuthEnabled } from '@/lib/session';
 import {fundingSummary} from '@/lib/ops-funding';
 import type {RunState} from '@/lib/funding-engine';
+import { demoFundingData } from '@/lib/demo-funding';
 
 export const runtime = 'nodejs';
 
@@ -13,7 +14,8 @@ export const runtime = 'nodejs';
 export async function GET(req:Request) {
   try {
     const session = await requireFactorSession();
-    if (await demoRequest() || !databaseAuthEnabled()) {
+    if (await demoRequest()) return NextResponse.json(demoFundingData(new URL(req.url).searchParams.get('lane')));
+    if (!databaseAuthEnabled()) {
       return NextResponse.json({ available: false, mode: 'off', runs: [], canAct: false, note: 'The funding engine needs database sign-in.' });
     }
     const url=new URL(req.url);

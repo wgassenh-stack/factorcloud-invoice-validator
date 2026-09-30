@@ -49,7 +49,7 @@ export interface Decision {
   reasons: string[];
 }
 
-const money = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
+const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(Math.round(n)).toLocaleString('en-US')}`;
 const DAY = 86_400_000;
 const dateOf = (record: RiskInvoiceRecord) => Date.parse(String(record.createdOn ?? record.invoiceDate ?? '').slice(0, 10));
 

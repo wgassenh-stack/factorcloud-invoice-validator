@@ -1,7 +1,7 @@
 import 'server-only';
 import { pool, query } from './db';
 import type { RuleSettings } from './rules/settings';
-import { normalizeSettings } from './rules/settings';
+import { normalizeSettings, settingsForClient } from './rules/settings';
 
 /** Serializes cap reservations across ALL invoices of a factor, not just one run. */
 export async function claimFunding(runId: string, auto: boolean, settings: RuleSettings): Promise<boolean> {
@@ -20,7 +20,7 @@ export async function claimFunding(runId: string, auto: boolean, settings: RuleS
       // Share the settings writer's lock so a queued claim observes the latest committed policy.
       await db.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [`rules:${run.factor_id}`]);
       const { rows: [policy] } = await db.query('select settings from rule_settings where factor_id=$1', [run.factor_id]);
-      if (policy) settings = normalizeSettings(policy.settings);
+      if (policy) settings = settingsForClient(normalizeSettings(policy.settings), run.factorcloud_client_id);
       const timezone = process.env.FACTOR_TIMEZONE || 'America/Chicago';
       const { rows: [clock] } = await db.query(`select
         extract(isodow from clock_timestamp() at time zone $1) between 1 and 5

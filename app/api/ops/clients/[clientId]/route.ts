@@ -47,7 +47,7 @@ export async function GET(_req: Request, context: { params: Promise<{ clientId: 
         clientInvoiceCount: records.length,
         complete: list.complete,
         incompleteReason: list.incompleteReason ?? null,
-        note: `${completenessNote(list)} Only invoices that positively match this FactorCloud client ID are included. Open-A/R semantics still need to be confirmed.`,
+        note: `${completenessNote(list)} Only invoices that positively match this FactorCloud client ID are included.`,
       },
     });
   } catch (err) {

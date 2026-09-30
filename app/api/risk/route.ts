@@ -98,7 +98,7 @@ export async function GET() {
         excludedWithoutPositiveClientMatch: allRecords.length - records.length,
         complete: list.complete,
         incompleteReason: list.incompleteReason ?? null,
-        note: `${completenessNote(list)} Only invoices whose FactorCloud client ID matches this client are shown. Open-A/R status semantics still need to be confirmed before treating these as exposure metrics.`,
+        note: `${completenessNote(list)} Only invoices whose FactorCloud client ID matches this client are shown.`,
       },
     });
   } catch (err) {

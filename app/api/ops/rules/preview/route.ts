@@ -5,7 +5,7 @@ import { databaseAuthEnabled } from '@/lib/session';
 import { query } from '@/lib/db';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { decide,type EngineFacts } from '@/lib/rules/engine';
-import { normalizeSettings } from '@/lib/rules/settings';
+import { normalizeSettings, settingsForClient } from '@/lib/rules/settings';
 
 export async function POST(req:Request){
   try{
@@ -15,7 +15,7 @@ export async function POST(req:Request){
     const rows=await query<{id:string;invoice_number:string;outcome:string;facts_snapshot:EngineFacts|null}>(`select id,invoice_number,outcome,facts_snapshot from engine_runs where factor_id=$1 order by created_at desc limit 100`,[session.factorId]);
     const results=rows.filter(r=>r.facts_snapshot).map(r=>{
       const facts={...r.facts_snapshot!,now:new Date(r.facts_snapshot!.now)};
-      const result=decide(facts,settings);return {id:r.id,invoice:r.invoice_number,before:r.outcome,after:result.outcome,reasons:result.reasons};
+      const result=decide(facts,settingsForClient(settings,facts.invoice.clientId));return {id:r.id,invoice:r.invoice_number,before:r.outcome,after:result.outcome,reasons:result.reasons};
     });
     return NextResponse.json({results,skipped:rows.length-results.length,note:'Uses facts recorded at each decision. This is not a live credit check or a simulation of future cumulative funding.'});
   }catch(err){return apiErrorResponse(err,'rules-preview');}
