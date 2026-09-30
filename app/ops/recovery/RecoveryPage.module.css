@@ -24,7 +24,6 @@
 .meta { color:#8c96a5; font-size:8px; }
 .timelineLink { color:#2768ba; font-size:9px; font-weight:850; text-decoration:none; white-space:nowrap; }
 .body { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.75fr); gap:18px; padding:14px 16px 16px; }
-checklist { display:block; }
 .checks { display:grid; gap:7px; }
 .checks span { position:relative; padding-left:16px; color:#667386; font-size:9px; line-height:1.45; }
 .checks span::before { content:'✓'; position:absolute; left:0; color:#78879a; font-weight:900; }
