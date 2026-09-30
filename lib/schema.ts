@@ -57,7 +57,7 @@ export const ENGINE_SCHEMA_STATEMENTS = [
   amount numeric(14,2) not null,
   mode text not null check (mode in ('suggest', 'approve', 'fund')),
   outcome text not null check (outcome in ('FUND', 'HOLD', 'REVIEW')),
-  state text not null check (state in ('SUGGESTED', 'REVIEW', 'APPROVED', 'FUNDING', 'FUNDED', 'FAILED')),
+  state text not null check (state in ('SUGGESTED', 'REVIEW', 'APPROVED', 'FUNDING', 'FUNDED', 'FAILED', 'CLOSED')),
   rules jsonb not null,
   reasons jsonb not null,
   detail text,

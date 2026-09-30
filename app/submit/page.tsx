@@ -7,6 +7,7 @@ import { ProcessingTheater, type TheaterPhase } from '@/app/components/Processin
 import { CameraCapture } from '@/app/components/CameraCapture';
 import { SubmitAnywayBox } from '@/app/components/SubmitAnyway';
 import { validate } from '@/lib/rules';
+import { normalizeIdentifier } from '@/lib/normalize';
 import { applyFactorCloudAvailability } from '@/lib/validation-availability';
 import { explanationProblem, flaggedChecks, hardBlocks } from '@/lib/override';
 import { driverViewInBrowser } from '@/lib/demo';
@@ -384,11 +385,12 @@ function InvoiceCard({ card, documents, targets, busy, asDriver, only, urlFor, f
   const addInput = useRef<HTMLInputElement>(null);
   const live = liveValidation(card);
   const state = cardState(card);
-  const flagged = flaggedChecks(live.checks);
+  const flagged = flaggedChecks(live.checks).filter((c) => c.id !== 'already-in-factorcloud');
   const blocked = hardBlocks(live);
   const sent = card.sent?.state === 'sent' || card.sent?.state === 'duplicate';
   const amount = Number(card.edits.invoiceAmount);
   const [tone, label] = card.sent?.state === 'duplicate' ? ['neutral', 'Already submitted']
+    : !sent && alreadyInFactorCloud(card) ? ['fail', 'Already in FactorCloud']
     : sent ? (card.sent!.review ? ['review', 'Sent for review'] : ['pass', 'Sent'])
     : state === 'ready' ? ['pass', 'Ready'] : state === 'needs-note' ? ['review', 'Needs a note'] : ['fail', "Can't send yet"];
   const elsewhere = targets.filter((t) => t.id !== card.id);
@@ -421,6 +423,7 @@ function InvoiceCard({ card, documents, targets, busy, asDriver, only, urlFor, f
       <button type="button" className="linkButton" disabled={busy} onClick={() => setSorting(!sorting)}>{sorting ? 'Done sorting' : only ? 'Remove a document' : 'Fix sorting'}</button>
     </div>}
 
+    {!sent && alreadyInFactorCloud(card) && <div className="warning duplicateWarning"><b>Already in FactorCloud:</b> invoice {card.existing!.invoiceNumber} was sent before{card.existing!.status ? ` (${card.existing!.status.toLowerCase().replace(/_/g, ' ')})` : ''}, so it can't be sent again.{asDriver ? '' : <> <a href={`/invoices/${encodeURIComponent(card.existing!.invoiceId)}`}>View it</a>.</>} If the number was read wrong, fix it under Invoice details.</div>}
     {card.warnings.map((w) => <div className="warning" key={w}>{w}</div>)}
     {!sent && (flagged.length
       ? <ul className="sendChecks">{flagged.map((c) => <li key={c.id} className={c.status.toLowerCase()}><b>{c.label}:</b> {c.message}</li>)}</ul>
@@ -508,7 +511,11 @@ function liveValidation(card: Card): ValidationReport {
     (original.invoiceAmount == null ? '' : String(original.invoiceAmount)) !== card.edits.invoiceAmount && 'amount',
     (original.invoiceDate ?? '') !== card.edits.invoiceDate && 'invoice date',
   ].filter(Boolean) as string[];
-  const merged = mergeServerFlags(base, card.serverFlags);
+  const withServer = mergeServerFlags(base, card.serverFlags);
+  // Already in FactorCloud: a failed check, so every summary of this invoice says it can't be sent.
+  const merged: ValidationReport = alreadyInFactorCloud(card)
+    ? { status: 'FAIL', checks: [{ id: 'already-in-factorcloud', label: 'Not already in FactorCloud', status: 'FAIL', message: `Invoice ${card.existing!.invoiceNumber} was sent before, so it can't be sent again.` }, ...withServer.checks] }
+    : withServer;
   if (!changed.length) return merged;
   const note = { id: 'client-corrections', label: 'Changed after reading', status: 'REVIEW' as const, message: `You changed the ${changed.join(', ')}. Your factor will review it.` };
   return { status: merged.status === 'FAIL' ? 'FAIL' : 'REVIEW', checks: [note, ...merged.checks] };
@@ -523,8 +530,14 @@ function mergeServerFlags(base: ValidationReport, server: ValidationReport | und
   return { status: checks.some((c) => c.status === 'FAIL') ? 'FAIL' : 'REVIEW', checks };
 }
 
+/** The card's invoice number (as edited) is one FactorCloud already has for this client. */
+function alreadyInFactorCloud(card: Card): boolean {
+  return Boolean(card.existing && normalizeIdentifier(card.edits.invoiceNumber) === normalizeIdentifier(card.existing.invoiceNumber));
+}
+
 function cardState(card: Card): 'ready' | 'needs-note' | 'blocked' | 'sent' {
   if (card.sent?.state === 'sent' || card.sent?.state === 'duplicate') return 'sent';
+  if (alreadyInFactorCloud(card)) return 'blocked';
   const live = liveValidation(card);
   const hasBasics = Boolean(card.edits.invoiceNumber && Number(card.edits.invoiceAmount) > 0 && card.edits.invoiceDate);
   if (!card.debtor || !card.analysisReceipt || card.factorCloudLookupFailed || !hasBasics || hardBlocks(live).length) return 'blocked';

@@ -123,7 +123,7 @@ describe.skipIf(!enabled)('request a fix (real SQL)', () => {
 
   it('the queue shows the client responded, and approving closes it', async () => {
     await asStaff();
-    const list = await (await (await import('../app/api/ops/reviews/route')).GET()).json();
+    const list = await (await (await import('../app/api/ops/reviews/route')).GET(new Request('http://portal.test/api/ops/reviews'))).json();
     expect(list.records[0].fix).toMatchObject({ status: 'DONE', responseNote: 'Signed POD attached' });
     const { POST } = await import('../app/api/ops/reviews/[reviewId]/route');
     const before = sent.length;

@@ -7,6 +7,7 @@ import { databaseAuthEnabled } from '@/lib/session';
 import {fundingSummary} from '@/lib/ops-funding';
 import {LANE_SQL,type Lane} from '@/lib/funding-engine';
 import { demoFundingData } from '@/lib/demo-funding';
+import { syncWithFactorCloud } from '@/lib/factorcloud-sync';
 
 export const runtime = 'nodejs';
 
@@ -23,10 +24,12 @@ export async function GET(req:Request) {
     if(lane&&!(lane in LANE_SQL))return NextResponse.json({error:'Unknown funding lane.'},{status:400});
     const createdAt=url.searchParams.get('before'),id=url.searchParams.get('beforeId');
     if((createdAt||id)&&(!createdAt||!id||!Number.isFinite(Date.parse(createdAt))||id.length>200))return NextResponse.json({error:'Invalid funding cursor.'},{status:400});
+    // Catch up with anything done in FactorCloud directly before listing.
+    const sync = await syncWithFactorCloud(session.factorId, { force: url.searchParams.get('refresh') === '1' });
     const [settings, runs] = await Promise.all([loadSettings(session.factorId), listRuns(session.factorId,{lane:(lane as Lane)||undefined,before:createdAt&&id?{createdAt,id}:undefined,limit:101})]);
     const summary=await fundingSummary(session.factorId);
     const shown=runs.slice(0,100),last=shown.at(-1);
-    return NextResponse.json({ available: true, mode: settings.mode, runs:shown,summary,next:runs.length>100&&last?{createdAt:last.createdAt,id:last.id}:null, canAct: session.role === 'FACTOR_ADMIN' });
+    return NextResponse.json({ available: true, mode: settings.mode, runs:shown,summary,next:runs.length>100&&last?{createdAt:last.createdAt,id:last.id}:null, canAct: session.role === 'FACTOR_ADMIN', sync });
   } catch (err) {
     return apiErrorResponse(err, 'ops-funding');
   }

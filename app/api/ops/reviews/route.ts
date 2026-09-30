@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { getCompany, listInvoices } from '@/lib/factorcloud';
+import { syncWithFactorCloud } from '@/lib/factorcloud-sync';
 import { pilotAdminViews, requireFactorSession } from '@/lib/portal-auth';
 import { collectRiskInvoiceRecords } from '@/lib/risk';
 import { flaggedForReview, sentAt } from '@/lib/pilot-views';
@@ -31,11 +32,13 @@ type DbReviewRow = {
   client_name: string;
 };
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const session = await requireFactorSession();
     if (await demoRequest()) return NextResponse.json(demoReviewList());
     if (pilotAdminViews()) return NextResponse.json(await pilotReviewList());
+    // Catch up with anything decided in FactorCloud directly before listing.
+    const sync = await syncWithFactorCloud(session.factorId, { force: new URL(req.url).searchParams.get('refresh') === '1' });
     const rows = await query<DbReviewRow>(`
       select r.id as review_id, r.submission_id, s.factorcloud_invoice_id, s.invoice_number_submitted,
         s.debtor_factorcloud_id, s.invoice_amount_submitted, s.invoice_date_submitted, s.workflow_status,
@@ -82,6 +85,7 @@ export async function GET() {
       clientNames: Object.fromEntries(rows.map((row) => [row.factorcloud_client_id, row.client_name])),
       debtorNames: Object.fromEntries(debtorEntries),
       source: { note: 'Review items are stored in the portal database with assignment-ready workflow state and audit history. FactorCloud remains the invoice system of record.' },
+      sync,
     });
   } catch (err) {
     return apiErrorResponse(err, 'ops-reviews');
