@@ -17,5 +17,9 @@ export async function recoveryQueue(factorId: string) {
     select 'stale:'||e.id,'FUNDING_UNKNOWN','Funding has not completed. Check the batch in FactorCloud before resolving.',e.updated_at,e.submission_id,e.id,e.invoice_number,e.factorcloud_invoice_id
     from engine_runs e where e.factor_id=$1 and e.state='FUNDING' and e.updated_at<now()-interval '5 minutes'
       and not exists(select 1 from recovery_items r where r.run_id=e.id and r.status='OPEN')
+    union all
+    select 'approval:'||e.id,'APPROVAL_UNKNOWN','Approval was interrupted. Verify the invoice and batch before retrying.',e.approval_started_at,e.submission_id,e.id,e.invoice_number,e.factorcloud_invoice_id
+    from engine_runs e where e.factor_id=$1 and e.approval_status in ('CHECKING','SENDING','UNKNOWN') and e.approval_started_at<now()-interval '5 minutes'
+      and not exists(select 1 from recovery_items r where r.run_id=e.id and r.kind='APPROVAL_UNKNOWN' and r.status='OPEN')
     order by created_at asc`, [factorId]);
 }

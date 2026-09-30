@@ -9,7 +9,7 @@ export async function claimFunding(runId: string, auto: boolean, settings: RuleS
   try {
     await db.query('begin');
     const { rows: [run] } = await db.query('select * from engine_runs where id=$1 for update', [runId]);
-    if (!run || run.state !== 'APPROVED') { await db.query('rollback'); return false; }
+    if (!run || run.state !== 'APPROVED' || !['IDLE','COMPLETE'].includes(run.approval_status)) { await db.query('rollback'); return false; }
     const amount = Number(run.amount);
     const { rows: [reservation] } = await db.query('select status from funding_reservations where run_id=$1', [runId]);
     if (!Number.isFinite(amount) || amount <= 0 || (reservation && reservation.status !== 'RELEASED')) {
