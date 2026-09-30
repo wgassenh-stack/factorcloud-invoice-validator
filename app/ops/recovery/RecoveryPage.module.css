@@ -1,0 +1,43 @@
+.page { --line:#e5e9ef; --ink:#172233; --muted:#778397; --red:#a44149; }
+.header { display:flex; justify-content:space-between; gap:20px; align-items:flex-start; margin-bottom:16px; }
+.header h1 { margin:0; color:var(--ink); font-size:34px; letter-spacing:-.04em; }
+.header p { max-width:700px; margin:8px 0 0; color:var(--muted); font-size:12px; line-height:1.55; }
+.header button { width:auto; margin:0; padding:8px 11px; border-radius:8px; font-size:10px; }
+.explainer { display:grid; grid-template-columns:34px minmax(0,1fr); gap:10px; margin-bottom:15px; padding:13px 14px; border:1px solid #efd8da; border-radius:12px; background:#fff8f8; }
+.explainerIcon { width:32px; height:32px; display:grid; place-items:center; border-radius:9px; background:#ffecee; color:#a53f47; font-weight:900; }
+.explainer div { display:grid; gap:3px; }
+.explainer strong { color:#6f3036; font-size:11px; }
+.explainer span { color:#88575b; font-size:9px; line-height:1.45; }
+.summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:15px; }
+.metric { padding:13px 14px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+.metric span { display:block; color:#8792a2; font-size:8px; font-weight:900; text-transform:uppercase; letter-spacing:.07em; }
+.metric strong { display:block; margin-top:5px; color:var(--ink); font-size:23px; letter-spacing:-.035em; }
+.metric small { display:block; margin-top:3px; color:#8b95a4; font-size:9px; line-height:1.35; }
+.list { display:grid; gap:11px; }
+.card { border:1px solid var(--line); border-radius:14px; background:#fff; overflow:hidden; box-shadow:0 7px 20px rgba(20,36,55,.035); }
+.cardTop { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; padding:14px 16px; border-bottom:1px solid #eef1f4; }
+.identity { display:grid; gap:5px; min-width:0; }
+.identityTop { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+.identityTop h2 { margin:0; color:#2c384c; font-size:14px; letter-spacing:-.02em; }
+.kind { padding:4px 7px; border-radius:999px; background:#fff0f1; color:#a44149; font-size:8px; font-weight:900; text-transform:uppercase; letter-spacing:.055em; }
+.identity p { margin:0; color:#687589; font-size:10px; line-height:1.45; }
+.meta { color:#8c96a5; font-size:8px; }
+.timelineLink { color:#2768ba; font-size:9px; font-weight:850; text-decoration:none; white-space:nowrap; }
+.body { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.75fr); gap:18px; padding:14px 16px 16px; }
+checklist { display:block; }
+.checks { display:grid; gap:7px; }
+.checks span { position:relative; padding-left:16px; color:#667386; font-size:9px; line-height:1.45; }
+.checks span::before { content:'✓'; position:absolute; left:0; color:#78879a; font-weight:900; }
+.form { display:grid; gap:9px; padding:12px; border:1px solid #e5e9ef; border-radius:11px; background:#f8fafc; }
+.form label { display:grid; gap:5px; }
+.form label>span { color:#667386; font-size:8px; font-weight:900; text-transform:uppercase; letter-spacing:.06em; }
+.form select,.form textarea { width:100%; border:1px solid #d8e0e8; border-radius:8px; background:#fff; color:#334155; font:inherit; font-size:10px; padding:8px 9px; }
+.form textarea { min-height:78px; resize:vertical; line-height:1.4; }
+.form button { width:100%; margin:0; padding:9px 10px; border-radius:8px; background:#172233; color:#fff; font-size:9px; font-weight:900; }
+.form button:disabled { opacity:.45; }
+.readOnly { padding:11px 12px; border:1px solid #e5e9ef; border-radius:10px; background:#f8fafc; color:#7d8999; font-size:9px; line-height:1.45; }
+.error { margin:8px 0 0; color:#9e3f46; font-size:9px; }
+.empty { padding:34px 18px; border:1px solid var(--line); border-radius:14px; background:#fff; text-align:center; }
+.empty strong { display:block; color:#2b7a50; font-size:15px; }
+.empty span { display:block; margin-top:5px; color:#8692a2; font-size:10px; }
+@media(max-width:850px){.body{grid-template-columns:1fr}.summary{grid-template-columns:1fr}.header{display:grid}.cardTop{grid-template-columns:1fr}.timelineLink{white-space:normal}}
