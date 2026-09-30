@@ -6,10 +6,10 @@ import styles from './OpsSidebar.module.css';
 
 const GROUPS = [
   {
-    label: 'Automation',
+    label: 'Workspace',
     links: [
-      { key: 'overview', href: '/ops', label: 'Automation center', icon: 'A' },
-      { key: 'funding', href: '/ops/funding', label: 'Funding', icon: '$' },
+      { key: 'overview', href: '/ops', label: 'Overview', icon: 'A' },
+      { key: 'funding', href: '/ops/funding', label: 'Funding center', icon: '$' },
       { key: 'reviews', href: '/ops/reviews', label: 'Review queue', icon: 'R' },
       { key: 'recovery', href: '/ops/recovery', label: 'Recovery', icon: '!' },
     ],
@@ -17,8 +17,8 @@ const GROUPS = [
   {
     label: 'Portfolio',
     links: [
-      { key: 'clients', href: '/ops#portfolio', label: 'Clients', icon: 'C' },
       { key: 'debtors', href: '/ops/debtors', label: 'Debtors', icon: 'D' },
+      { key: 'reports', href: '/ops/reports', label: 'Reports', icon: '↗' },
     ],
   },
   {
@@ -31,7 +31,7 @@ const GROUPS = [
   {
     label: 'Admin',
     links: [
-      { key: 'connection', href: '/connection', label: 'Diagnostics', icon: '↗' },
+      { key: 'connection', href: '/connection', label: 'Diagnostics', icon: '•' },
     ],
   },
 ] as const;
@@ -65,7 +65,7 @@ export function OpsSidebar({ active }: { active: LinkKey }) {
     </nav>
 
     <div className={`${styles.footer} opsSidebarFooter`}>
-      <div className={styles.footerMeta}><strong>Internal factor view</strong><span>Factor-wide access</span></div>
+      <div className={styles.footerMeta}><strong>Factor Admin</strong><span>Internal operations view</span></div>
       <OpsSignOut />
     </div>
   </aside>;
