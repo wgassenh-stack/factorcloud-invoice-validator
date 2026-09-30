@@ -376,13 +376,14 @@ export function laneOf(run: Pick<EngineRun, 'state' | 'mode'>): Lane {
   return run.state === 'APPROVED' ? 'decision' : run.state === 'FUNDED' ? 'funded' : run.state === 'REVIEW' ? 'review' : run.state === 'CLOSED' ? 'closed' : 'exceptions';
 }
 
-export async function listRuns(factorId: string, filter: { id?: string; limit?: number; states?: RunState[]; lane?: Lane; before?: {createdAt:string;id:string} } = {}): Promise<EngineRun[]> {
+export async function listRuns(factorId: string, filter: { id?: string; limit?: number; states?: RunState[]; lane?: Lane; clientId?: string; before?: {createdAt:string;id:string} } = {}): Promise<EngineRun[]> {
   await ensureEngineSchema();
   const params:unknown[]=[factorId];
   let extra='';
   if(filter.id){params.push(filter.id);extra+=' and r.id = $'+params.length;}
   if(filter.states?.length){params.push(filter.states);extra+=' and r.state = any($'+params.length+'::text[])';}
   if(filter.lane)extra+=' and '+LANE_SQL[filter.lane];
+  if(filter.clientId){params.push(filter.clientId);extra+=' and r.factorcloud_client_id = $'+params.length;}
   if(filter.before){params.push(filter.before.createdAt,filter.before.id);extra+=' and (r.created_at,r.id) < ($'+(params.length-1)+'::timestamptz,$'+params.length+'::text)';}
   const rows = await query<RunRow>(`
     select r.*, to_char(r.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as created_cursor, c.name as client_name,

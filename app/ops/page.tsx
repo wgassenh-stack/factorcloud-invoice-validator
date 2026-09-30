@@ -20,6 +20,7 @@ export default function Overview() {
     {errors.map(error=><OpsNotice tone="bad" key={error}>{error}</OpsNotice>)}
     {recoveryCount!=null&&recoveryCount>0&&<div className="oc-alert"><div><strong>{recoveryCount} operation{recoveryCount===1?'':'s'} need reconciliation</strong><p>Verify the remote result before another approval or funding attempt.</p></div><a className="oc-button" href="/ops/recovery">Open Recovery</a></div>}
     {loading&&!reviews&&!funding?<DashboardSkeleton metrics={4}/>:<>
+      <WaitingForYou toFund={summary?.approved??null} paperwork={reviews?factorRows.length:null} problems={summary?summary.failed+summary.uncertain:null} recovery={recoveryCount}/>
       {activity?.available&&activity.summary?.today&&<AutomationToday data={activity}/>}
       <div className="oc-metrics">
         <OpsMetric label="Paperwork exceptions" value={reviews?rows.length:'—'} detail={reviews?factorRows.length+' with factor · '+clientCount+' with client':'Review data unavailable'} href="/ops/reviews"/>
@@ -72,4 +73,12 @@ function AutomationControl({data}:{data:FundingData|null}) {
   return <div className="oc-body"><h3 style={a?.paused?{color:'#a73544'}:undefined}><OpsIcon name="rules"/> {headline}</h3><p className="oc-small oc-muted">{note}</p>
     {c&&<dl className="oc-facts"><div><dt>Auto-fund</dt><dd>{c.fund} client{c.fund===1?'':'s'}</dd></div><div><dt>Auto-approve</dt><dd>{c.approve}</dd></div><div><dt>Suggest only</dt><dd>{c.suggest}</dd></div><div><dt>Off</dt><dd>{c.off}</dd></div><div><dt>Approval failures</dt><dd>{data.summary?.failed??'—'}</dd></div></dl>}
     <p><a className="oc-link" href="/ops/rules">{a?.paused?'Resume automation →':'Pause or change the rules →'}</a></p></div>;
+}
+
+/** The factor's to-do list in one line, above the automation's results. */
+function WaitingForYou({toFund,paperwork,problems,recovery}:{toFund:number|null;paperwork:number|null;problems:number|null;recovery:number|null}) {
+  const items=[{n:toFund,label:'to fund',href:'/ops/funding?lane=decision'},{n:paperwork,label:'paperwork to review',href:'/ops/reviews'},{n:problems,label:'approval problem',plural:'approval problems',href:'/ops/funding?lane=exceptions'},{n:recovery,label:'to reconcile',href:'/ops/recovery'}].filter(i=>i.n!=null);
+  if(!items.length)return null;
+  const open=items.filter(i=>(i.n??0)>0);
+  return <nav className={styles.waiting} aria-label="Waiting for you">{open.length?<><strong>Waiting for you</strong>{open.map(i=><a key={i.label} href={i.href}><b>{i.n}</b> {i.n===1||!i.plural?i.label:i.plural}</a>)}</>:<span>✓ Nothing is waiting for you right now.</span>}</nav>;
 }

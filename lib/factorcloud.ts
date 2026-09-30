@@ -305,6 +305,15 @@ export async function getInvoice(invoiceId: string): Promise<unknown | null> {
   }
 }
 
+/**
+ * A short-lived link to all of an invoice's documents combined into one PDF
+ * (GET /invoices/{id}/combined-documentation). Null when FactorCloud has none to give.
+ */
+export async function invoiceDocumentsUrl(invoiceId: string): Promise<string | null> {
+  const body = await fcRequest<{ downloadUrl?: unknown }>(`/invoices/${encodeURIComponent(invoiceId)}/combined-documentation`);
+  return typeof body.downloadUrl === 'string' && /^https:\/\//.test(body.downloadUrl) ? body.downloadUrl : null;
+}
+
 /** Search terms that together find an invoice number despite punctuation differences ("INV-001" vs "INV001"). */
 export function duplicateSearchTerms(invoiceNumber: string): string[] {
   const raw = invoiceNumber.trim();
