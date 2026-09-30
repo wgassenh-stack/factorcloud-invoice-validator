@@ -1,6 +1,7 @@
 import 'server-only';
 
-import { FactorCloudError, allowedDebtorIds, getCompany } from './factorcloud';
+import { FactorCloudError, allowedDebtorIds, findExistingInvoice, getCompany } from './factorcloud';
+import { normalizeIdentifier } from './normalize';
 import { scoreDebtor } from './matching';
 import { validate } from './rules';
 import { applyFactorCloudAvailability } from './validation-availability';
@@ -15,6 +16,8 @@ import type { AnalyzeResponse, AnalyzedDocument, CompanyRecord } from './types';
 /** One group of documents, checked as one invoice. Same shape the invoice create step expects. */
 export interface PaperworkCard extends AnalyzeResponse {
   id: string;
+  /** The invoice number is already in FactorCloud for this client: sending it would be refused. */
+  existing?: { invoiceId: string; invoiceNumber: string; status: string | null } | null;
   /** Positions of this card's documents in the upload, in the order the files must be sent. */
   documentIndexes: number[];
 }
@@ -206,8 +209,26 @@ export async function checkCards(clientId: string, documents: AnalyzedDocument[]
       credit: null,
       analysisReceipt: signAnalysisReceipt({ version: 1, clientId, debtorId: debtor?.id ?? null, primaryIndex, documents: docs }),
     };
+    // Already in FactorCloud? Said now rather than after the sender has checked everything. The
+    // send step checks again, so a lookup that fails here only means no early warning.
+    const number = docs[primaryIndex].fields.invoiceNumber?.trim();
+    if (number && !lookupFailed) {
+      try {
+        const { existing } = await findExistingInvoice(clientId, number);
+        if (existing) card.existing = { invoiceId: existing.id, invoiceNumber: number, status: existing.status ?? null };
+      } catch (err) { console.error('[paperwork] duplicate lookup failed', err); }
+    }
     return card;
   }));
+  // Two invoices in this upload with the same number: only one can be sent.
+  const seen = new Map<string, PaperworkCard>();
+  for (const card of cards) {
+    const key = normalizeIdentifier(card.documents[card.primaryIndex]?.fields.invoiceNumber);
+    if (!key) continue;
+    const first = seen.get(key);
+    if (first) card.warnings.push(`Same invoice number as another invoice in this upload (${card.documents[card.primaryIndex].fields.invoiceNumber}). Only one of them can be sent.`);
+    else seen.set(key, card);
+  }
   return { cards, warnings };
 }
 

@@ -24,7 +24,7 @@ import { ensureEngineSchema } from './schema';
 // Every step is recorded in engine_runs. Nothing here throws into the send step: the invoice is
 // already created, and a failure leaves it for a person.
 
-export type RunState = 'SUGGESTED' | 'REVIEW' | 'APPROVED' | 'FUNDING' | 'FUNDED' | 'FAILED';
+export type RunState = 'SUGGESTED' | 'REVIEW' | 'APPROVED' | 'FUNDING' | 'FUNDED' | 'FAILED' | 'CLOSED';
 
 export interface EngineRun {
   id: string;
@@ -343,17 +343,18 @@ type RunRow = {
  * The Funding Center's lanes. "Needs a click" holds approved invoices waiting to be funded and, in
  * auto-fund mode, held invoices waiting for one click that approves and funds them.
  */
-export type Lane = 'decision' | 'suggestions' | 'exceptions' | 'funded' | 'review';
+export type Lane = 'decision' | 'suggestions' | 'exceptions' | 'funded' | 'review' | 'closed';
 export const LANE_SQL: Record<Lane, string> = {
   decision: "(r.state = 'APPROVED' or (r.state = 'SUGGESTED' and r.mode = 'fund'))",
   suggestions: "(r.state = 'SUGGESTED' and r.mode <> 'fund')",
   exceptions: "r.state in ('FAILED', 'FUNDING')",
   funded: "r.state = 'FUNDED'",
   review: "r.state = 'REVIEW'",
+  closed: "r.state = 'CLOSED'",
 };
 export function laneOf(run: Pick<EngineRun, 'state' | 'mode'>): Lane {
   if (run.state === 'SUGGESTED') return run.mode === 'fund' ? 'decision' : 'suggestions';
-  return run.state === 'APPROVED' ? 'decision' : run.state === 'FUNDED' ? 'funded' : run.state === 'REVIEW' ? 'review' : 'exceptions';
+  return run.state === 'APPROVED' ? 'decision' : run.state === 'FUNDED' ? 'funded' : run.state === 'REVIEW' ? 'review' : run.state === 'CLOSED' ? 'closed' : 'exceptions';
 }
 
 export async function listRuns(factorId: string, filter: { id?: string; limit?: number; states?: RunState[]; lane?: Lane; before?: {createdAt:string;id:string} } = {}): Promise<EngineRun[]> {
