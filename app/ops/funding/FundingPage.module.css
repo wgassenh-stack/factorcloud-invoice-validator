@@ -1,0 +1,64 @@
+.page { --line:#e5e9ef; --ink:#172233; --muted:#768396; --blue:#2167d6; --green:#1d7a51; --amber:#936719; --red:#a44149; }
+.header { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; margin-bottom:18px; }
+.headerCopy { max-width:700px; }
+.headerMeta { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+.header h1 { margin:0; color:var(--ink); font-size:34px; letter-spacing:-.04em; }
+.header p { margin:8px 0 0; color:var(--muted); font-size:12px; line-height:1.55; }
+.actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.actions a,.actions button { width:auto; min-height:36px; margin:0; padding:8px 11px; border-radius:8px; text-decoration:none; font-size:10px; font-weight:850; }
+.mode { padding:6px 9px; border-radius:999px; background:#eef4ff; border:1px solid #d9e4f7; color:#285da9; font-size:9px; font-weight:900; text-transform:uppercase; letter-spacing:.055em; }
+.mode[data-mode='fund'] { background:#eaf7ef; border-color:#d3eadc; color:#26754d; }
+.mode[data-mode='approve'] { background:#fff5dc; border-color:#efe0b4; color:#8e651c; }
+.mode[data-mode='suggest'] { background:#f5effe; border-color:#e7dbfa; color:#6949a0; }
+.mode[data-mode='off'] { background:#f3f4f6; border-color:#e4e7ec; color:#667085; }
+.metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:11px; margin-bottom:18px; }
+.metric { min-height:104px; padding:14px; border:1px solid var(--line); border-radius:13px; background:white; display:grid; gap:5px; }
+.metric span { color:#7e8999; font-size:8px; font-weight:900; text-transform:uppercase; letter-spacing:.07em; }
+.metric strong { color:var(--ink); font-size:26px; letter-spacing:-.04em; }
+.metric small { margin-top:auto; color:#8792a2; font-size:9px; line-height:1.4; }
+.metric[data-tone='warn'] { border-color:#ecdfb8; background:#fffdf7; }
+.metric[data-tone='danger'] { border-color:#efd7d9; background:#fffafb; }
+.section { margin-top:15px; border:1px solid var(--line); border-radius:15px; background:white; overflow:hidden; box-shadow:0 7px 21px rgba(20,36,55,.035); }
+.sectionHeader { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; padding:15px 17px 12px; border-bottom:1px solid #eef1f4; }
+.sectionTitle { display:grid; gap:3px; }
+.sectionTitle span { color:#8792a2; font-size:8px; font-weight:900; text-transform:uppercase; letter-spacing:.085em; }
+.sectionTitle h2 { margin:0; color:#273347; font-size:16px; letter-spacing:-.02em; }
+.sectionTitle p { margin:0; color:#828e9f; font-size:9px; line-height:1.45; }
+.count { display:inline-grid; min-width:23px; height:23px; place-items:center; border-radius:999px; background:#f1f4f7; color:#647286; font-size:9px; font-weight:900; }
+.rows { display:grid; }
+.row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:15px; padding:14px 17px; border-bottom:1px solid #eef1f4; }
+.row:last-child { border-bottom:0; }
+.rowMain { min-width:0; display:grid; gap:7px; }
+.rowTop { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+.rowTop strong { color:#2d394c; font-size:11px; }
+.meta { color:#8b95a4; font-size:9px; }
+.pill { padding:4px 7px; border-radius:999px; font-size:8px; font-weight:900; }
+.pill[data-state='APPROVED'] { background:#eef4ff; color:#2f64aa; }
+.pill[data-state='FUNDED'] { background:#eaf7ef; color:#24764b; }
+.pill[data-state='SUGGESTED'] { background:#f4effd; color:#6949a0; }
+.pill[data-state='FAILED'],.pill[data-state='FUNDING'] { background:#fff0f1; color:#a24148; }
+.reasons { margin:0; padding:0; list-style:none; display:grid; gap:3px; }
+.reasons li { position:relative; padding-left:11px; color:#6f7c8f; font-size:9px; line-height:1.4; }
+.reasons li::before { content:'•'; position:absolute; left:1px; color:#c58b24; }
+.detail { margin:0; color:#7c8798; font-size:9px; }
+.rulesButton { width:auto; margin:0; padding:0; border:0; background:transparent; color:#2768ba; font-size:9px; font-weight:850; text-align:left; }
+.rules { margin-top:3px; display:grid; gap:5px; padding:9px; border-radius:9px; background:#f8fafc; }
+.rule { display:grid; grid-template-columns:20px minmax(0,1fr); gap:7px; align-items:flex-start; }
+.rule b { width:19px; height:19px; display:grid; place-items:center; border-radius:6px; background:#edf1f5; color:#6e7b8c; font-size:8px; }
+.rule[data-status='PASS'] b { background:#eaf7ef; color:#24764b; }
+.rule[data-status='HOLD'] b,.rule[data-status='REVIEW'] b { background:#fff5dc; color:#8e651c; }
+.rule div { display:grid; gap:1px; }
+.rule strong { color:#455266; font-size:9px; }
+.rule span { color:#8993a2; font-size:8px; line-height:1.35; }
+.rowSide { min-width:155px; display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
+.amount { color:#273347; font-size:14px; }
+.rowSide button,.rowSide a { width:auto; margin:0; padding:8px 10px; border-radius:8px; font-size:9px; font-weight:850; text-decoration:none; }
+.fund { background:#176fd1; color:white; border:1px solid #176fd1; }
+.approve { background:#172233; color:white; border:1px solid #172233; }
+.recovery { background:#fff4f4; color:#9e3e46; border:1px solid #efd5d8; }
+.empty { padding:22px 17px; color:#8792a2; font-size:10px; text-align:center; }
+.notice { margin-bottom:12px; padding:10px 12px; border:1px solid #eedfb4; border-radius:9px; background:#fff9e9; color:#80621d; font-size:10px; }
+.toast { position:fixed; right:22px; bottom:22px; z-index:20; max-width:420px; padding:11px 13px; border-radius:10px; background:#172233; color:white; box-shadow:0 15px 35px rgba(17,32,51,.2); font-size:10px; }
+.toast[data-tone='fail'] { background:#8f353c; }
+@media(max-width:950px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr));}.header{display:grid}.row{grid-template-columns:1fr}.rowSide{align-items:flex-start;min-width:0;}}
+@media(max-width:600px){.metrics{grid-template-columns:1fr}.actions{width:100%}.rowTop{align-items:flex-start}.header h1{font-size:30px}}
