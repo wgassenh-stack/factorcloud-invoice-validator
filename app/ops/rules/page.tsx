@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { RulePreview } from '@/app/components/RulePreview';
 import { OpsSidebar } from '@/app/components/OpsSidebar';
 import { Skeleton } from '@/app/components/CommandCharts';
 import type { EngineMode, RuleSettings } from '@/lib/rules/settings';
@@ -85,6 +86,7 @@ export default function RulesPage() {
       {!s && !error && <Skeleton height={200} lines={6} />}
 
       {s && <>
+        <RulePreview settings={s}/>
         <section className="dashCard rulesCard">
           <div className="dashCardHeader"><div><span>Step 1</span><h2>How far the engine may go</h2></div></div>
           <div className="rulesModes">

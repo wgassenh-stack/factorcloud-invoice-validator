@@ -1,0 +1,5 @@
+/** Browser-only, per-account drafts. Files stay on this device; never placed in localStorage. */
+const DB='factorcloud-paperwork-drafts';
+async function database():Promise<IDBDatabase>{return new Promise((resolve,reject)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>r.result.createObjectStore('drafts');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
+export async function loadDraft<T>(key:string):Promise<T|null>{const db=await database();try{return await new Promise((resolve,reject)=>{const tx=db.transaction('drafts','readonly');const r=tx.objectStore('drafts').get(key);r.onsuccess=()=>resolve(r.result??null);r.onerror=()=>reject(r.error);});}finally{db.close();}}
+export async function saveDraft(key:string,value:unknown):Promise<void>{const db=await database();try{await new Promise<void>((resolve,reject)=>{const tx=db.transaction('drafts','readwrite');if(value===null)tx.objectStore('drafts').delete(key);else tx.objectStore('drafts').put(value,key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}finally{db.close();}}

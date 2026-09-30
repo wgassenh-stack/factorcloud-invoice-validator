@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PortalNav } from '@/app/components/PortalNav';
+import { UploadDraft } from '@/app/components/UploadDraft';
 import { ProcessingTheater, type TheaterPhase } from '@/app/components/ProcessingTheater';
 import { CameraCapture } from '@/app/components/CameraCapture';
 import { SubmitAnywayBox } from '@/app/components/SubmitAnyway';
@@ -40,7 +41,7 @@ export default function SendPaperworkPage() {
   const [preview, setPreview] = useState<number | null>(null);
   const [asDriver, setAsDriver] = useState(false);
 
-  useEffect(() => { setAsDriver(driverViewInBrowser()); }, []);
+  useEffect(() => { setAsDriver(driverViewInBrowser()); void fetch('/api/portal-auth/session').then(r=>r.json()).then(b=>{if(b.user?.role==='DRIVER')setAsDriver(true);}).catch(()=>{}); }, []);
 
   // A viewable link for every file, for thumbnails and the preview.
   const urls = useMemo(() => files.map((file) => URL.createObjectURL(file)), [files]);
@@ -259,6 +260,8 @@ export default function SendPaperworkPage() {
         <div>
           <span className="eyebrow">FactorCloud Client Portal</span>
           <h1>{asDriver ? 'Send in paperwork' : 'Submit invoices'}</h1>
+          <UploadDraft empty={!files.length} value={{files,loads,load,upload,cards,unassigned,suggestions,left,skipped}}
+            onRestore={draft=>{setFiles(draft.files);setLoads(draft.loads);setLoad(draft.load);setUpload(draft.upload);setCards(draft.cards.map(c=>c.sent?.state==='sending'?{...c,sent:{...c.sent,state:'error',message:'Submission interrupted. Check your invoices before trying again.'}}:c));setUnassigned(draft.unassigned);setSuggestions(draft.suggestions);setLeft(draft.left);setSkipped(draft.skipped);}}/>
           <p>{asDriver
             ? 'Snap or upload the invoice, BOL and signed POD. Doing several loads? Tap “Next load” between them. We sort and check everything before it goes to your factor.'
             : 'Upload one invoice with its paperwork, or a whole stack. We read every page, sort it into one invoice each, and check it before anything reaches FactorCloud.'}</p>

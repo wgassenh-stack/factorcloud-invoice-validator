@@ -67,6 +67,7 @@ describe('create retry classification', () => {
     expect(isDefinitiveCreateFailure(new FactorCloudError('bad request', 400, null))).toBe(true);
     expect(isDefinitiveCreateFailure(new FactorCloudError('not signed in', 401, null))).toBe(true);
     expect(isDefinitiveCreateFailure(new FactorCloudError('server error', 500, null))).toBe(false);
+    expect(isDefinitiveCreateFailure(new FactorCloudError('request timeout', 408, null))).toBe(false);
     expect(isDefinitiveCreateFailure(new FactorCloudError('Invoice created but the response had no invoice id.', 502, null))).toBe(false);
     expect(isDefinitiveCreateFailure(new TypeError('fetch failed'))).toBe(false);
     expect(isDefinitiveCreateFailure(new FactorCloudError('FactorCloud could not be reached (POST /invoices).', 503, null))).toBe(false);

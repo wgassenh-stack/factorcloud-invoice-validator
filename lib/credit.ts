@@ -12,7 +12,7 @@ export interface DebtorCredit {
   approved: boolean | null;
   rating: number | null;
   noBuy: boolean;
-  /** Unpaid balance already owed by this debtor on this client's invoices. */
+  /** This debtor's share of the client's OpenAR: approved or funded invoices not yet paid. */
   openBalance: number;
   openCount: number;
   thisInvoice: number;

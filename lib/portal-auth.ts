@@ -81,6 +81,7 @@ export function pilotAdminViews(): boolean {
  * with the shared password, whoever holds it; with database sign-in, signed-in factor staff.
  */
 export async function adminDriverViewAllowed(): Promise<boolean> {
+  if (databaseAuthEnabled() && (await currentValidPortalSession())?.role === 'DRIVER') return true;
   if (!adminViewsEnabled()) return false;
   if (!databaseAuthEnabled()) return true;
   const session = await currentValidPortalSession();
@@ -107,7 +108,7 @@ export async function requireFactorSession(): Promise<PortalSession> {
   if (pilotAdminViews()) return PILOT_ADMIN_SESSION;
   if (!databaseAuthEnabled()) throw new PortalAccessError('Factor operations require database authentication.', 404);
   const session = await requirePortalSession();
-  if (session.role === 'CLIENT_USER') throw new PortalAccessError('Factor access required.', 403);
+  if (session.role === 'CLIENT_USER' || session.role === 'DRIVER') throw new PortalAccessError('Factor access required.', 403);
   return session;
 }
 
@@ -120,7 +121,7 @@ export async function resolveConfiguredClientId(): Promise<string> {
   }
 
   const session = await requirePortalSession();
-  if (session.role !== 'CLIENT_USER') {
+  if (session.role !== 'CLIENT_USER' && session.role !== 'DRIVER') {
     if (!configured) throw new PortalAccessError('Client portal preview is not configured.', 403);
     return configured;
   }
@@ -167,3 +168,4 @@ export async function portalClientRecord(factorId: string, factorCloudClientId: 
 }
 
 export class PortalAccessError extends PublicError {}
+

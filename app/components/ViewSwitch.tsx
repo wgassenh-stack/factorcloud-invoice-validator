@@ -21,6 +21,7 @@ export function ViewSwitch({ current }: { current: 'client' | 'staff' }) {
       if (!res.ok) return;
       const session = await res.json() as SessionInfo;
       const demo = session.mode === 'demo' || demoInBrowser();
+      if (session.user?.role === 'DRIVER') { setOptions({driver:false,show:false}); return; }
       const staff = session.mode === 'database' && session.authenticated && session.user?.role !== 'CLIENT_USER';
       const admin = Boolean(session.adminViews);
       setOptions({ driver: demo || admin, show: demo || staff || admin });

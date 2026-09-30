@@ -1,364 +1,392 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityTrendChart, RankBars, StatusDonut, money } from '@/app/components/DashboardCharts';
-import { DashboardViewSwitcher, type DashboardPreset, type DashboardWidgetOption } from '@/app/components/DashboardViews';
-import { OpsSignOut } from '../components/OpsSignOut';
-import type { ActivityPoint, StatusMixItem } from '@/lib/dashboard';
-import type { AgingSummary, DayVolume, DsoPoint, ExposureItem, MonthlyCash, PortfolioKpis } from '@/lib/analytics';
-import { AgingBars, CalendarHeatmap, CashFlowBars, CountUp, DashboardSkeleton, DsoLine, ExposureTreemap, compactMoney } from '@/app/components/CommandCharts';
+import { OpsSidebar } from '@/app/components/OpsSidebar';
+import { DashboardSkeleton } from '@/app/components/CommandCharts';
 import { DemoBadge } from '@/app/components/DemoBadge';
-import { ViewSwitch } from '@/app/components/ViewSwitch';
+import styles from './AutomationCenter.module.css';
 
-type OpsClientSummary = {
+type ClientSummary = {
   clientId: string;
   clientName: string;
   invoiceCount: number;
   invoiceAmount: number;
   latestInvoiceDate: string | null;
-  statuses: Record<string, number>;
 };
 
-type RecentInvoice = {
-  id: string;
-  invoiceNumber: string | null;
-  companyClientId: string | null;
-  clientName: string;
-  invoiceAmount: number | null;
-  invoiceDate: string | null;
-  status: string | null;
-};
-
-type Arrival = {
-  submissionId: string | null;
-  invoiceId: string;
-  invoiceNumber: string | null;
-  clientId: string;
-  clientName: string;
-  invoiceAmount: number | null;
-  documentCount: number | null;
-  submittedBy: string | null;
-  createdAt: string;
-  status: string | null;
-};
-
-type OpsResponse = {
-  clients: OpsClientSummary[];
+type OpsData = {
+  clients: ClientSummary[];
   totals: { clientCount: number; invoiceCount: number; invoiceAmount: number };
   portfolio: {
-    weeklyActivity: ActivityPoint[];
-    statuses: StatusMixItem[];
-    averageInvoiceAmount: number;
-    last30Amount: number;
-    prior30Amount: number;
-    last30TrendPct: number | null;
     topClientShare: number;
-    recentInvoices: RecentInvoice[];
-    reviewSummary: { available: boolean; openCount: number; openAmount: number; oldestCreatedAt: string | null };
-    arrivedToday: { available: boolean; count: number; amount: number; items: Arrival[] };
+    arrivedToday: { available: boolean; count: number; amount: number };
   };
   analytics: {
-    today: string;
-    kpis: PortfolioKpis;
-    aging: AgingSummary;
-    exposure: ExposureItem[];
-    monthlyCash: MonthlyCash[];
-    dso: DsoPoint[];
-    daily: DayVolume[];
+    kpis: {
+      openBalance: number;
+      openCount: number;
+      fundedLast30: number;
+      collectedLast30: number;
+      feesLast30: number;
+      dsoLast90: number | null;
+    };
+    aging: { totals: number[]; openBalance: number; openCount: number };
   };
   demo?: boolean;
-  source: { returnedInvoiceCount: number; complete?: boolean; note: string };
-  error?: string;
+  source: { complete?: boolean; note: string };
 };
 
-const FACTOR_PRESETS: DashboardPreset[] = [
-  { id: 'command', label: 'Command center', description: 'Exposure, aging, cash and collections', widgets: ['kpis', 'aging', 'exposure', 'cashflow', 'dso', 'arrivals', 'reviews', 'calendar', 'clients'] },
-  { id: 'operations', label: 'Operations', description: 'Reviews, volume and the latest work', widgets: ['metrics', 'arrivals', 'reviews', 'volume', 'status', 'recent', 'clients'] },
-];
+type FundingRun = {
+  id: string;
+  factorCloudInvoiceId: string;
+  clientName: string | null;
+  invoiceNumber: string | null;
+  amount: number;
+  outcome: 'FUND' | 'HOLD' | 'REVIEW';
+  state: 'SUGGESTED' | 'REVIEW' | 'APPROVED' | 'FUNDING' | 'FUNDED' | 'FAILED';
+  reasons: string[];
+  detail: string | null;
+  autoFunded: boolean;
+  fundedAt: string | null;
+  createdAt: string;
+};
 
-const FACTOR_WIDGETS: DashboardWidgetOption[] = [
-  { id: 'kpis', label: 'Portfolio KPIs', description: 'Open A/R, funded, collected, fees and days to collect' },
-  { id: 'aging', label: 'A/R aging', description: 'Open balances by age bucket and client' },
-  { id: 'exposure', label: 'Concentration map', description: 'Treemap of open exposure by client, with flags' },
-  { id: 'cashflow', label: 'Cash in vs. out', description: 'Monthly advances against collections' },
-  { id: 'dso', label: 'Days to collect', description: 'Monthly trend of days from invoice to payment' },
-  { id: 'calendar', label: 'Submission calendar', description: 'Daily invoice volume heatmap' },
-  { id: 'metrics', label: 'Key metrics', description: '30-day activity, clients, reviews and average invoice size' },
-  { id: 'volume', label: 'Volume trend', description: 'Twelve weeks of factor-wide invoice activity' },
-  { id: 'top-clients', label: 'Top clients', description: 'Clients ranked by invoice activity amount' },
-  { id: 'status', label: 'Status mix', description: 'FactorCloud status distribution across invoices' },
-  { id: 'arrivals', label: 'Arrived today', description: 'Invoices that passed every check and went straight into FactorCloud today' },
-  { id: 'reviews', label: 'Review workload', description: 'Open portal reviews and queue context' },
-  { id: 'recent', label: 'Recent invoices', description: 'Latest invoice activity across clients' },
-  { id: 'clients', label: 'Client table', description: 'Searchable operating view across clients' },
-];
+type FundingData = {
+  available: boolean;
+  mode: 'off' | 'suggest' | 'approve' | 'fund';
+  runs: FundingRun[];
+  canAct: boolean;
+  note?: string;
+};
 
-export default function FactorOperationsPage() {
-  const [data, setData] = useState<OpsResponse | null>(null);
+type ReviewRecord = {
+  id: string;
+  reviewId?: string;
+  submissionId?: string;
+  invoiceNumber: string | null;
+  companyClientId: string | null;
+  companyDebtorId: string | null;
+  invoiceAmount: number | null;
+  reason?: string;
+  createdAt?: string;
+};
+
+type ReviewData = {
+  records: ReviewRecord[];
+  clientNames: Record<string, string>;
+  debtorNames: Record<string, string>;
+};
+
+type RecoveryItem = {
+  id: string;
+  kind: string;
+  detail: string;
+  created_at: string;
+  submission_id: string | null;
+  invoice_number: string | null;
+  factorcloud_invoice_id: string | null;
+};
+
+type RecoveryData = { items: RecoveryItem[]; editable: boolean; note?: string };
+
+type WorkItem = {
+  key: string;
+  kind: 'review' | 'funding' | 'recovery';
+  title: string;
+  meta: string;
+  amount: number | null;
+  status: string;
+  href: string;
+  createdAt: string;
+  priority: number;
+};
+
+const MODE_LABEL: Record<FundingData['mode'], string> = {
+  off: 'Automation off',
+  suggest: 'Suggest only',
+  approve: 'Auto-approve',
+  fund: 'Auto-fund active',
+};
+
+export default function AutomationCenterPage() {
+  const [ops, setOps] = useState<OpsData | null>(null);
+  const [funding, setFunding] = useState<FundingData | null>(null);
+  const [reviews, setReviews] = useState<ReviewData | null>(null);
+  const [recovery, setRecovery] = useState<RecoveryData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [query, setQuery] = useState('');
-  const [visibleWidgets, setVisibleWidgets] = useState<string[]>(FACTOR_PRESETS[0].widgets);
 
   async function load() {
     setLoading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/ops/clients', { cache: 'no-store' });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Could not load factor operations data.');
-      setData(body);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
+    setWarnings([]);
+    const requests = [
+      fetchJson<OpsData>('/api/ops/clients'),
+      fetchJson<FundingData>('/api/ops/funding'),
+      fetchJson<ReviewData>('/api/ops/reviews'),
+      fetchJson<RecoveryData>('/api/ops/recovery'),
+    ] as const;
+    const results = await Promise.allSettled(requests);
+    const failures: string[] = [];
+
+    if (results[0].status === 'fulfilled') setOps(results[0].value);
+    else failures.push(`Portfolio: ${message(results[0].reason)}`);
+    if (results[1].status === 'fulfilled') setFunding(results[1].value);
+    else failures.push(`Funding: ${message(results[1].reason)}`);
+    if (results[2].status === 'fulfilled') setReviews(results[2].value);
+    else failures.push(`Reviews: ${message(results[2].reason)}`);
+    if (results[3].status === 'fulfilled') setRecovery(results[3].value);
+    else failures.push(`Recovery: ${message(results[3].reason)}`);
+
+    setWarnings(failures);
+    setLoading(false);
   }
 
   useEffect(() => { void load(); }, []);
 
-  const filtered = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    if (!term) return data?.clients ?? [];
-    return (data?.clients ?? []).filter((client) => client.clientName.toLowerCase().includes(term) || client.clientId.toLowerCase().includes(term));
-  }, [data, query]);
+  const runs = funding?.runs ?? [];
+  const reviewCount = reviews?.records.length ?? 0;
+  const readyToFund = runs.filter((run) => run.state === 'APPROVED');
+  const autoFundedToday = runs.filter((run) => run.state === 'FUNDED' && run.autoFunded && isToday(run.fundedAt));
+  const recoveryCount = recovery?.items.length ?? 0;
 
-  const topClients = useMemo(() => [...(data?.clients ?? [])].sort((a, b) => b.invoiceAmount - a.invoiceAmount).slice(0, 7), [data]);
-  const show = (widget: string) => visibleWidgets.includes(widget);
+  const work = useMemo<WorkItem[]>(() => {
+    const items: WorkItem[] = [];
+    for (const item of recovery?.items ?? []) {
+      items.push({
+        key: `recovery-${item.id}`,
+        kind: 'recovery',
+        title: item.invoice_number ? `Invoice ${item.invoice_number}` : 'Recovery item',
+        meta: item.detail,
+        amount: null,
+        status: 'Reconcile',
+        href: '/ops/recovery',
+        createdAt: item.created_at,
+        priority: 0,
+      });
+    }
+    for (const row of reviews?.records ?? []) {
+      const client = row.companyClientId ? reviews?.clientNames[row.companyClientId] ?? row.companyClientId : 'Client';
+      const debtor = row.companyDebtorId ? reviews?.debtorNames[row.companyDebtorId] ?? row.companyDebtorId : null;
+      items.push({
+        key: `review-${row.reviewId ?? row.id}`,
+        kind: 'review',
+        title: `Invoice ${row.invoiceNumber ?? row.id.slice(0, 8)}`,
+        meta: [client, debtor, row.reason].filter(Boolean).join(' · '),
+        amount: row.invoiceAmount,
+        status: 'Review',
+        href: row.submissionId ? `/ops/submissions/${encodeURIComponent(row.submissionId)}` : '/ops/reviews',
+        createdAt: row.createdAt ?? '',
+        priority: 1,
+      });
+    }
+    for (const run of runs) {
+      if (run.state !== 'APPROVED' && run.state !== 'SUGGESTED') continue;
+      items.push({
+        key: `funding-${run.id}`,
+        kind: 'funding',
+        title: `Invoice ${run.invoiceNumber ?? run.factorCloudInvoiceId.slice(0, 8)}`,
+        meta: [run.clientName, run.reasons[0] ?? run.detail ?? (run.state === 'APPROVED' ? 'Approved and waiting to fund' : 'Automation suggestion')].filter(Boolean).join(' · '),
+        amount: run.amount,
+        status: run.state === 'APPROVED' ? 'Fund' : 'Approve',
+        href: '/ops/funding',
+        createdAt: run.createdAt,
+        priority: run.state === 'APPROVED' ? 2 : 3,
+      });
+    }
+    return items
+      .sort((a, b) => a.priority - b.priority || timestamp(b.createdAt) - timestamp(a.createdAt))
+      .slice(0, 8);
+  }, [recovery, reviews, runs]);
 
-  return <main className="opsShell dashboardPage">
-    <aside className="opsSidebar">
-      <a className="opsBrand" href="/ops"><img src="https://www.factorcloud.com/images/logo-nav.svg" alt="FactorCloud" /></a>
-      <div className="opsRole">Factor Operations</div>
-      <ViewSwitch current="staff" />
-      <nav className="opsNav">
-        <a className="active" href="/ops">Overview</a>
-        <a href="#clients">Clients</a>
-        <a href="/ops/debtors">Debtors</a>
-        <a href="/ops/reviews">Review queue</a>
-        <a href="/ops/funding">Funding</a>
-        <a href="/ops/rules">Funding rules</a>
-        <a href="/connection">Connection check</a>
-      </nav>
-      <div className="opsSidebarFooter"><strong>Internal view</strong><span>Factor-wide access</span><OpsSignOut /></div>
-    </aside>
+  const filteredClients = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const clients = [...(ops?.clients ?? [])].sort((a, b) => b.invoiceAmount - a.invoiceAmount);
+    return needle ? clients.filter((client) => client.clientName.toLowerCase().includes(needle) || client.clientId.toLowerCase().includes(needle)) : clients;
+  }, [ops, query]);
 
+  const recentRuns = [...runs].sort((a, b) => timestamp(b.fundedAt ?? b.createdAt) - timestamp(a.fundedAt ?? a.createdAt)).slice(0, 7);
+  const heldCount = runs.filter((run) => run.state === 'APPROVED' || (run.state === 'SUGGESTED' && run.outcome === 'HOLD')).length;
+  const failedCount = runs.filter((run) => run.state === 'FAILED' || run.state === 'FUNDING').length;
+  const fundedCount = runs.filter((run) => run.state === 'FUNDED').length;
+  const ninetyPlus = ops?.analytics.aging.totals[3] ?? 0;
+
+  return <main className={`opsShell ${styles.page}`}>
+    <OpsSidebar active="overview" />
     <section className="opsContent">
-      <header className="opsHeader dashboardHero opsDashboardHero">
-        <div>
-          <div className="dashboardHeroMeta"><span className="eyebrow">Factor operations</span>{data?.demo ? <DemoBadge /> : <span className="dashLiveBadge"><i />Live FactorCloud data</span>}</div>
-          <h1>Portfolio command center</h1>
-          <p>See client activity, review workload, and portfolio mix before drilling into the details.</p>
+      <header className={styles.header}>
+        <div className={styles.headerCopy}>
+          <div className={styles.headerMeta}>
+            <span className="eyebrow">Factor operations</span>
+            {ops?.demo ? <DemoBadge /> : <span className={styles.livePill}>Live FactorCloud data</span>}
+            {funding?.available && <span className={styles.modePill} data-mode={funding.mode}>{MODE_LABEL[funding.mode]}</span>}
+          </div>
+          <h1>Automation Center</h1>
+          <p>Work the exceptions. Clean invoices move through the rules automatically, while reviews, funding holds and uncertain outcomes stay visible until a person resolves them.</p>
         </div>
-        <button className="small opsRefresh" onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
+        <div className={styles.headerActions}>
+          <a className={styles.secondaryAction} href="/ops/rules">Rules & automation</a>
+          <button className={styles.primaryAction} onClick={() => void load()} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
+        </div>
       </header>
 
-      <DashboardViewSwitcher
-        storageKey="factorcloud-factor-dashboard-views-v1"
-        presets={FACTOR_PRESETS}
-        widgets={FACTOR_WIDGETS}
-        onWidgetsChange={setVisibleWidgets}
-      />
+      {warnings.length > 0 && <div className={styles.alert}><strong>Some automation data could not be loaded.</strong> {warnings.join(' | ')}</div>}
+      {ops?.source.complete === false && <div className={styles.alert}><strong>Portfolio totals may be incomplete.</strong> {ops.source.note}</div>}
+      {funding && !funding.available && <div className={styles.alert}><strong>Funding automation is unavailable.</strong> {funding.note ?? 'Database sign-in is required.'}</div>}
 
-      {error && <div className="attentionSummary fail"><strong>Could not load operations data</strong><span>{error}</span></div>}
-      {data?.source.complete === false && <div className="attentionSummary review"><strong>Portfolio totals may be incomplete</strong><span>{data.source.note}</span></div>}
-
-      {loading && !data && <DashboardSkeleton />}
-
-      {data && <>
-        {show('kpis') && <KpiRow kpis={data.analytics.kpis} />}
-        {show('metrics') && <section className="dashMetricGrid factorMetricGrid">
-          <DashMetric icon="$" label="30-day activity" value={money(data.portfolio.last30Amount)} detail={trendCopy(data.portfolio.last30TrendPct, 'vs. prior 30 days')} trend={data.portfolio.last30TrendPct} />
-          <DashMetric icon="C" label="Clients with activity" value={data.totals.clientCount} detail={`${data.totals.invoiceCount} invoices in loaded history`} />
-          {data.portfolio.reviewSummary.available
-            ? <DashMetric icon="!" label="Open reviews" value={data.portfolio.reviewSummary.openCount} detail={data.portfolio.reviewSummary.openCount ? `${money(data.portfolio.reviewSummary.openAmount)} submitted amount` : 'Review queue is clear'} tone={data.portfolio.reviewSummary.openCount ? 'review' : 'good'} />
-            : <DashMetric icon="?" label="Open reviews" value="Unavailable" detail="Could not load the portal review queue" tone="review" />}
-          <DashMetric icon="Ø" label="Average invoice" value={money(data.portfolio.averageInvoiceAmount)} detail={`${money(data.totals.invoiceAmount)} total invoice activity`} />
-          <DashMetric icon="%" label="Top client share" value={`${Math.round(data.portfolio.topClientShare * 100)}%`} detail={topClients[0]?.clientName || 'No client activity yet'} tone={data.portfolio.topClientShare >= .5 ? 'review' : 'good'} />
-        </section>}
-
-        <section className="dashBoard factorDashBoard">
-          {show('aging') && <DashboardCard className="dashSpan7" kicker="Receivables" title="A/R aging by client" action={<span className="dashCardHint">{data.analytics.aging.openCount} open invoices</span>}>
-            <AgingBars aging={data.analytics.aging} />
-          </DashboardCard>}
-
-          {show('exposure') && <DashboardCard className="dashSpan5" kicker="Concentration" title="Where the money is">
-            <ExposureTreemap items={data.analytics.exposure} hrefFor={(id) => `/ops/clients/${encodeURIComponent(id)}`} />
-          </DashboardCard>}
-
-          {show('cashflow') && <DashboardCard className="dashSpan7" kicker="Cash" title="Advanced vs. collected">
-            <div className="dashCardStatline"><strong>{compactMoney(data.analytics.monthlyCash.reduce((s, m) => s + m.fees, 0))}</strong><span>fees earned over twelve months</span></div>
-            <CashFlowBars months={data.analytics.monthlyCash} />
-          </DashboardCard>}
-
-          {show('dso') && <DashboardCard className="dashSpan5" kicker="Collections" title="Days to collect">
-            <div className="dashCardStatline"><strong>{data.analytics.kpis.dsoLast90 == null ? '-' : `${data.analytics.kpis.dsoLast90.toFixed(1)} days`}</strong><span>{dsoCopy(data.analytics.kpis)}</span></div>
-            <DsoLine points={data.analytics.dso} target={40} />
-          </DashboardCard>}
-
-          {show('arrivals') && <DashboardCard className="dashSpan8" kicker="Passed every check" title="Arrived today" action={<span className="dashCardHint">Funding decisions stay in FactorCloud</span>}>
-            {!data.portfolio.arrivedToday.available ? <div className="portalEmpty"><strong>Arrivals unavailable</strong><span>Could not load today's portal submissions.</span></div> : <>
-              <div className="dashCardStatline"><strong>{data.portfolio.arrivedToday.count}</strong><span>{data.portfolio.arrivedToday.count === 1 ? 'clean invoice' : 'clean invoices'} today · {money(data.portfolio.arrivedToday.amount)} · no portal review needed</span></div>
-              <div className="dashInvoiceRows">
-                {data.portfolio.arrivedToday.items.map((a) => <a className="dashInvoiceRow factorInvoiceRow" href={a.submissionId ? `/ops/submissions/${encodeURIComponent(a.submissionId)}` : `/ops/clients/${encodeURIComponent(a.clientId)}`} key={a.submissionId ?? a.invoiceId}>
-                  <div className="dashInvoiceGlyph">{(a.clientName || 'C').charAt(0).toUpperCase()}</div>
-                  <div className="dashInvoiceIdentity">
-                    <strong>{a.clientName}</strong>
-                    <span>Invoice {a.invoiceNumber || a.invoiceId.slice(0, 8)}{a.documentCount != null ? ` · ${a.documentCount} document${a.documentCount === 1 ? '' : 's'}` : ''}{a.submittedBy ? ` · by ${a.submittedBy === 'Driver' ? 'a driver' : a.submittedBy === 'Office' ? 'the office' : a.submittedBy}` : ''}{a.createdAt.includes('T') ? ` · ${timeOfDay(a.createdAt)}` : ''}{a.status ? ` · ${pretty(a.status)} in FactorCloud` : ''}</span>
-                  </div>
-                  <span className="portalStatus pass">✓ All checks passed</span>
-                  <strong>{a.invoiceAmount == null ? '-' : money(a.invoiceAmount)}</strong>
-                </a>)}
-                {!data.portfolio.arrivedToday.count && <div className="portalEmpty"><strong>Nothing yet today</strong><span>Invoices that pass every check will appear here as clients send them.</span></div>}
-                {data.portfolio.arrivedToday.count > data.portfolio.arrivedToday.items.length && <span className="dashCardHint">and {data.portfolio.arrivedToday.count - data.portfolio.arrivedToday.items.length} more today</span>}
-              </div>
-            </>}
-          </DashboardCard>}
-
-          {show('reviews') && <DashboardCard className="dashSpan4" kicker="Portal workflow" title="Review workload" action={<a href="/ops/reviews">Open queue</a>}>
-            {!data.portfolio.reviewSummary.available ? <div className="reviewWorkload">
-              <div className="reviewWorkloadHero unavailable">
-                <span>Review status unavailable</span>
-                <strong>?</strong>
-                <small>Could not load the portal review queue.</small>
-              </div>
-              <a className="reviewQueueLink" href="/ops/reviews">Try the review queue <span>›</span></a>
-            </div> : <div className="reviewWorkload">
-              <div className={`reviewWorkloadHero ${data.portfolio.reviewSummary.openCount ? 'hasWork' : ''}`}>
-                <span>{data.portfolio.reviewSummary.openCount ? 'Needs attention' : 'All clear'}</span>
-                <strong>{data.portfolio.reviewSummary.openCount}</strong>
-                <small>open review{data.portfolio.reviewSummary.openCount === 1 ? '' : 's'}</small>
-              </div>
-              <div className="reviewWorkloadDetails">
-                <div><span>Submitted amount</span><strong>{money(data.portfolio.reviewSummary.openAmount)}</strong></div>
-                <div><span>Oldest open item</span><strong>{ageCopy(data.portfolio.reviewSummary.oldestCreatedAt)}</strong></div>
-              </div>
-              <a className="reviewQueueLink" href="/ops/reviews">Work the review queue <span>›</span></a>
-            </div>}
-          </DashboardCard>}
-
-          {show('calendar') && <DashboardCard className="dashSpan12" kicker="Activity" title="Submission calendar">
-            <CalendarHeatmap days={data.analytics.daily} />
-          </DashboardCard>}
-
-          {show('volume') && <DashboardCard className="dashSpan8" kicker="Portfolio activity" title="Twelve-week invoice trend">
-            <div className="dashCardStatline"><strong>{money(data.portfolio.weeklyActivity.reduce((sum, point) => sum + point.amount, 0))}</strong><span>{data.portfolio.weeklyActivity.reduce((sum, point) => sum + point.count, 0)} invoices across the last twelve calendar weeks</span></div>
-            <ActivityTrendChart points={data.portfolio.weeklyActivity} />
-          </DashboardCard>}
-
-          {show('top-clients') && <DashboardCard className="dashSpan4" kicker="Portfolio mix" title="Top clients by activity">
-            <RankBars items={topClients.map((client) => ({ id: client.clientId, label: client.clientName, value: client.invoiceAmount, detail: `${client.invoiceCount} invoices` }))} />
-          </DashboardCard>}
-
-          {show('status') && <DashboardCard className="dashSpan4" kicker="FactorCloud status" title="Invoice status mix">
-            <StatusDonut items={data.portfolio.statuses} centerValue={data.totals.invoiceCount} centerLabel="Invoices" />
-          </DashboardCard>}
-
-          {show('recent') && <DashboardCard className="dashSpan12" kicker="Recent activity" title="Latest invoices across clients">
-            <div className="dashInvoiceRows">
-              {data.portfolio.recentInvoices.map((invoice) => <a className="dashInvoiceRow factorInvoiceRow" href={invoice.companyClientId ? `/ops/clients/${encodeURIComponent(invoice.companyClientId)}` : '/ops'} key={invoice.id}>
-                <div className="dashInvoiceGlyph">{(invoice.clientName || 'C').charAt(0).toUpperCase()}</div>
-                <div className="dashInvoiceIdentity">
-                  <strong>{invoice.clientName}</strong>
-                  <span>Invoice {invoice.invoiceNumber || invoice.id.slice(0, 8)} · {invoice.invoiceDate || 'No date'}</span>
-                </div>
-                <span className={`portalStatus ${statusTone(invoice.status)}`}>{pretty(invoice.status || 'Unknown')}</span>
-                <strong>{invoice.invoiceAmount == null ? '-' : money(invoice.invoiceAmount)}</strong>
-              </a>)}
-              {!data.portfolio.recentInvoices.length && <div className="portalEmpty"><strong>No recent activity</strong><span>Invoices will appear here as FactorCloud activity builds.</span></div>}
-            </div>
-          </DashboardCard>}
-
-          {show('clients') && <section className="dashCard dashSpan12" id="clients">
-            <div className="dashCardHeader clientsCardHeader">
-              <div><span>Operating view</span><h2>Clients</h2><p>Search and drill into any client represented in the FactorCloud invoice data.</p></div>
-              <label className="opsSearch"><span>Search</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Client name or ID" /></label>
-            </div>
-            <div className="batchTableWrap">
-              <table className="batchTable opsTable dashboardClientTable">
-                <thead><tr><th>Client</th><th>Invoices</th><th>Invoice activity</th><th>Latest activity</th><th>Status mix</th></tr></thead>
-                <tbody>
-                  {filtered.map((client) => <tr key={client.clientId}>
-                    <td><a className="opsClientLink" href={`/ops/clients/${encodeURIComponent(client.clientId)}`}><div className="opsClientName"><strong>{client.clientName}</strong><span>{client.clientId}</span></div></a></td>
-                    <td><strong>{client.invoiceCount}</strong></td>
-                    <td><strong>{money(client.invoiceAmount)}</strong></td>
-                    <td>{client.latestInvoiceDate || '-'}</td>
-                    <td><div className="opsStatuses">{Object.entries(client.statuses).slice(0, 4).map(([status, count]) => <span key={status}>{pretty(status)} <strong>{count}</strong></span>)}</div></td>
-                  </tr>)}
-                  {!filtered.length && <tr><td colSpan={5}>No matching clients found.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </section>}
+      {loading && !ops && !funding && !reviews && !recovery ? <DashboardSkeleton /> : <>
+        <section className={styles.metricGrid}>
+          <MetricCard href="/ops/reviews" label="Needs review" value={reviewCount} detail={reviewCount ? 'Paperwork or validation needs a factor decision' : 'No paperwork exceptions waiting'} icon="R" tone={reviewCount ? 'review' : 'good'} />
+          <MetricCard href="/ops/funding" label="Ready to fund" value={readyToFund.length} detail={`${formatMoney(readyToFund.reduce((sum, run) => sum + run.amount, 0))} approved, not funded`} icon="$" tone={readyToFund.length ? 'review' : 'good'} />
+          <MetricCard href="/ops/recovery" label="Recovery" value={recoveryCount} detail={recoveryCount ? 'Uncertain or interrupted operations need reconciliation' : 'No open reconciliation items'} icon="!" tone={recoveryCount ? 'danger' : 'good'} />
+          <MetricCard href="/ops/funding" label="Auto-funded today" value={autoFundedToday.length} detail={`${formatMoney(autoFundedToday.reduce((sum, run) => sum + run.amount, 0))} funded automatically`} icon="✓" tone="good" />
         </section>
 
-        <p className="portalDataNote opsPortfolioNote">{data.source.note} Open A/R, aging and cash figures come from FactorCloud's balance, advance, reserve, funded and paid fields; invoices missing those fields drop out of those charts.</p>
+        <section className={styles.mainGrid}>
+          <div className={styles.card}>
+            <div className={styles.cardHeader}>
+              <div className={styles.cardHeaderCopy}><span className={styles.kicker}>Priority work</span><h2>What needs a person</h2><p>Recovery first, then review and funding actions.</p></div>
+              <a className={styles.cardLink} href="/ops/funding">Open funding →</a>
+            </div>
+            <div className={styles.queue}>
+              {work.map((item) => <a className={styles.queueRow} data-kind={item.kind} href={item.href} key={item.key}>
+                <span className={styles.queueBadge}>{item.kind === 'recovery' ? '!' : item.kind === 'review' ? 'R' : '$'}</span>
+                <span className={styles.queueIdentity}><strong>{item.title}</strong><span>{item.meta}</span></span>
+                <span className={styles.queueAmount}>{item.amount != null && <strong>{formatMoney(item.amount)}</strong>}<span>{item.status}</span></span>
+              </a>)}
+              {!work.length && <div className={styles.empty}>Nothing needs a person right now. Clean automation is doing the work.</div>}
+            </div>
+          </div>
+
+          <div className={styles.card}>
+            <div className={styles.cardHeader}>
+              <div className={styles.cardHeaderCopy}><span className={styles.kicker}>Engine status</span><h2>Automation health</h2><p>Current recorded decisions in the portal.</p></div>
+              <a className={styles.cardLink} href="/ops/rules">Configure →</a>
+            </div>
+            <div className={styles.healthBody}>
+              <div className={styles.healthHero}>
+                <span>Current mode</span>
+                <strong>{funding ? MODE_LABEL[funding.mode] : 'Unavailable'}</strong>
+                <small>{funding?.mode === 'fund' ? 'Clean invoices can approve and fund automatically within the active rules and caps.' : funding?.mode === 'approve' ? 'Clean invoices can be approved automatically, but funding still needs a person.' : funding?.mode === 'suggest' ? 'The engine evaluates invoices but does not make FactorCloud funding decisions on its own.' : 'The funding engine is not currently taking automatic action.'}</small>
+              </div>
+              <div className={styles.healthRows}>
+                <HealthRow label="Recorded decisions" value={runs.length} />
+                <HealthRow label="Funded" value={fundedCount} />
+                <HealthRow label="Held / waiting" value={heldCount} />
+                <HealthRow label="Paperwork review" value={runs.filter((run) => run.state === 'REVIEW').length} />
+                <HealthRow label="Failed / uncertain" value={failedCount} />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.section}>
+          <div className={styles.sectionHeading}><div><h2>Recent automation activity</h2><p>Newest funding-engine decisions, with portfolio context beside them.</p></div></div>
+          <div className={styles.activityGrid}>
+            <div className={styles.card}>
+              <div className={styles.activityList}>
+                {recentRuns.map((run) => <div className={styles.activityRow} key={run.id}>
+                  <span className={styles.activityDot} data-state={run.state} />
+                  <span className={styles.activityIdentity}><strong>Invoice {run.invoiceNumber ?? run.factorCloudInvoiceId.slice(0, 8)} · {stateLabel(run)}</strong><span>{[run.clientName, run.reasons[0] ?? run.detail].filter(Boolean).join(' · ') || 'No exception reason recorded'}</span></span>
+                  <span className={styles.activityTime}>{shortTime(run.fundedAt ?? run.createdAt)}</span>
+                </div>)}
+                {!recentRuns.length && <div className={styles.empty}>Automation decisions will appear here as invoices move through the engine.</div>}
+              </div>
+            </div>
+
+            <div className={styles.card}>
+              <div className={styles.cardHeader}><div className={styles.cardHeaderCopy}><span className={styles.kicker}>Today</span><h2>Flow at a glance</h2></div></div>
+              <div className={styles.healthBody}>
+                <HealthRow label="Clean arrivals" value={ops?.portfolio.arrivedToday.available ? ops.portfolio.arrivedToday.count : '—'} />
+                <HealthRow label="Auto-funded" value={autoFundedToday.length} />
+                <HealthRow label="Waiting for review" value={reviewCount} />
+                <HealthRow label="Waiting to fund" value={readyToFund.length} />
+                <HealthRow label="Recovery items" value={recoveryCount} />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.section} id="portfolio">
+          <div className={styles.sectionHeading}><div><h2>Portfolio context</h2><p>Useful risk and client context, secondary to the automation work queues.</p></div><a className={styles.cardLink} href="/ops/debtors">View debtors →</a></div>
+          <div className={styles.portfolioMetrics}>
+            <PortfolioMetric label="Open A/R" value={formatMoney(ops?.analytics.kpis.openBalance ?? 0)} detail={`${ops?.analytics.kpis.openCount ?? 0} open invoices`} />
+            <PortfolioMetric label="90+ days" value={formatMoney(ninetyPlus)} detail="Oldest aging bucket" />
+            <PortfolioMetric label="Active clients" value={ops?.totals.clientCount ?? 0} detail={`${ops?.totals.invoiceCount ?? 0} invoices loaded`} />
+            <PortfolioMetric label="Days to collect" value={ops?.analytics.kpis.dsoLast90 == null ? '—' : `${ops.analytics.kpis.dsoLast90.toFixed(1)}d`} detail="Last 90 days" />
+          </div>
+
+          <div className={styles.clientPanel}>
+            <div className={styles.clientToolbar}><strong>Clients</strong><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search clients" /></div>
+            <div className={styles.clientRows}>
+              {filteredClients.slice(0, 12).map((client) => <a className={styles.clientRow} href={`/ops/clients/${encodeURIComponent(client.clientId)}`} key={client.clientId}>
+                <span className={styles.clientName}><strong>{client.clientName}</strong><span>{client.latestInvoiceDate ? `Latest invoice ${client.latestInvoiceDate}` : 'No recent invoice date'}</span></span>
+                <span className={styles.clientCell}>{client.invoiceCount} invoices</span>
+                <span className={styles.clientCell}>{formatMoney(client.invoiceAmount)}</span>
+                <span className={styles.clientArrow}>›</span>
+              </a>)}
+              {!filteredClients.length && <div className={styles.empty}>No clients match that search.</div>}
+            </div>
+          </div>
+        </section>
       </>}
     </section>
   </main>;
 }
 
-function KpiRow({ kpis }: { kpis: PortfolioKpis }) {
-  const dsoTrend = kpis.dsoLast90 != null && kpis.dsoPrior90 ? ((kpis.dsoLast90 - kpis.dsoPrior90) / kpis.dsoPrior90) * 100 : null;
-  return <section className="dashMetricGrid factorMetricGrid">
-    <DashMetric icon="A/R" label="Open A/R" value={<CountUp value={kpis.openBalance} format={compactMoney} />} detail={`${kpis.openCount} funded invoices outstanding`} />
-    <DashMetric icon="↑" label="Advanced, 30 days" value={<CountUp value={kpis.fundedLast30} format={compactMoney} />} detail="Cash sent to clients" />
-    <DashMetric icon="↓" label="Collected, 30 days" value={<CountUp value={kpis.collectedLast30} format={compactMoney} />} detail="Payments received from debtors" tone="good" />
-    <DashMetric icon="$" label="Fees, 30 days" value={<CountUp value={kpis.feesLast30} format={compactMoney} />} detail="Earned on invoices paid" tone="good" />
-    <DashMetric icon="⏱" label="Days to collect" value={kpis.dsoLast90 == null ? '-' : <CountUp value={kpis.dsoLast90} format={(v) => `${v.toFixed(1)}d`} />} detail="Last 90 days, amount-weighted" trend={dsoTrend == null ? null : -dsoTrend} tone={dsoTrend != null && dsoTrend < 0 ? 'good' : ''} />
-  </section>;
+function MetricCard({ href, label, value, detail, icon, tone }: { href: string; label: string; value: number | string; detail: string; icon: string; tone: 'review' | 'danger' | 'good' }) {
+  return <a className={styles.metricCard} data-tone={tone} href={href}><span className={styles.metricTop}><span className={styles.metricLabel}>{label}</span><span className={styles.metricIcon}>{icon}</span></span><strong className={styles.metricValue}>{value}</strong><span className={styles.metricDetail}>{detail}</span></a>;
 }
 
-function dsoCopy(kpis: PortfolioKpis): string {
-  if (kpis.dsoLast90 == null || kpis.dsoPrior90 == null) return 'last 90 days';
-  const delta = kpis.dsoLast90 - kpis.dsoPrior90;
-  return `last 90 days · ${Math.abs(delta).toFixed(1)} days ${delta <= 0 ? 'faster' : 'slower'} than the prior 90`;
+function HealthRow({ label, value }: { label: string; value: number | string }) {
+  return <div className={styles.healthRow}><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function DashboardCard({ kicker, title, action, className = '', children }: { kicker: string; title: string; action?: React.ReactNode; className?: string; children: React.ReactNode }) {
-  return <section className={`dashCard ${className}`}>
-    <div className="dashCardHeader"><div><span>{kicker}</span><h2>{title}</h2></div>{action && <div className="dashCardAction">{action}</div>}</div>
-    <div className="dashCardBody">{children}</div>
-  </section>;
+function PortfolioMetric({ label, value, detail }: { label: string; value: number | string; detail: string }) {
+  return <div className={styles.portfolioMetric}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>;
 }
 
-function DashMetric({ icon, label, value, detail, trend, tone = '' }: { icon: string; label: string; value: React.ReactNode; detail: string; trend?: number | null; tone?: string }) {
-  return <div className={`dashMetric ${tone}`}>
-    <div className="dashMetricTop"><span className="dashMetricIcon">{icon}</span>{trend != null && Number.isFinite(trend) && <span className={`dashMetricTrend ${trend >= 0 ? 'up' : 'down'}`}>{trend >= 0 ? '↗' : '↘'} {Math.abs(trend).toFixed(0)}%</span>}</div>
-    <span className="dashMetricLabel">{label}</span>
-    <strong>{value}</strong>
-    <small>{detail}</small>
-  </div>;
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url, { cache: 'no-store' });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || `Could not load ${url}.`);
+  return body as T;
 }
 
-function trendCopy(value: number | null, suffix: string): string {
-  if (value == null) return `No prior baseline ${suffix}`;
-  if (Math.abs(value) < 0.5) return `Flat ${suffix}`;
-  return `${value > 0 ? '+' : ''}${value.toFixed(0)}% ${suffix}`;
+function stateLabel(run: FundingRun): string {
+  if (run.state === 'FUNDED') return run.autoFunded ? 'Auto-funded' : 'Funded';
+  if (run.state === 'APPROVED') return 'Approved, needs funding';
+  if (run.state === 'FUNDING') return 'Funding outcome uncertain';
+  if (run.state === 'FAILED') return 'Approval failed';
+  if (run.state === 'REVIEW') return 'Paperwork review';
+  if (run.outcome === 'FUND') return 'Would fund';
+  if (run.outcome === 'HOLD') return 'Would hold';
+  return 'Suggested review';
 }
 
-function timeOfDay(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value || 0);
 }
 
-function ageCopy(iso: string | null): string {
-  if (!iso) return 'None';
-  const ageMs = Date.now() - Date.parse(iso);
-  if (!Number.isFinite(ageMs) || ageMs < 0) return 'Just opened';
-  const hours = Math.floor(ageMs / (60 * 60 * 1000));
-  if (hours < 1) return '< 1 hour';
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ${hours % 24}h`;
+function shortTime(value: string | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-function pretty(value: string): string {
-  return value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+function isToday(value: string | null): boolean {
+  if (!value) return false;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) && date.toDateString() === new Date().toDateString();
 }
 
-function statusTone(status: string | null): string {
-  const value = (status || '').toUpperCase();
-  if (value.includes('PAID') || value.includes('FUNDED') || value.includes('PURCHASE') || value.includes('APPROV')) return 'pass';
-  if (value.includes('REJECT') || value.includes('FAIL') || value.includes('ERROR')) return 'fail';
-  return 'review';
+function timestamp(value: string | null | undefined): number {
+  if (!value) return 0;
+  const result = Date.parse(value);
+  return Number.isFinite(result) ? result : 0;
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

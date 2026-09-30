@@ -1,4 +1,4 @@
-export type PortalRole = 'FACTOR_ADMIN' | 'FACTOR_REVIEWER' | 'CLIENT_USER';
+export type PortalRole = 'FACTOR_ADMIN' | 'FACTOR_REVIEWER' | 'CLIENT_USER' | 'DRIVER';
 
 export interface PortalSessionClient {
   id: string;
@@ -42,7 +42,7 @@ export async function verifyPortalSession(token: string | undefined | null, secr
     if (!safeEqual(expected, actual)) return null;
     const payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[0]))) as PortalSession;
     if (payload.v !== 1 || !payload.userId || !payload.factorId || !payload.role || payload.exp <= Date.now()) return null;
-    if (!['FACTOR_ADMIN', 'FACTOR_REVIEWER', 'CLIENT_USER'].includes(payload.role)) return null;
+    if (!['FACTOR_ADMIN', 'FACTOR_REVIEWER', 'CLIENT_USER', 'DRIVER'].includes(payload.role)) return null;
     return payload;
   } catch {
     return null;
@@ -95,10 +95,11 @@ export function sessionMismatch(session: PortalSession, account: SessionAccountS
   if (!account.isActive) return 'user is deactivated';
   if (account.factorId !== session.factorId) return 'user belongs to a different factor';
   if (account.role !== session.role) return 'role changed';
-  if (session.role === 'CLIENT_USER') {
+  if ((session.role === 'CLIENT_USER' || session.role === 'DRIVER')) {
     const assigned = session.clients[0]?.factorCloudClientId;
     if (session.clients.length !== 1 || !assigned) return 'session has no single client';
     if (account.activeClientIds.length !== 1 || account.activeClientIds[0] !== assigned) return 'client assignment changed';
   }
   return null;
 }
+

@@ -49,7 +49,6 @@ describe.skipIf(!enabled)('Driver view with database sign-in (real SQL)', () => 
     }));
     ({ query, pool } = await import('./db'));
     ({ signPortalSession: sign } = await import('./session'));
-    await query('drop table if exists client_tasks');
     await query('truncate audit_events, review_items, submission_files, submissions, user_client_access, portal_users, portal_clients, factors cascade');
     await query(`insert into factors (id, factorcloud_factor_id, name) values ('f1','fc-factor-1','F')`);
     await query(`insert into portal_clients (id, factor_id, factorcloud_client_id, name) values ('pc1','f1','fc-client-1','Client')`);
@@ -101,3 +100,4 @@ describe.skipIf(!enabled)('Driver view with database sign-in (real SQL)', () => 
     process.env = savedEnv;
   });
 });
+

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { openRecovery } from '@/lib/recovery';
 import {
   FC_DOCUMENT_TYPES,
   allowedDebtorIds,
@@ -149,13 +150,19 @@ export async function POST(req: Request) {
 
   const steps: CreateStep[] = [];
   const documentIds: string[] = [];
+  const recover = async (kind: string, detail: string) => {
+    if (session && storedSubmission && !demo) {
+      try { await openRecovery({factorId:session.factorId,submissionId:storedSubmission.id,kind,detail}); }
+      catch (err) { console.error('[recovery] could not record failure',err); }
+    }
+  };
   let invoiceId: string | null = null;
   const respond = (ok: boolean, error?: string) => NextResponse.json({ ok, invoiceId, documentIds, steps, validation: withoutCreditCheck(validation), error } satisfies CreateResponse, { status: ok ? 200 : 502 });
 
   try {
     // With admin views the note says who sent the invoice: the Driver view lists what was sent
     // from it, and without the portal database the note is the only record of that.
-    const sender = (await adminDriverViewAllowed()) ? ((await demoClientView()) === 'driver' ? 'Driver' as const : 'Office' as const) : null;
+    const sender = session?.role === 'DRIVER' ? 'Driver' as const : (await adminDriverViewAllowed()) ? ((await demoClientView()) === 'driver' ? 'Driver' as const : 'Office' as const) : null;
     // FactorCloud notes may be visible beyond the factor, so the credit warning stays out of them.
     const notes = buildPortalNote({
       review: validation.status === 'REVIEW',
@@ -179,9 +186,12 @@ export async function POST(req: Request) {
   } catch (err) {
     const detail = publicErrorMessage(err, 'create');
     // Only a definite FactorCloud refusal means no invoice exists, so only then may the client retry.
-    const retryable = isDefinitiveCreateFailure(err);
+    const retryable = !invoiceId && isDefinitiveCreateFailure(err);
+    if (!retryable) await recover('CREATE_UNKNOWN', invoiceId
+      ? `Invoice ${invoiceId} was created, but recording the result failed. Check FactorCloud and finish the document uploads before proceeding.`
+      : 'Invoice creation result is unknown. Check FactorCloud before any further submission.');
     steps.push({ step: 'Create invoice', ok: false, detail });
-    try { await markSubmissionFactorCloudResult({ submission: storedSubmission, session, validationStatus: validation.status, error: detail, retryable }); } catch { /* original error remains primary */ }
+    try { await markSubmissionFactorCloudResult({ submission: storedSubmission, session, invoiceId: invoiceId ?? undefined, validationStatus: validation.status, error: detail, retryable }); } catch { /* original error remains primary */ }
     return respond(false, retryable
       ? `FactorCloud did not accept the invoice, so nothing was created: ${detail} You can correct the problem and submit again.`
       : `The FactorCloud result is uncertain: ${detail} Do not resubmit. Your factor needs to check FactorCloud first.`);
@@ -197,6 +207,7 @@ export async function POST(req: Request) {
     } catch (err) {
       const detail = publicErrorMessage(err, 'create');
       steps.push({ step: `Upload ${file.name}`, ok: false, detail });
+      await recover('DOCUMENT_UPLOAD', `Invoice ${invoiceId} exists. Upload failed for ${file.name}. Check its documents and attach the missing file in FactorCloud.`);
       try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: 'DOCUMENT_UPLOAD_FAILED', eventData: { invoiceId, fileName: file.name, error: detail } }); } catch { /* original error remains primary */ }
       return respond(false, `Invoice ${invoiceId} was created, but uploading ${file.name} failed. Do not recreate it. Attach the missing file in FactorCloud and retry only after checking the existing invoice.`);
     }
@@ -210,6 +221,7 @@ export async function POST(req: Request) {
     } catch (err) {
       const detail = publicErrorMessage(err, 'create');
       steps.push({ step: 'Attach documents', ok: false, detail });
+      await recover('DOCUMENT_ATTACH', `Invoice ${invoiceId} exists. Check attachment of document IDs: ${documentIds.join(', ')}.`);
       try { await recordSubmissionAudit({ submission: storedSubmission, session, eventType: 'DOCUMENT_ATTACH_FAILED', eventData: { invoiceId, documentIds, error: detail } }); } catch { /* original error remains primary */ }
       return respond(false, `Invoice ${invoiceId} was created and documents uploaded, but attaching them failed. Do not recreate it. Attach the uploaded documents in FactorCloud.`);
     }
@@ -276,4 +288,3 @@ function addCorrectionReview(validation: ValidationReport, corrections: string[]
   };
   return { status: validation.status === 'FAIL' ? 'FAIL' : 'REVIEW', checks: [correctionCheck, ...validation.checks] };
 }
-

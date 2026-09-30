@@ -26,7 +26,13 @@ export async function GET() {
     if (!(await adminDriverViewAllowed())) return NextResponse.json({ error: 'The Driver view is only available with demo data for now.' }, { status: 404 });
     const clientId = await resolveConfiguredClientId();
     const today = new Date().toISOString().slice(0, 10);
-    const records = collectRiskInvoiceRecords((await listInvoices({ client: clientId })).raw);
+    let records = collectRiskInvoiceRecords((await listInvoices({ client: clientId })).raw);
+    const signed=databaseAuthEnabled()?await requirePortalSession():null;
+    if(signed?.role==='DRIVER'){
+      const owned=await query<{factorcloud_invoice_id:string}>(`select factorcloud_invoice_id from submissions where factor_id=$1 and submitted_by_user_id=$2 and factorcloud_invoice_id is not null`,[signed.factorId,signed.userId]);
+      const ids=new Set(owned.map(r=>r.factorcloud_invoice_id));
+      records=records.filter(r=>ids.has(r.id));
+    }
     let portal: Record<string, PortalState> = {};
     if (databaseAuthEnabled()) {
       try { portal = await portalStates((await requirePortalSession()).factorId, clientId, records.map((r) => r.id)); }
@@ -43,7 +49,7 @@ export async function GET() {
       }
     })));
     return NextResponse.json({
-      driver: null,
+      driver: signed?.role==='DRIVER'?(signed.displayName||signed.email):null,
       invoices: rows.map(({ debtorId, ...row }) => ({ ...row, debtorName: debtorId ? names[debtorId] : 'Customer' })),
     });
   } catch (err) {
@@ -76,3 +82,4 @@ async function portalStates(factorId: string, clientId: string, invoiceIds: stri
     } satisfies PortalState];
   }));
 }
+

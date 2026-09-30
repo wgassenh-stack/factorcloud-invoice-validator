@@ -24,6 +24,7 @@ export async function GET() {
     // Admin views: factor staff also get the Driver view.
     adminViews: adminViewsEnabled() && session.role !== 'CLIENT_USER',
     user: {
+      id: session.userId,
       email: session.email,
       displayName: session.displayName,
       role: session.role,
@@ -31,3 +32,4 @@ export async function GET() {
     },
   });
 }
+

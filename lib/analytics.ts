@@ -146,6 +146,18 @@ export function openBalance(record: RiskInvoiceRecord): number {
   return Math.max(0, record.invoiceBalance ?? record.invoiceAmount ?? 0);
 }
 
+/**
+ * What an invoice adds to FactorCloud's OpenAR, the figure its credit limits are checked against:
+ * the unpaid balance of invoices that have been approved for funding or funded. Pending invoices
+ * don't count until they are approved (FactorCloud said 36,000 OpenAR where counting pending ones
+ * too gave $54,956).
+ */
+export function openArBalance(record: RiskInvoiceRecord): number {
+  const status = token(record.status);
+  const counted = Boolean(record.fundedDate) || ['APPROVED', 'PURCHASED', 'FUNDED'].includes(status);
+  return counted ? openBalance(record) : 0;
+}
+
 /** Whether FactorCloud sent a balance for this invoice (rather than it being assumed). */
 export function balanceReported(record: RiskInvoiceRecord): boolean {
   return record.invoiceBalance !== null && record.invoiceBalance !== undefined;

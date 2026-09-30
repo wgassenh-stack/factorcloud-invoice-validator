@@ -29,7 +29,9 @@ export async function getCashReserveBalance(clientId: string): Promise<number> {
       query: { client: clientId },
       headers: { 'X-PAGINATION-NUM': String(page), 'X-PAGINATION-LIMIT': String(limit) },
     });
-    const rows = Array.isArray(body.ledgers) ? body.ledgers : [];
+    if (!Array.isArray(body.ledgers)) throw new FactorCloudError('Cash reserve response was not recognized.',502,null);
+    const rows = body.ledgers;
+    if (rows.some(row => !Number.isFinite(num(row.increaseAmount)) || !Number.isFinite(num(row.decreaseAmount)))) throw new FactorCloudError('Cash reserve amounts are missing or invalid.',502,null);
     for (const row of rows) balance += (num(row.increaseAmount) || 0) - (num(row.decreaseAmount) || 0);
     if (rows.length < limit) return Math.round(balance * 100) / 100;
   }
@@ -111,3 +113,4 @@ export async function approveForFunding(clientId: string, fundingInstructionId: 
 export async function fundInvoiceGroups(invoiceGroupIds: string[], paymentType: string, transactionId: string): Promise<void> {
   await fcRequest('/invoice-groups/fund', { method: 'PATCH', json: { action: 'fund', invoiceGroups: invoiceGroupIds, paymentType, transactionId } });
 }
+

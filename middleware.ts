@@ -3,6 +3,8 @@ import { DEMO_COOKIE, adminViewsEnabled, demoFromCookie, demoMode } from './lib/
 import { databaseAuthEnabled, PORTAL_SESSION_COOKIE, verifyPortalSession } from './lib/session';
 
 export async function middleware(req: NextRequest) {
+  // This route validates its own dedicated worker secret before doing anything.
+  if (req.nextUrl.pathname === '/api/internal/notifications') return NextResponse.next();
   // Demo mode holds no real data, so client and factor pages are both open (behind the shared
   // password when one is set).
   if (demoMode()) return passwordGate(req);
@@ -12,12 +14,12 @@ export async function middleware(req: NextRequest) {
 
 async function databaseAuth(req: NextRequest) {
   const path = req.nextUrl.pathname;
-  const publicPath = path === '/login' || path === '/api/portal-auth/login';
+  const publicPath = path === '/login' || path === '/api/portal-auth/login' || path === '/invite' || path === '/api/portal-auth/accept-invite';
   const session = await verifyPortalSession(req.cookies.get(PORTAL_SESSION_COOKIE)?.value);
 
   if (publicPath) {
     if (session && path === '/login') {
-      return NextResponse.redirect(new URL(session.role === 'CLIENT_USER' ? '/' : '/ops', req.url));
+      return NextResponse.redirect(new URL(session.role === 'DRIVER' ? '/driver' : session.role === 'CLIENT_USER' ? '/' : '/ops', req.url));
     }
     return NextResponse.next();
   }
@@ -29,12 +31,21 @@ async function databaseAuth(req: NextRequest) {
     return NextResponse.redirect(login);
   }
 
+  if (session.role === 'DRIVER' && !driverPath(path)) {
+    if (path.startsWith('/api/')) return NextResponse.json({error:'Driver access is limited to your paperwork.'},{status:403});
+    return NextResponse.redirect(new URL('/driver',req.url));
+  }
+
   if (isOpsPath(path) && session.role === 'CLIENT_USER') {
     if (path.startsWith('/api/')) return NextResponse.json({ error: 'Factor access required.' }, { status: 403 });
     return NextResponse.redirect(new URL('/', req.url));
   }
 
   return NextResponse.next();
+}
+
+function driverPath(path: string) {
+  return ['/driver','/submit','/api/driver/invoices','/api/create','/api/portal-auth/session','/api/portal-auth/logout'].includes(path) || path.startsWith('/api/paperwork/') || path.startsWith('/api/tasks/');
 }
 
 function pilotAuth(req: NextRequest, demo: boolean) {
@@ -79,3 +90,4 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'] };
+

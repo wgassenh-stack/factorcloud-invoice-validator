@@ -1,4 +1,5 @@
 'use client';
+import { InvoiceJourney } from '@/app/components/InvoiceJourney';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
@@ -185,6 +186,7 @@ export default function OpsSubmissionDetailPage() {
           </div>
 
           <div className="opsPanel">
+            <InvoiceJourney submissionId={data.submission.id}/>
             <div className="opsPanelHeader"><div><h2>Audit history</h2><p>Who did what and when.</p></div></div>
             <div className="opsTimeline">
               {data.submission.audit.map((event) => <div key={event.id}><span className="timelineDot review" /><div><strong>{pretty(event.eventType)}</strong><small>{dateTime(event.createdAt)} · {event.actor.name || event.actor.email || 'System'}</small></div></div>)}
