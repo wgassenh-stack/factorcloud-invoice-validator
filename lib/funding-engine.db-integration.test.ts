@@ -25,6 +25,7 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     invoices: [] as Record<string, unknown>[],
     groupSeq: 0,
     refuseApprove: false,
+    timeoutApprove: false,
   };
   const admin = { v: 1 as const, userId: 's1', email: 'admin@x.com', displayName: 'Factor Admin', role: 'FACTOR_ADMIN' as const, factorId: 'f1', clients: [], exp: Date.now() + 3600_000 };
 
@@ -68,6 +69,7 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
         const invoice = fc.invoices.find((r) => r.id === p.split('/')[2]);
         return invoice ? ok({ status: 'SUCCESS', invoice }) : ok({ error: 'not found' }, 404);
       }
+      if (p === '/invoices/approve-for-funding' && fc.timeoutApprove) throw Error('response lost');
       if (p === '/invoices/approve-for-funding' && fc.refuseApprove) return ok({ message: 'final OpenAR calculated 36,000 exceeds the credit limit 25,000' }, 400);
       if (p === '/invoices/approve-for-funding') for (const r of fc.invoices) if (body.invoiceIds.includes(r.id)) r.status = 'APPROVED';
       if (p === '/invoices/approve-for-funding') return ok({ status: 'SUCCESS', invoiceGroups: [{ id: `g-${++fc.groupSeq}`, code: `G${fc.groupSeq}`, status: 'NOT_FUNDED', paymentType: 'ACH', paymentAmount: 900 }] });
@@ -226,6 +228,30 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     const { PUT } = await import('../app/api/ops/rules/route');
     expect((await PUT(new Request('http://portal.test/x', { method: 'PUT', body: JSON.stringify({ settings: { mode: 'fund' } }) }))).status).toBe(403);
     sessionCookie = await (await import('./session')).signPortalSession(admin);
+  });
+
+  it('an uncertain approval cannot send again until explicit reconciliation', async () => {
+    await setRules(s=>{s.mode='approve';});fc.timeoutApprove=true;
+    const {run}=await send('UNKNOWN-APPROVAL',200);
+    expect(run.state).toBe('FAILED');
+    expect((await query('select approval_status from engine_runs where id=$1',[run.id]))[0].approval_status).toBe('UNKNOWN');
+    const {actOnRun}=await import('./funding-engine');const count=calls.filter(c=>c.path==='/invoices/approve-for-funding').length;
+    fc.timeoutApprove=false;
+    expect((await actOnRun('f1',run.id,'approve','s1','Admin')).ok).toBe(false);
+    expect(calls.filter(c=>c.path==='/invoices/approve-for-funding')).toHaveLength(count);
+    const [item]=await query("select id from recovery_items where run_id=$1 and kind='APPROVAL_UNKNOWN'",[run.id]);
+    const {POST}=await import('../app/api/ops/recovery/route');
+    expect((await POST(new Request('https://portal.test',{method:'POST',body:JSON.stringify({id:item.id,outcome:'not-approved',evidence:'Verified no approved batch exists for this invoice in FactorCloud.'})}))).status).toBe(200);
+    expect((await actOnRun('f1',run.id,'approve','s1','Admin')).ok).toBe(true);
+    expect(calls.filter(c=>c.path==='/invoices/approve-for-funding')).toHaveLength(count+1);
+  });
+
+  it('simultaneous approval clicks produce one FactorCloud approval',async()=>{
+    await setRules(s=>{s.mode='suggest';});const {run}=await send('DOUBLE-APPROVAL',200);
+    const count=calls.filter(c=>c.path==='/invoices/approve-for-funding').length;
+    const {actOnRun}=await import('./funding-engine');
+    const outcomes=await Promise.all([actOnRun('f1',run.id,'approve','s1','Admin'),actOnRun('f1',run.id,'approve','s1','Admin')]);
+    expect(outcomes.filter(r=>r.ok)).toHaveLength(1);expect(calls.filter(c=>c.path==='/invoices/approve-for-funding')).toHaveLength(count+1);
   });
 
   afterAll(async () => {

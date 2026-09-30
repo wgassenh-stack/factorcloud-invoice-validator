@@ -69,7 +69,7 @@ export async function fcRequest<T = unknown>(path: string, opts: RequestOptions 
   for (let attempt = 0; attempt < attempts; attempt++) {
     let res: Response;
     try {
-      res = await fetch(url, { method, headers, body, cache: 'no-store' });
+      res = await fetch(url, { method, headers, body, cache: 'no-store', signal: AbortSignal.timeout(30000) });
     } catch (err) {
       // No HTTP response (DNS, connection reset, timeout). For a write the outcome is unknown.
       console.error(`[factorcloud] ${method} ${path} network error`, err);
