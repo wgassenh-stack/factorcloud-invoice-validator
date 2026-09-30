@@ -5,7 +5,7 @@ import { RulePreview } from '@/app/components/RulePreview';
 import { OpsSidebar } from '@/app/components/OpsSidebar';
 import { Skeleton } from '@/app/components/CommandCharts';
 import {OpsDialog,OpsNotice} from '@/app/components/OpsUI';
-import type { EngineMode, RuleSettings } from '@/lib/rules/settings';
+import { normalizeSettings, type EngineMode, type RuleSettings } from '@/lib/rules/settings';
 
 const MODES: { value: EngineMode; title: string; detail: string }[] = [
   { value: 'off', title: 'Off', detail: 'The engine does nothing. Clean invoices wait in FactorCloud as before.' },
@@ -82,7 +82,7 @@ export default function RulesPage() {
         <div><span className="eyebrow">Factor defaults</span><h1>Automation Rules</h1><p>Change each financial rule independently. Paperwork and No Buy remain separate approval blockers.</p></div>
         <div className="fundingHeaderActions">
           <a className="secondaryLink" href="/ops/funding">Funding</a>
-          {s && <button className="primaryLink" onClick={() => {setAck(false);setConfirm(true);}} disabled={disabled||!changes.length}>{saving ? 'Saving…' : demo?'Apply to demo':'Review & save'}</button>}
+          {s && <button className="primaryLink" onClick={() => {setSettings(normalizeSettings(s));setAck(false);setConfirm(true);}} disabled={disabled||!changes.length}>{saving ? 'Saving…' : demo?'Apply to demo':'Review & save'}</button>}
         </div>
       </header>
       {note && <div className="attentionSummary review"><strong>{demo?'Editable demo example':'Read only'}</strong><span>{note} {demo?'These controls can be tried locally; no production setting is written.':''}</span></div>}
