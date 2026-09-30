@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS, normalizeSettings, overrideFrom, settingsForClient } from './settings';
+import { DEFAULT_SETTINGS, effectiveModes, normalizeSettings, overrideFrom, settingsForClient } from './settings';
 
 describe('client rules', () => {
   const settings = normalizeSettings({
@@ -30,5 +30,18 @@ describe('client rules', () => {
     expect(o).toMatchObject({ name: 'New Co', mode: 'approve', caps: { perInvoice: 5_000, perClientPerDay: 10_000 } });
     o.rules.creditLimit.enabled = false;
     expect(settings.rules.creditLimit.enabled).toBe(true);
+  });
+
+  it('pausing turns every client off, including clients with their own rules; resuming restores them', () => {
+    const paused = normalizeSettings({ ...settings, paused: true });
+    expect(settingsForClient(paused, 'big').mode).toBe('off');
+    expect(settingsForClient(paused, 'other').mode).toBe('off');
+    expect(effectiveModes(paused, ['big', 'other'])).toEqual({ off: 2, suggest: 0, approve: 0, fund: 0 });
+    expect(effectiveModes(settings, ['big', 'other'])).toEqual({ off: 0, suggest: 0, approve: 1, fund: 1 });
+  });
+
+  it('an Off default still leaves clients with their own rules automated, and the counts show it', () => {
+    const off = normalizeSettings({ ...settings, mode: 'off' });
+    expect(effectiveModes(off, ['big', 'other', 'third'])).toEqual({ off: 2, suggest: 0, approve: 0, fund: 1 });
   });
 });

@@ -8,6 +8,8 @@ import {fundingSummary} from '@/lib/ops-funding';
 import {LANE_SQL,type Lane} from '@/lib/funding-engine';
 import { demoFundingData } from '@/lib/demo-funding';
 import { syncWithFactorCloud } from '@/lib/factorcloud-sync';
+import { effectiveModes } from '@/lib/rules/settings';
+import { query } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
@@ -28,8 +30,9 @@ export async function GET(req:Request) {
     const sync = await syncWithFactorCloud(session.factorId, { force: url.searchParams.get('refresh') === '1' });
     const [settings, runs] = await Promise.all([loadSettings(session.factorId), listRuns(session.factorId,{lane:(lane as Lane)||undefined,before:createdAt&&id?{createdAt,id}:undefined,limit:101})]);
     const summary=await fundingSummary(session.factorId);
+    const clientIds=await query<{id:string}>('select factorcloud_client_id as id from portal_clients where factor_id=$1 and is_active',[session.factorId]);
     const shown=runs.slice(0,100),last=shown.at(-1);
-    return NextResponse.json({ available: true, mode: settings.mode, runs:shown,summary,next:runs.length>100&&last?{createdAt:last.createdAt,id:last.id}:null, canAct: session.role === 'FACTOR_ADMIN', sync });
+    return NextResponse.json({ available: true, mode: settings.mode, runs:shown,summary,next:runs.length>100&&last?{createdAt:last.createdAt,id:last.id}:null, canAct: session.role === 'FACTOR_ADMIN', sync, automation: { paused: settings.paused, defaultMode: settings.mode, clients: effectiveModes(settings, clientIds.map((c) => c.id)) } });
   } catch (err) {
     return apiErrorResponse(err, 'ops-funding');
   }

@@ -27,7 +27,18 @@ export function remoteState(record: RiskInvoiceRecord | null): RemoteState {
   return (record.status ?? '').trim().toUpperCase() === 'APPROVED' ? 'APPROVED' : 'PENDING';
 }
 
-export interface SyncResult { checked: number; changed: number; at: string; skipped?: boolean; error?: string }
+export interface SyncResult {
+  /** Open items read from FactorCloud this time. */
+  checked: number;
+  /** Open items FactorCloud couldn't answer for this time: tried again on the next check. */
+  failed: number;
+  /** All open items. The check works through them in turns, so one pass may cover only some. */
+  total: number;
+  changed: number;
+  at: string;
+  skipped?: boolean;
+  error?: string;
+}
 
 const MIN_INTERVAL_MS = 60_000;
 const MAX_ITEMS = 60;
@@ -35,16 +46,18 @@ const CONCURRENCY = 6;
 const BUDGET_MS = 6_000;
 const last = new Map<string, { at: number; result: SyncResult }>();
 const running = new Map<string, Promise<SyncResult>>();
+/** Where the next check starts in each factor's open items, so every item gets its turn. */
+const cursor = new Map<string, number>();
 
 /** Catches the portal up with FactorCloud. Never throws: a failed check leaves things as they were. */
-export function syncWithFactorCloud(factorId: string, opts: { force?: boolean } = {}): Promise<SyncResult> {
+export function syncWithFactorCloud(factorId: string, opts: { force?: boolean; limit?: number } = {}): Promise<SyncResult> {
   const previous = last.get(factorId);
   const minimum = opts.force ? 10_000 : MIN_INTERVAL_MS;
   if (previous && Date.now() - previous.at < minimum) return Promise.resolve({ ...previous.result, skipped: true });
   const inFlight = running.get(factorId);
   if (inFlight) return inFlight;
-  const work = run(factorId)
-    .catch((err): SyncResult => { console.error('[factorcloud-sync] failed', err); return { checked: 0, changed: 0, at: new Date().toISOString(), error: 'FactorCloud could not be checked.' }; })
+  const work = run(factorId, opts.limit ?? MAX_ITEMS)
+    .catch((err): SyncResult => { console.error('[factorcloud-sync] failed', err); return { checked: 0, failed: 0, total: 0, changed: 0, at: new Date().toISOString(), error: 'FactorCloud could not be checked.' }; })
     .then((result) => { last.set(factorId, { at: Date.now(), result }); return result; })
     .finally(() => running.delete(factorId));
   running.set(factorId, work);
@@ -54,22 +67,27 @@ export function syncWithFactorCloud(factorId: string, opts: { force?: boolean } 
 type OpenRun = { id: string; factorcloud_invoice_id: string; state: string; approval_status: string; client_id: string; submission_id: string | null; invoice_number: string | null };
 type OpenReview = { review_id: string; submission_id: string; factorcloud_invoice_id: string; client_id: string };
 
-async function run(factorId: string): Promise<SyncResult> {
+async function run(factorId: string, limit: number): Promise<SyncResult> {
   const started = Date.now();
   // In-flight approvals and funding are left to their own safeguards and to Recovery.
-  const runs = await query<OpenRun>(`
+  const allRuns = await query<OpenRun>(`
     select id, factorcloud_invoice_id, state, approval_status, client_id, submission_id, invoice_number from engine_runs
     where factor_id = $1 and state in ('SUGGESTED', 'APPROVED', 'FAILED', 'REVIEW') and approval_status in ('IDLE', 'COMPLETE')
-    order by updated_at desc limit ${MAX_ITEMS}`, [factorId]);
-  const reviews = await query<OpenReview>(`
+    order by id limit 5000`, [factorId]);
+  const allReviews = await query<OpenReview>(`
     select r.id as review_id, r.submission_id, s.factorcloud_invoice_id, s.client_id from review_items r
     join submissions s on s.id = r.submission_id
     where s.factor_id = $1 and r.status = 'OPEN' and s.factorcloud_invoice_id is not null
-    order by r.created_at desc limit ${MAX_ITEMS}`, [factorId]);
+    order by r.id limit 5000`, [factorId]);
 
-  const ids = [...new Set([...runs.map((r) => r.factorcloud_invoice_id), ...reviews.map((r) => r.factorcloud_invoice_id)])];
+  // Every open invoice, in a stable order. Each check takes the next slice, wrapping around, so
+  // older items are never starved by newer ones.
+  const all = [...new Set([...allRuns.map((r) => r.factorcloud_invoice_id), ...allReviews.map((r) => r.factorcloud_invoice_id)])].sort();
+  const start = all.length ? (cursor.get(factorId) ?? 0) % all.length : 0;
+  const ids = [...all.slice(start), ...all.slice(0, start)].slice(0, limit);
   const states = new Map<string, RemoteState>();
   let next = 0;
+  let failed = 0;
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ids.length) }, async () => {
     while (next < ids.length && Date.now() - started < BUDGET_MS) {
       const id = ids[next++];
@@ -77,13 +95,18 @@ async function run(factorId: string): Promise<SyncResult> {
         const record = collectRiskInvoiceRecords(await fcRequest(`/invoices/${encodeURIComponent(id)}`)).find((r) => r.id === id);
         // A reply we can't read is left alone, never taken to mean the invoice is gone.
         if (record) states.set(id, remoteState(record));
+        else failed++;
       } catch (err) {
         // Only a definite "not found" means it was deleted.
         if (err instanceof FactorCloudError && err.status === 404) states.set(id, 'DELETED');
-        else console.error(`[factorcloud-sync] could not read ${id}`, err);
+        else { failed++; console.error(`[factorcloud-sync] could not read ${id}`, err); }
       }
     }
   }));
+  if (all.length) cursor.set(factorId, (start + next) % all.length);
+  const inWindow = new Set(ids);
+  const runs = allRuns.filter((r) => inWindow.has(r.factorcloud_invoice_id));
+  const reviews = allReviews.filter((r) => inWindow.has(r.factorcloud_invoice_id));
 
   let changed = 0;
   const audit = (clientId: string | null, submissionId: string | null, data: Record<string, unknown>) =>
@@ -135,10 +158,16 @@ async function run(factorId: string): Promise<SyncResult> {
     await audit(r.client_id, r.submission_id, { reviewId: r.review_id, invoiceId: r.factorcloud_invoice_id, factorCloud: remote });
   }
 
-  return { checked: states.size, changed, at: new Date().toISOString() };
+  return { checked: states.size, failed, total: all.length, changed, at: new Date().toISOString() };
 }
 
 /** For tests: forget when each factor was last checked. */
 export function resetSyncClock(): void {
+  last.clear();
+  cursor.clear();
+}
+
+/** For tests: forget the once-a-minute limit but keep each factor's place in the queue. */
+export function resetSyncThrottle(): void {
   last.clear();
 }

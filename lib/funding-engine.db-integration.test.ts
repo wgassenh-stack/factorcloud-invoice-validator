@@ -24,6 +24,8 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     cashReserve: 1500,
     invoices: [] as Record<string, unknown>[],
     groupSeq: 0,
+    invoiceSeq: 0,
+    failReads: new Set<string>(),
     refuseApprove: false,
     // FactorCloud batches like the real thing: one open (NOT_FUNDED) batch per client; approving adds to it.
     groups: [] as { id: string; code: string; clientId: string; status: string; invoiceIds: string[] }[],
@@ -64,10 +66,11 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
         return ok({ invoices: page === 0 ? rows : [] });
       }
       if (p === '/invoices' && method === 'POST') {
-        const id = `inv-${fc.invoices.length + 1}`;
+        const id = `inv-${++fc.invoiceSeq}`;
         fc.invoices.push({ ...body, id, invoiceBalance: body.invoiceAmount, status: 'PENDING', createdOn: new Date().toISOString() });
         return ok({ data: { id } }, 201);
       }
+      if (p.startsWith('/invoices/') && p.split('/').length === 3 && method === 'GET' && fc.failReads.has(p.split('/')[2])) return ok({ message: 'temporarily unavailable' }, 500);
       if (p.startsWith('/invoices/') && p.split('/').length === 3 && method === 'GET') {
         const invoice = fc.invoices.find((r) => r.id === p.split('/')[2]);
         return invoice ? ok({ status: 'SUCCESS', invoice }) : ok({ error: 'not found' }, 404);
@@ -114,6 +117,9 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     sessionCookie = await (await import('./session')).signPortalSession(admin);
   });
 
+  /** Earlier scenarios can leave a batch open; FactorCloud would add new approvals to it. */
+  function closeOpenBatches() { for (const g of fc.groups) if (g.status === 'NOT_FUNDED') g.status = 'FUNDED'; }
+
   async function setRules(change: (s: any) => void) {
     const { GET, PUT } = await import('../app/api/ops/rules/route');
     const { settings } = await (await GET()).json();
@@ -146,7 +152,7 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
 
   it('all good: verified, approved and funded with no one clicking', async () => {
     // A small test client: one debtor's share and a short history are expected here.
-    await setRules((s) => { s.mode = 'fund'; s.rules.concentration.enabled = false; s.rules.newClient.enabled = false; s.caps.perClientPerDay = 100_000; s.caps.perFactorPerDay = 200_000; });
+    await setRules((s) => { s.mode = 'fund'; s.rules.concentration.enabled = false; s.rules.newClient.enabled = false; s.rules.volumeSpike.enabled = false; s.caps.perClientPerDay = 100_000; s.caps.perFactorPerDay = 200_000; });
     const { run, writes } = await send('AUTO-1', 1000);
     expect(run).toMatchObject({ outcome: 'FUND', state: 'FUNDED', autoFunded: true, reasons: [] });
     expect(writes).toEqual(expect.arrayContaining(['PATCH /invoices/verification', 'PATCH /invoices/approve-for-funding', 'PATCH /invoice-groups/fund']));
@@ -167,7 +173,9 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     expect(reviews).toHaveLength(0);
 
     const { POST } = await import('../app/api/ops/funding/[runId]/route');
-    const click = () => POST(new Request('http://portal.test/x', { method: 'POST', body: JSON.stringify({ action: 'fund' }) }), { params: Promise.resolve({ runId: run.id }) });
+    // The person saw these hold reasons in the dialog and overrides them.
+    const seenHolds = run.rules.filter((r) => r.status === 'HOLD' || r.status === 'UNKNOWN').map((r) => r.id);
+    const click = () => POST(new Request('http://portal.test/x', { method: 'POST', body: JSON.stringify({ action: 'fund', seenHolds }) }), { params: Promise.resolve({ runId: run.id }) });
     const first = await click();
     const out = await first.json();
     expect(first.status, JSON.stringify(out)).toBe(200);
@@ -207,7 +215,8 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     const { GET, POST } = await import('../app/api/ops/funding/[runId]/route');
     const preview = await (await GET(new Request('http://portal.test/x'), { params: Promise.resolve({ runId: run.id }) })).json();
     expect(preview.batch.invoices.map((i: { invoiceNumber: string }) => i.invoiceNumber).sort()).toEqual(['HAND-1', 'WITH-HAND']);
-    const res = await POST(new Request('http://portal.test/x', { method: 'POST', body: JSON.stringify({ action: 'fund' }) }), { params: Promise.resolve({ runId: run.id }) });
+    const expected = preview.batch.invoices.map((i: { invoiceId: string; amount: number | null }) => ({ invoiceId: i.invoiceId, amount: i.amount }));
+    const res = await POST(new Request('http://portal.test/x', { method: 'POST', body: JSON.stringify({ action: 'fund', expected }) }), { params: Promise.resolve({ runId: run.id }) });
     const out = await res.json();
     expect(res.status, JSON.stringify(out)).toBe(200);
     expect(out.detail).toMatch(/HAND-1/);
@@ -221,15 +230,19 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     const b = await send('PAIR-B', 450);
     expect([a.run.state, b.run.state]).toEqual(['APPROVED', 'APPROVED']);
     expect(a.run.invoiceGroupId).toBe(b.run.invoiceGroupId);
-    const { actOnRun, listRuns } = await import('./funding-engine');
-    const result = await actOnRun('f1', a.run.id, 'fund', 's1', 'Admin');
+    const { actOnRun, listRuns, batchFor } = await import('./funding-engine');
+    const reviewed = (await batchFor('f1', a.run.factorCloudInvoiceId, a.run.invoiceGroupId)).invoices.map((i) => ({ invoiceId: i.invoiceId, amount: i.amount }));
+    expect(reviewed).toHaveLength(2);
+    // Without saying what was reviewed, a person's funding is refused.
+    expect((await actOnRun('f1', a.run.id, 'fund', 's1', 'Admin')).ok).toBe(false);
+    const result = await actOnRun('f1', a.run.id, 'fund', 's1', 'Admin', { expected: reviewed });
     expect(result.ok, result.detail).toBe(true);
     const [ra, rb] = await Promise.all([listRuns('f1', { id: a.run.id }), listRuns('f1', { id: b.run.id })]);
     expect(ra[0]).toMatchObject({ state: 'FUNDED', autoFunded: false });
     expect(rb[0]).toMatchObject({ state: 'FUNDED', autoFunded: false });
     expect(rb[0].detail).toMatch(/same FactorCloud batch as PAIR-A/);
     expect(calls.filter((c) => c.path === '/invoice-groups/fund' && c.body.invoiceGroups[0] === a.run.invoiceGroupId)).toHaveLength(1);
-    expect((await actOnRun('f1', b.run.id, 'fund', 's1', 'Admin')).ok).toBe(false);
+    expect((await actOnRun('f1', b.run.id, 'fund', 's1', 'Admin', { expected: reviewed })).ok).toBe(false);
     await setRules((s) => { s.mode = 'fund'; });
     fc.invoices = fc.invoices.filter((r) => !['PAIR-A', 'PAIR-B'].includes(String(r.invoiceNumber)));
   });
@@ -369,6 +382,121 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     expect((await listRuns('f1', { id: held.run.id }))[0].state).toBe('SUGGESTED');
     fc.invoices = fc.invoices.filter((r) => r.id !== held.run.factorCloudInvoiceId);
     await query("update engine_runs set state='REVIEW' where id=$1", [held.run.id]);
+  });
+
+  it('approve & fund on a held invoice checks FactorCloud again first, and only overrides reasons the person saw', async () => {
+    closeOpenBatches();
+    const { actOnRun, listRuns } = await import('./funding-engine');
+    const now = async (id: string) => (await listRuns('f1', { id }))[0];
+    const approvals = () => calls.filter((c) => c.path === '/invoices/approve-for-funding').length;
+    const holdsOf = (run: { rules: { id: string; status: string }[] }) => run.rules.filter((r) => r.status === 'HOLD' || r.status === 'UNKNOWN').map((r) => r.id);
+
+    // The amount changed in FactorCloud after the decision: nothing is done.
+    const a = await send('OVR-AMOUNT', 6100);
+    fc.invoices.find((r) => r.id === a.run.factorCloudInvoiceId)!.invoiceAmount = 6900;
+    let before = approvals();
+    let out = await actOnRun('f1', a.run.id, 'fund', 's1', 'Admin', { seenHolds: holdsOf(a.run) });
+    expect(out).toMatchObject({ ok: false, detail: expect.stringMatching(/amount changed in FactorCloud \(\$6,100\.00 → \$6,900\.00\)/) });
+    expect(approvals()).toBe(before);
+    expect(await now(a.run.id)).toMatchObject({ state: 'SUGGESTED', amount: 6900 });
+
+    // A new reason appeared since the person looked (negative cash reserve): nothing is done…
+    const b = await send('OVR-NEWREASON', 6200);
+    fc.cashReserve = -75;
+    before = approvals();
+    out = await actOnRun('f1', b.run.id, 'fund', 's1', 'Admin', { seenHolds: holdsOf(b.run) });
+    try {
+      expect(out).toMatchObject({ ok: false, detail: expect.stringMatching(/new reason to hold it came up \(Cash reserve is negative/) });
+      expect(approvals()).toBe(before);
+    } finally { fc.cashReserve = 1500; }
+    fc.cashReserve = -75;
+    // …until they've seen it too.
+    const seen = await now(b.run.id);
+    out = await actOnRun('f1', b.run.id, 'fund', 's1', 'Admin', { seenHolds: holdsOf(seen) });
+    expect(out.ok, out.detail).toBe(true);
+    expect(await now(b.run.id)).toMatchObject({ state: 'FUNDED', autoFunded: false });
+    fc.cashReserve = 1500;
+
+    // Rejected in FactorCloud meanwhile: nothing is done.
+    const c = await send('OVR-REJECTED', 6300);
+    fc.invoices.find((r) => r.id === c.run.factorCloudInvoiceId)!.status = 'REJECTED';
+    before = approvals();
+    out = await actOnRun('f1', c.run.id, 'fund', 's1', 'Admin', { seenHolds: holdsOf(c.run) });
+    expect(out).toMatchObject({ ok: false, detail: expect.stringMatching(/rejected in FactorCloud/) });
+    expect(approvals()).toBe(before);
+    fc.invoices = fc.invoices.filter((r) => !String(r.invoiceNumber).startsWith('OVR-'));
+    for (const r of [a, c]) await query("update engine_runs set state='REVIEW' where id=$1", [r.run.id]);
+  });
+
+  it('funding is bound to the batch the person reviewed, and needs a known batch status', async () => {
+    closeOpenBatches();
+    await setRules((s) => { s.mode = 'approve'; });
+    const a = await send('BIND-A', 410);
+    const { actOnRun, batchFor } = await import('./funding-engine');
+    const reviewed = (await batchFor('f1', a.run.factorCloudInvoiceId, a.run.invoiceGroupId)).invoices.map((i) => ({ invoiceId: i.invoiceId, amount: i.amount }));
+    // Another invoice joins the batch between review and click.
+    const b = await send('BIND-B', 420);
+    expect(b.run.invoiceGroupId).toBe(a.run.invoiceGroupId);
+    const funds = () => calls.filter((c) => c.path === '/invoice-groups/fund').length;
+    let before = funds();
+    let out = await actOnRun('f1', a.run.id, 'fund', 's1', 'Admin', { expected: reviewed });
+    expect(out).toMatchObject({ ok: false, batchChanged: true, detail: expect.stringMatching(/changed after you reviewed it.*BIND-B/) });
+    expect(funds()).toBe(before);
+
+    // FactorCloud doesn't say whether the batch is still unfunded: refuse.
+    const group = fc.groups.find((g) => g.id === a.run.invoiceGroupId)!;
+    const status = group.status;
+    group.status = undefined as unknown as string;
+    const both = (await batchFor('f1', a.run.factorCloudInvoiceId, a.run.invoiceGroupId)).invoices.map((i) => ({ invoiceId: i.invoiceId, amount: i.amount }));
+    out = await actOnRun('f1', a.run.id, 'fund', 's1', 'Admin', { expected: both });
+    expect(out).toMatchObject({ ok: false, detail: expect.stringMatching(/didn't say whether/) });
+    expect(funds()).toBe(before);
+    group.status = status;
+    // Reviewed as it is now: funded.
+    out = await actOnRun('f1', a.run.id, 'fund', 's1', 'Admin', { expected: both });
+    expect(out.ok, out.detail).toBe(true);
+    await setRules((s) => { s.mode = 'fund'; });
+    fc.invoices = fc.invoices.filter((r) => !String(r.invoiceNumber).startsWith('BIND-'));
+  });
+
+  it('pause all automation stops every client, including clients with their own rules', async () => {
+    await setRules((s) => { s.paused = true; s.clientOverrides = { [CLIENT]: { name: 'Test Trucking LLC', mode: 'fund', rules: s.rules, caps: { perInvoice: 8_000, perClientPerDay: 50_000 } } }; });
+    const { run, writes } = await send('PAUSED-1', 500);
+    expect(run).toBeUndefined();
+    expect(writes.filter((w) => /verification|approve-for-funding|invoice-groups/.test(w))).toEqual([]);
+    const { GET } = await import('../app/api/ops/funding/route');
+    const body = await (await GET(new Request('http://portal.test/api/ops/funding'))).json();
+    expect(body.automation).toMatchObject({ paused: true, clients: { fund: 0, off: 1 } });
+    await setRules((s) => { s.paused = false; s.clientOverrides = {}; });
+    fc.invoices = fc.invoices.filter((r) => r.invoiceNumber !== 'PAUSED-1');
+  });
+
+  it('the FactorCloud check says how much it covered, counts failures, and works through every item in turns', async () => {
+    const { syncWithFactorCloud, resetSyncClock, resetSyncThrottle } = await import('./factorcloud-sync');
+    resetSyncClock();
+    const openIds = (await query<{ id: string }>("select distinct factorcloud_invoice_id as id from engine_runs where factor_id='f1' and state in ('SUGGESTED','APPROVED','FAILED','REVIEW') and approval_status in ('IDLE','COMPLETE')")).map((r) => r.id);
+    expect(openIds.length).toBeGreaterThan(3);
+    const seen = new Set<string>();
+    const reads = () => calls.filter((c) => /^\/invoices\/[^/]+$/.test(c.path) && c.method === 'GET').map((c) => c.path.split('/')[2]);
+    for (let pass = 0; pass < 50 && openIds.some((id) => !seen.has(id)); pass++) {
+      const before = reads().length;
+      resetSyncThrottle();
+      const result = await syncWithFactorCloud('f1', { limit: 2 });
+      // Items it closes along the way (deleted in FactorCloud) leave the total, so it can shrink.
+      expect(result.total).toBeGreaterThan(0);
+      expect(result.checked + result.failed).toBeLessThanOrEqual(2);
+      for (const id of reads().slice(before)) seen.add(id);
+    }
+    // Every open item got its turn, not just the newest ones.
+    expect(openIds.filter((id) => !seen.has(id))).toEqual([]);
+
+    // A read that fails is counted, not hidden, and changes nothing.
+    fc.failReads.add(openIds[0]);
+    resetSyncClock();
+    const result = await syncWithFactorCloud('f1');
+    fc.failReads.clear();
+    expect(result.failed).toBe(1);
+    expect(result.checked + result.failed).toBe(result.total);
   });
 
   it('suggest only: nothing done in FactorCloud until a person approves', async () => {

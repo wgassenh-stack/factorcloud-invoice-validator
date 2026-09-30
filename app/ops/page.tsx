@@ -35,7 +35,7 @@ export default function Overview() {
         </OpsPanel>
         {funding?.available&&ready.length>0&&<Paperwork rows={factorRows} data={reviews}/>}
       </div><aside className="oc-stack">
-        <OpsPanel title="Automation control"><div className="oc-body"><h3><OpsIcon name="rules"/> {funding?.available?modeLabels[funding.mode]:'Unavailable'}</h3><p className="oc-small oc-muted">{funding?.available?(funding.mode==='approve'?'Approvals automated. Funding requires a person.':funding.mode==='fund'?'Approval and funding may run within configured rules and caps.':funding.mode==='suggest'?'Suggestions only. People control the financial steps.':'The engine is off.'):funding?.note||'Engine data could not be read.'}</p><dl className="oc-facts"><div><dt>Approval gate</dt><dd>{!funding?.available?'Unavailable':funding.mode==='approve'||funding.mode==='fund'?'Automatic':'Human decision'}</dd></div><div><dt>Funding gate</dt><dd>{!funding?.available?'Unavailable':funding.mode==='fund'?'Automatic within limits':'Human decision'}</dd></div><div><dt>Approval failures</dt><dd>{summary?.failed??'—'}</dd></div><div><dt>Clients with their own rules</dt><dd><a className="oc-link" href="/ops/rules?tab=clients">Set per client →</a></dd></div></dl><p><a className="oc-link" href="/ops/rules">View automation rules →</a></p></div></OpsPanel>
+        <OpsPanel title="Automation control"><AutomationControl data={funding}/></OpsPanel>
       </aside></div><div className="oc-toolbar" style={{marginTop:16}}><span className="oc-note">Amounts are invoice value.</span><a className="oc-link" href="/ops/reports">Portfolio reports →</a></div>
     </>}
   </section></main>;
@@ -47,7 +47,7 @@ const lane:Record<string,string>={funded:'funded',held:'decision',review:'review
 function AutomationToday({data}:{data:FundingData}) {
   const t=data.summary!.today!,parts=[{key:'funded',label:'Funded automatically',n:t.autoFunded,href:'/ops/funding?lane=funded'},{key:'held',label:'Waiting for one click',n:t.held,href:'/ops/funding?lane=decision'},{key:'review',label:'Paperwork needs a person',n:t.review,href:'/ops/reviews'},{key:'problem',label:'Needs attention',n:t.problems,href:'/ops/funding?lane=exceptions'}];
   const speed=t.secondsToFund==null?null:t.secondsToFund<90?Math.max(1,Math.round(t.secondsToFund))+' seconds':Math.round(t.secondsToFund/60)+' minutes';
-  return <section className={styles.hero} aria-label="Automation today"><div><span className={styles.eyebrow}><i className={styles.live} aria-hidden="true"/>Automation today · {modeLabels[data.mode]}</span>
+  return <section className={styles.hero} aria-label="Automation today"><div><span className={styles.eyebrow}><i className={styles.live} aria-hidden="true"/>Automation today · {data.automation?.paused?'Paused':modeLabels[data.mode]}</span>
     <p className={styles.headline}>{t.received?<><em>{t.autoFunded} of {t.received}</em> invoices funded with no one touching them</>:'No invoices sent in yet today'}</p>
     <p className={styles.sub}>{t.autoFunded>0&&<><strong>{opsMoney(t.autoAmount)}</strong> funded automatically{speed&&<>, on average <strong>{speed}</strong> after the client sent it</>}. </>}The rest are waiting for you below, each with the reason.</p></div>
     <div><div className={styles.bar} role="img" aria-label={parts.map(p=>p.n+' '+p.label.toLowerCase()).join(', ')}>{parts.filter(p=>p.n>0).map(p=><span key={p.key} className={styles[p.key]} style={{flexGrow:p.n}}/>)}</div>
@@ -58,4 +58,18 @@ function Decision({run}:{run:EngineRun}) {
   const what=run.state==='FUNDED'?(run.autoFunded?'Funded automatically':'Funded'):run.state==='APPROVED'?'Approved, waiting to fund':run.state==='SUGGESTED'?(run.mode==='fund'?'Held for one click':'Suggested for approval'):run.state==='REVIEW'?'Sent to paperwork review':run.state==='FAILED'?"Couldn't be approved":runLabel(run);
   const why=run.state==='FUNDED'&&run.autoFunded?'Every rule and limit passed.':run.reasons[0]||run.detail||'';
   return <a className={styles.item} href={k==='review'?'/ops/reviews':'/ops/funding?lane='+(run.state==='SUGGESTED'&&run.mode!=='fund'?'suggestions':lane[k])+'&run='+encodeURIComponent(run.id)}><span className={styles.icon+' '+styles[k]} aria-hidden="true">{mark}</span><span className={styles.what}><strong>{run.invoiceNumber||run.factorCloudInvoiceId.slice(0,8)}</strong> · {what}<span className={styles.why}>{run.clientName||'Client'}{run.debtorName?' → '+run.debtorName:''}{why?' · '+why:''}</span></span><span className={styles.meta}><b>{opsMoney(run.amount)}</b>{opsTime(run.fundedAt||run.createdAt)}</span></a>;
+}
+
+/** What the automation is allowed to do right now, client by client. */
+function AutomationControl({data}:{data:FundingData|null}) {
+  if(!data?.available)return <div className="oc-body"><h3><OpsIcon name="rules"/> Unavailable</h3><p className="oc-small oc-muted">{data?.note||'Engine data could not be read.'}</p></div>;
+  const a=data.automation,c=a?.clients,total=c?c.off+c.suggest+c.approve+c.fund:0;
+  const headline=a?.paused?'Paused':modeLabels[a?.defaultMode??data.mode]+' by default';
+  const note=a?.paused?'All automation is paused: nothing is approved or funded automatically, for any client.'
+    :!c?'':c.fund?`${c.fund} of ${total} client${total===1?'':'s'} can be funded automatically, within their limits.`
+    :c.approve?'Approvals are automatic for some clients; funding always needs a person.'
+    :c.suggest?'Suggestions only: people approve and fund.':'Automation is off for every client.';
+  return <div className="oc-body"><h3 style={a?.paused?{color:'#a73544'}:undefined}><OpsIcon name="rules"/> {headline}</h3><p className="oc-small oc-muted">{note}</p>
+    {c&&<dl className="oc-facts"><div><dt>Auto-fund</dt><dd>{c.fund} client{c.fund===1?'':'s'}</dd></div><div><dt>Auto-approve</dt><dd>{c.approve}</dd></div><div><dt>Suggest only</dt><dd>{c.suggest}</dd></div><div><dt>Off</dt><dd>{c.off}</dd></div><div><dt>Approval failures</dt><dd>{data.summary?.failed??'—'}</dd></div></dl>}
+    <p><a className="oc-link" href="/ops/rules">{a?.paused?'Resume automation →':'Pause or change the rules →'}</a></p></div>;
 }

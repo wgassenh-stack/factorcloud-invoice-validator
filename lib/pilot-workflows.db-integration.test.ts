@@ -83,10 +83,10 @@ describe.skipIf(!enabled)('pilot workflows against PostgreSQL',()=>{
       if(path.startsWith('/invoice-groups/'))return new Response(JSON.stringify({invoiceGroup:{id:'batch-one',code:'B1',status:'NOT_FUNDED'}}));
       return new Response(JSON.stringify({}));});
     vi.stubGlobal('fetch',fetcher);
-    expect((await actOnRun('factor','one','fund','admin','Admin')).ok).toBe(false);
+    expect((await actOnRun('factor','one','fund','admin','Admin',{expected:[{invoiceId:'one',amount:600}]})).ok).toBe(false);
     expect((await query("select state from engine_runs where id='one'"))[0].state).toBe('FUNDING');
     expect((await query('select kind from recovery_items'))[0].kind).toBe('FUNDING_UNKNOWN');
-    await actOnRun('factor','one','fund','admin','Admin');expect(fundCalls).toEqual(['/invoice-groups/fund']);
+    await actOnRun('factor','one','fund','admin','Admin',{expected:[{invoiceId:'one',amount:600}]});expect(fundCalls).toEqual(['/invoice-groups/fund']);
   });
   it('reconciliation needs evidence and records the actor before unblocking',async()=>{
     await run('one');const {claimFunding}=await import('./funding-safety');await claimFunding('one',true,await settings());const {openRecovery}=await import('./recovery');await openRecovery({factorId:'factor',runId:'one',kind:'FUNDING_UNKNOWN',detail:'Timeout'});

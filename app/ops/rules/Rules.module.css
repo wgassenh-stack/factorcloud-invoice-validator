@@ -17,3 +17,11 @@
 /* Beat the site-wide button hover (dark fill), which hid the client's name. */
 .clientList .client:not(:disabled):hover { background:#f5f7fa; }
 .clientList .client.selected:not(:disabled):hover { background:#eaf1fc; }
+.pause { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-top:16px; padding:16px 20px; border-radius:12px; background:#fff; border:1px solid var(--fc-line, #dce2ea); }
+.pause div { display:grid; gap:4px; }
+.pause strong { font-size:15px; color:#1a2130; }
+.pause span { font-size:13px; color:#5b6474; max-width:760px; }
+.pause button { width:auto; margin:0; white-space:nowrap; }
+.paused { background:#fbeeee; border-color:#e7b9b9; }
+.paused strong { color:#a73544; }
+.startsFunding { color:#a86a12; font-weight:700; }
