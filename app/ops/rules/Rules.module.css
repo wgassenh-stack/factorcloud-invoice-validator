@@ -25,3 +25,4 @@
 .paused { background:#fbeeee; border-color:#e7b9b9; }
 .paused strong { color:#a73544; }
 .startsFunding { color:#a86a12; font-weight:700; }
+.search { margin:0 0 6px; padding:8px 10px; border:1px solid var(--fc-line, #dce2ea); border-radius:8px; font-size:13px; width:100%; }

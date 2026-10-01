@@ -155,7 +155,7 @@ function seedRuns(s: DemoFundingState): void {
     return run(i, at, { tweak: { debtorCredit: tight }, expect: (d) => d.outcome === 'HOLD' && d.reasons.length === 1 && d.rules.some((r) => r.id === 'credit-limit' && r.status === 'HOLD') });
   });
   // Held by a debtor risk rule the portfolio really trips (slow payer, concentration or first invoice).
-  take(small, (i, at) => run(i, at, { expect: (d) => d.outcome === 'HOLD' && d.rules.some((r) => ['slow-debtor', 'concentration', 'new-debtor'].includes(r.id) && r.status === 'HOLD') }));
+  take(plain, (i, at) => run(i, at, { expect: (d) => d.outcome === 'HOLD' && d.rules.some((r) => ['slow-debtor', 'concentration', 'new-debtor'].includes(r.id) && r.status === 'HOLD') }));
   // Paperwork sent anyway: never approved automatically.
   take(reviewed, (i, at) => run(i, at, { paperwork: 'REVIEW', expect: 'REVIEW' }));
   // A client on "suggest only".

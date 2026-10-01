@@ -41,13 +41,17 @@ export default function RulesPage() {
   const [clients,setClients]=useState<{id:string;name:string}[]>([]);
   const [tab,setTab]=useState<'factor'|'clients'>('factor');
   const [clientId,setClientId]=useState('');
+  const [clientQuery,setClientQuery]=useState('');
 
   useEffect(() => {
     void fetch('/api/ops/rules', { cache: 'no-store' }).then(async (res) => {
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Could not load the rules.');
       setSettings(body.settings); setBaseline(body.settings); setEditable(body.editable); setDemo(Boolean(body.demo)); setNote(body.note ?? ''); setClients(body.clients ?? []); setClientId((body.clients ?? [])[0]?.id ?? '');
-      if (new URLSearchParams(window.location.search).get('tab') === 'clients') setTab('clients');
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('tab') === 'clients' || params.get('client')) setTab('clients');
+      const wanted = params.get('client');
+      if (wanted && (body.clients ?? []).some((c: { id: string }) => c.id === wanted)) setClientId(wanted);
     }).catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
@@ -156,7 +160,8 @@ export default function RulesPage() {
         {tab==='clients'&&<div className={styles.clients}>
           <nav className={styles.clientList} aria-label="Clients">
             <p className={styles.listNote}>Each client uses the factor defaults unless you give it its own rules.</p>
-            {clients.map((c)=>{const o=s.clientOverrides[c.id];return <button key={c.id} className={styles.client+' '+(clientId===c.id?styles.selected:'')} onClick={()=>setClientId(c.id)} aria-current={clientId===c.id?'true':undefined}><strong>{c.name}</strong><small>{o?summary(o):'Factor defaults'}</small>{o&&<span className={styles.custom}>Custom</span>}</button>;})}
+            {clients.length>8&&<input className={styles.search} type="search" placeholder="Search clients" aria-label="Search clients" value={clientQuery} onChange={(e)=>setClientQuery(e.target.value)}/>}
+            {clients.filter((c)=>c.name.toLowerCase().includes(clientQuery.trim().toLowerCase())).map((c)=>{const o=s.clientOverrides[c.id];return <button key={c.id} className={styles.client+' '+(clientId===c.id?styles.selected:'')} onClick={()=>setClientId(c.id)} aria-current={clientId===c.id?'true':undefined}><strong>{c.name}</strong><small>{o?summary(o):'Factor defaults'}</small>{o&&<span className={styles.custom}>Custom</span>}</button>;})}
             {!clients.length&&<p className={styles.listNote}>No clients yet.</p>}
           </nav>
           <div className={styles.clientEditor}>{(()=>{
