@@ -261,7 +261,7 @@ export default function SendPaperworkPage() {
         <div>
           <span className="eyebrow">FactorCloud Client Portal</span>
           <h1>{asDriver ? 'Send in paperwork' : 'Submit invoices'}</h1>
-          <UploadDraft empty={!files.length} value={{files,loads,load,upload,cards,unassigned,suggestions,left,skipped}}
+          <UploadDraft empty={!files.length || (cards.length > 0 && cards.every((c) => cardState(c) === 'sent'))} value={{files,loads,load,upload,cards,unassigned,suggestions,left,skipped}}
             onRestore={draft=>{setFiles(draft.files);setLoads(draft.loads);setLoad(draft.load);setUpload(draft.upload);setCards(draft.cards.map(c=>c.sent?.state==='sending'?{...c,sent:{...c.sent,state:'error',message:'Submission interrupted. Check your invoices before trying again.'}}:c));setUnassigned(draft.unassigned);setSuggestions(draft.suggestions);setLeft(draft.left);setSkipped(draft.skipped);}}/>
           <p>{asDriver
             ? 'Snap or upload the invoice, BOL and signed POD. Doing several loads? Tap “Next load” between them. We sort and check everything before it goes to your factor.'
@@ -440,7 +440,7 @@ function InvoiceCard({ card, documents, targets, busy, asDriver, only, urlFor, f
       {card.debtor && <p className="match">Debtor: <strong>{card.debtor.companyName}</strong>{card.debtorMatch ? ` (matched by ${card.debtorMatch.method})` : ''}</p>}
     </details>}
 
-    {!sent && !blocked.length && flagged.length > 0 && card.debtor && <SubmitAnywayBox compact flagged={flagged} blocked={[]} value={card.note} onChange={(note) => onChange({ note })} />}
+    {!sent && !alreadyInFactorCloud(card) && !blocked.length && flagged.length > 0 && card.debtor && <SubmitAnywayBox compact flagged={flagged} blocked={[]} value={card.note} onChange={(note) => onChange({ note })} />}
     {!sent && blocked.length > 0 && <SubmitAnywayBox flagged={[]} blocked={blocked} value="" onChange={() => {}} />}
 
     <footer className="sendCardFoot">
