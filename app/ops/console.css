@@ -34,3 +34,4 @@
 .oc-sync.warn{color:#8a5a0a}
 .oc-dialog.wide{max-width:1280px}
 .oc-figure-row.wide{grid-template-columns:minmax(0,200px) 1fr 60px}.oc-figure-row.wide>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:700px){.oc-figure-row.wide{grid-template-columns:minmax(0,120px) 1fr 44px}}
+.oc-activity.plain{grid-template-columns:minmax(0,1fr) auto;align-items:center}

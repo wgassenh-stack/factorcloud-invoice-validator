@@ -49,6 +49,9 @@ export default function FactorClientDetailPage() {
   }
   useEffect(() => { void load(); }, [clientId]);
 
+  // Funded invoices from FactorCloud, for when the portal has no funding decisions of its own yet
+  // (funded before the portal, or directly in FactorCloud).
+  const fundedInFc = useMemo(() => (data?.records ?? []).filter((r) => /^(FUNDED|PAID)/i.test(r.status ?? '')).sort((a, b) => String(b.invoiceDate ?? '').localeCompare(String(a.invoiceDate ?? ''))).slice(0, 5), [data]);
   const recent = useMemo(() => (data?.records ?? []).slice().sort((a, b) => String(b.invoiceDate ?? '').localeCompare(String(a.invoiceDate ?? ''))).slice(0, 12), [data]);
   const waiting = data?.work?.waiting ?? [];
   const waitingAmount = waiting.reduce((t, r) => t + r.amount, 0);
@@ -114,7 +117,7 @@ export default function FactorClientDetailPage() {
           </div>}
         </OpsPanel>
         <OpsPanel title="Recently funded">
-          {data.work?.recent.length ? data.work.recent.map((run) => <div className="oc-activity" key={run.id}><div><strong>{run.invoiceNumber || run.factorCloudInvoiceId.slice(0, 8)} · {opsMoney(run.amount)}</strong><small>{run.autoFunded ? 'Funded automatically' : 'Funded by a person'}{run.debtorName ? ' · ' + run.debtorName : ''}</small></div></div>) : <OpsEmpty>No funding decisions recorded yet.</OpsEmpty>}
+          {data.work?.recent.length ? data.work.recent.map((run) => <div className="oc-activity plain" key={run.id}><div><strong>{run.invoiceNumber || run.factorCloudInvoiceId.slice(0, 8)}</strong><small>{run.autoFunded ? 'Funded automatically' : 'Funded by a person'}{run.debtorName ? ' · ' + run.debtorName : ''}</small></div><strong className="oc-num">{opsMoney(run.amount)}</strong></div>) : fundedInFc.length ? fundedInFc.map((r) => <div className="oc-activity plain" key={r.id}><div><strong>{r.invoiceNumber || r.id.slice(0, 8)}</strong><small>{r.companyDebtorId && data.debtorNames[r.companyDebtorId] ? data.debtorNames[r.companyDebtorId] : 'Funded in FactorCloud'}{r.invoiceDate ? ' · ' + r.invoiceDate.slice(5, 10) : ''}</small></div><strong className="oc-num">{r.invoiceAmount == null ? '—' : opsMoney(r.invoiceAmount)}</strong></div>) : <OpsEmpty>Nothing funded yet.</OpsEmpty>}
         </OpsPanel>
         <OpsPanel title="Volume">
           <div className="oc-body"><dl className="oc-facts">
