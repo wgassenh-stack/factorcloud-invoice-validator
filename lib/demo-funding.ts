@@ -198,7 +198,7 @@ function syncInvoice(run: EngineRun): void {
 /** The Funding Center lane, as the live engine's laneOf(). */
 function laneOf(run: EngineRun): string {
   if (run.state === 'SUGGESTED') return run.mode === 'fund' ? 'decision' : 'suggestions';
-  return run.state === 'APPROVED' ? 'decision' : run.state === 'FUNDED' ? 'funded' : run.state === 'REVIEW' ? 'review' : 'exceptions';
+  return run.state === 'APPROVED' ? 'decision' : run.state === 'FUNDED' ? 'funded' : run.state === 'REVIEW' ? 'review' : run.state === 'CLOSED' ? 'closed' : 'exceptions';
 }
 
 export function demoFundingData(lane: string | null): FundingData {
@@ -234,6 +234,15 @@ export function demoRun(id: string): EngineRun | null {
 }
 
 /** A click on the demo Funding Center. Approving re-runs the rules first, as the live engine does. */
+/** Demo version of removing an invoice from the list: closes the decision in memory. */
+export function removeDemoRun(id: string, reviewer: string): { ok: boolean; detail: string } {
+  const run = state().runs.find((r) => r.id === id);
+  if (!run) return { ok: false, detail: 'Not found.' };
+  if (!['SUGGESTED', 'APPROVED', 'FAILED', 'REVIEW'].includes(run.state)) return { ok: false, detail: run.state === 'CLOSED' ? 'Already removed.' : run.state === 'FUNDED' ? 'Already funded, so it stays on record.' : 'Funding is in progress for this invoice.' };
+  Object.assign(run, { state: 'CLOSED', detail: `Removed from the list by ${reviewer}.` });
+  return { ok: true, detail: `${run.invoiceNumber || 'The invoice'} was removed from the list. Nothing changed in FactorCloud.` };
+}
+
 export function actOnDemoRun(id: string, action: 'approve' | 'fund', reviewer: string): { ok: boolean; detail: string } {
   const s = state();
   const run = s.runs.find((r) => r.id === id);

@@ -1,29 +1,34 @@
 import { NextResponse } from 'next/server';
 import { apiErrorResponse } from '@/lib/api-errors';
 import { demoRequest } from '@/lib/demo-request';
-import { actOnRun, batchFor, listRuns } from '@/lib/funding-engine';
-import { actOnDemoRun, demoRun } from '@/lib/demo-funding';
+import { actOnRun, batchFor, listRuns, removeRun } from '@/lib/funding-engine';
+import { actOnDemoRun, demoRun, removeDemoRun } from '@/lib/demo-funding';
 import { requireFactorSession } from '@/lib/portal-auth';
 import { databaseAuthEnabled } from '@/lib/session';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-/** A person's click: "approve" a suggestion for funding, or "fund" an approved invoice. Factor admins only. */
+/** A person's click: "approve" a suggestion for funding, "fund" an approved invoice, or "remove" it from the list. Factor admins only. */
 export async function POST(req: Request, context: { params: Promise<{ runId: string }> }) {
   try {
     const session = await requireFactorSession();
     if (await demoRequest()) {
       const { runId } = await context.params;
       const body = await req.json().catch(() => ({})) as { action?: string };
+      if (body.action === 'remove') { const result = removeDemoRun(runId, 'Demo Admin'); return NextResponse.json({ ...result, run: demoRun(runId) }, { status: result.ok ? 200 : 409 }); }
       if (body.action !== 'approve' && body.action !== 'fund') return NextResponse.json({ error: 'Choose approve or fund.' }, { status: 400 });
       const result = actOnDemoRun(runId, body.action, 'Demo Admin');
       return NextResponse.json({ ...result, run: demoRun(runId) }, { status: result.ok ? 200 : 409 });
     }
     if (!databaseAuthEnabled()) return NextResponse.json({ error: 'The funding engine needs database sign-in.' }, { status: 409 });
-    if (session.role !== 'FACTOR_ADMIN') return NextResponse.json({ error: 'Only a factor admin can approve or fund invoices.' }, { status: 403 });
+    if (session.role !== 'FACTOR_ADMIN') return NextResponse.json({ error: 'Only a factor admin can approve, fund or remove invoices.' }, { status: 403 });
     const { runId } = await context.params;
     const body = await req.json().catch(() => ({})) as { action?: string; expected?: unknown; seenHolds?: unknown };
+    if (body.action === 'remove') {
+      const result = await removeRun(session.factorId, runId, session.userId, session.displayName || session.email);
+      return NextResponse.json({ ...result, run: (await listRuns(session.factorId, { id: runId }))[0] ?? null }, { status: result.ok ? 200 : 409 });
+    }
     if (body.action !== 'approve' && body.action !== 'fund') return NextResponse.json({ error: 'Choose approve or fund.' }, { status: 400 });
     const result = await actOnRun(session.factorId, runId, body.action, session.userId, session.displayName || session.email, reviewed(body));
     const [run] = await listRuns(session.factorId, { id: runId });
