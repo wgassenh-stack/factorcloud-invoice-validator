@@ -40,7 +40,7 @@ describe('rejected FactorCloud credentials', () => {
 
   it('an expired service token gives a plain message, not the raw 401', async () => {
     fakeFactorCloud('something-else');
-    const err = await fcRequest('/companies/c1').catch((e) => e);
+    const err = await fcRequest('/companies/c1').catch((e: unknown) => e) as FactorCloudError;
     expect(err).toBeInstanceOf(FactorCloudError);
     expect(err.status).toBe(401);
     expect(err.message).toBe(SERVICE_TOKEN_REJECTED);
