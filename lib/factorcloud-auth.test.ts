@@ -87,10 +87,11 @@ describe('token expiry', () => {
     expect(tokenExpiry('a.not-json.b')).toBeNull();
   });
 
-  it('fails when expired, warns within a week, and is fine otherwise', () => {
+  it('fails when expired, warns in the last 3 days, and is fine otherwise', () => {
     expect(tokenExpiryCheck(at(-60_000), now).state).toBe('fail');
     expect(tokenExpiryCheck(at(5 * 3600_000), now)).toMatchObject({ state: 'warn', detail: expect.stringContaining('in 5 hours') });
-    expect(tokenExpiryCheck(at(3 * 86400_000), now)).toMatchObject({ state: 'warn', detail: expect.stringContaining('in 3 days') });
+    expect(tokenExpiryCheck(at(36 * 3600_000), now)).toMatchObject({ state: 'warn', detail: expect.stringContaining('in 36 hours') });
+    expect(tokenExpiryCheck(at(7 * 86400_000), now).state).toBe('ok');
     expect(tokenExpiryCheck(at(30 * 86400_000), now).state).toBe('ok');
     expect(tokenExpiryCheck('opaque', now).state).toBe('skip');
   });

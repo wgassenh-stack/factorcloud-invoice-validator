@@ -12,6 +12,7 @@ import { adminViewsEnabled } from './demo';
 import { fairCoverage, valueCounts, type FieldCoverage, type ValueCounts } from './field-coverage';
 import { collectRiskInvoiceRecords, type RiskInvoiceRecord } from './risk';
 import { tokenExpiryCheck } from './token-expiry';
+import { canStoreToken, storedToken } from './factorcloud-connection';
 
 // A read-only tour of every FactorCloud call the portal depends on, plus how much of the invoice
 // data comes back filled in. Nothing is created, uploaded or changed in FactorCloud.
@@ -51,14 +52,20 @@ export async function runConnectionCheck(opts: { clientId: string | null; scope:
   const items: ConnectionItem[] = [];
 
   // 1. Settings the portal needs (reported as present/missing only; values never leave the server).
+  const connected = await storedToken();
   const missing = [
     !process.env.FACTORCLOUD_FACTOR_ID && 'FACTORCLOUD_FACTOR_ID',
-    !process.env.FACTORCLOUD_BEARER_TOKEN && 'FACTORCLOUD_BEARER_TOKEN',
+    !process.env.FACTORCLOUD_BEARER_TOKEN && !connected && 'FACTORCLOUD_BEARER_TOKEN (or reconnect FactorCloud on this page)',
     opts.scope === 'client' && !opts.clientId && 'FACTORCLOUD_CLIENT_ID',
     !process.env.PORTAL_SIGNING_SECRET && 'PORTAL_SIGNING_SECRET',
   ].filter(Boolean) as string[];
   items.push({ id: 'settings', label: 'Portal settings', state: missing.length ? 'fail' : 'ok', detail: missing.length ? `Missing: ${missing.join(', ')}.` : 'FactorCloud and signing settings are all set.' });
-  if (process.env.FACTORCLOUD_BEARER_TOKEN) items.push({ id: 'token', label: 'FactorCloud access token', ...tokenExpiryCheck(process.env.FACTORCLOUD_BEARER_TOKEN) });
+  if (connected) {
+    const check = tokenExpiryCheck(connected.token, new Date(), 'Reconnect FactorCloud on this page.');
+    items.push({ id: 'token', label: 'FactorCloud connection', ...check, detail: `Connected${connected.connectedBy ? ` by ${connected.connectedBy}` : ''} on ${new Date(connected.connectedAt).toLocaleDateString('en-US', { dateStyle: 'medium', timeZone: process.env.FACTOR_TIMEZONE || 'America/Chicago' })}. ${check.detail}` });
+  } else if (process.env.FACTORCLOUD_BEARER_TOKEN) {
+    items.push({ id: 'token', label: 'FactorCloud access token', ...tokenExpiryCheck(process.env.FACTORCLOUD_BEARER_TOKEN, new Date(), canStoreToken() ? 'Reconnect FactorCloud on this page.' : 'Replace FACTORCLOUD_BEARER_TOKEN and redeploy.') });
+  }
   const extraction = await timed(() => checkExtraction());
   items.push({ id: 'extraction', label: 'Document reading (Gemini)', state: extraction.value?.state ?? 'fail', detail: extraction.value?.detail ?? fail(extraction.error), ms: extraction.ms });
 

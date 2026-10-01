@@ -20,6 +20,7 @@ export default function Overview() {
     {errors.map(error=><OpsNotice tone="bad" key={error}>{error}</OpsNotice>)}
     {recoveryCount!=null&&recoveryCount>0&&<div className="oc-alert"><div><strong>{recoveryCount} operation{recoveryCount===1?'':'s'} need reconciliation</strong><p>Verify the remote result before another approval or funding attempt.</p></div><a className="oc-button" href="/ops/recovery">Open Recovery</a></div>}
     {loading&&!reviews&&!funding?<DashboardSkeleton metrics={4}/>:<>
+      <ConnectionWarning/>
       <WaitingForYou toFund={summary?.approved??null} paperwork={reviews?factorRows.length:null} problems={summary?summary.failed+summary.uncertain:null} recovery={recoveryCount}/>
       {activity?.available&&activity.summary?.today&&<AutomationToday data={activity}/>}
       <div className="oc-metrics">
@@ -81,4 +82,16 @@ function WaitingForYou({toFund,paperwork,problems,recovery}:{toFund:number|null;
   if(!items.length)return null;
   const open=items.filter(i=>(i.n??0)>0);
   return <nav className={styles.waiting} aria-label="Waiting for you">{open.length?<><strong>Waiting for you</strong>{open.map(i=><a key={i.label} href={i.href}><b>{i.n}</b> {i.n===1||!i.plural?i.label:i.plural}</a>)}</>:<span>✓ Nothing is waiting for you right now.</span>}</nav>;
+}
+
+/** Warns factor staff before the portal's FactorCloud access runs out, with a link to renew it. */
+function ConnectionWarning(){
+  const [expiresAt,setExpiresAt]=useState<string|null>(null),[canReconnect,setCanReconnect]=useState(false);
+  useEffect(()=>{opsFetch<{demo?:boolean;canReconnect:boolean;connected:{expiresAt:string|null}|null;setting:{expiresAt:string|null}|null}>('/api/ops/factorcloud-connection').then(b=>{if(b.demo)return;setCanReconnect(b.canReconnect);setExpiresAt((b.connected??b.setting)?.expiresAt??null);}).catch(()=>{});},[]);
+  if(!expiresAt)return null;
+  const left=new Date(expiresAt).getTime()-Date.now();
+  if(left>3*86_400_000)return null;
+  const hours=Math.max(0,Math.round(left/3_600_000));
+  const text=left<=0?'The portal\'s FactorCloud connection has expired, so FactorCloud data can\'t load and invoices can\'t be sent.':`The portal's FactorCloud connection expires in ${hours<48?`${hours} hour${hours===1?'':'s'}`:`${Math.round(left/86_400_000)} days`}.`;
+  return <OpsNotice tone={left<=0?'bad':'warn'}>{text} {canReconnect?<a className="oc-link" href="/connection#factorcloud-connection">Reconnect FactorCloud →</a>:'Ask a factor admin to reconnect it on the Diagnostics page.'}</OpsNotice>;
 }

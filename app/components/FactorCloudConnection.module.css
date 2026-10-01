@@ -1,0 +1,14 @@
+.panel{margin:18px 0}
+.status{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.status p{margin:4px 0 0;color:#5b6576;font-size:14px}
+.status strong{font-size:15px}
+.ok{color:#1d7a46}.warn{color:#9a6a00}.bad{color:#a73544}
+.form{display:grid;gap:12px;margin-top:16px;max-width:420px}
+.form label{display:grid;gap:6px;font-size:13px;font-weight:600;color:#253042}
+.form input{font:inherit;font-weight:400;padding:10px 12px;border:1px solid #cdd5df;border-radius:8px;background:#fff;color:#111827}
+.form small{font-weight:400;color:#5b6576}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.error{color:#a73544;font-size:14px;margin:0}
+.done{color:#1d7a46;font-size:14px;margin:0}
+.note{margin:10px 0 0;color:#5b6576;font-size:13px}
+.status>button{flex:none;width:auto;padding-left:20px;padding-right:20px}

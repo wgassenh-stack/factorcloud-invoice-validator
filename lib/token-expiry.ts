@@ -16,16 +16,16 @@ export function tokenExpiry(token: string | null | undefined): Date | null {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** A plain-language check of the service token's expiry, for Diagnostics. */
-export function tokenExpiryCheck(token: string | null | undefined, now = new Date()): { state: 'ok' | 'warn' | 'fail' | 'skip'; detail: string } {
+export function tokenExpiryCheck(token: string | null | undefined, now = new Date(), renew = 'Replace FACTORCLOUD_BEARER_TOKEN and redeploy.'): { state: 'ok' | 'warn' | 'fail' | 'skip'; detail: string } {
   if (!token) return { state: 'skip', detail: 'No service token is set.' };
   const expires = tokenExpiry(token);
-  if (!expires) return { state: 'skip', detail: 'The token does not say when it expires. If FactorCloud data stops loading with a sign-in error, replace FACTORCLOUD_BEARER_TOKEN and redeploy.' };
+  if (!expires) return { state: 'skip', detail: 'The token does not say when it expires. If FactorCloud data stops loading with a sign-in error: ' + renew };
   const when = expires.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: process.env.FACTOR_TIMEZONE || 'America/Chicago' });
   const left = expires.getTime() - now.getTime();
-  if (left <= 0) return { state: 'fail', detail: `The token expired on ${when}. Replace FACTORCLOUD_BEARER_TOKEN with a new one and redeploy.` };
-  if (left < 7 * DAY_MS) {
+  if (left <= 0) return { state: 'fail', detail: `The token expired on ${when}. ${renew}` };
+  if (left < 3 * DAY_MS) {
     const hours = Math.round(left / (60 * 60 * 1000));
-    return { state: 'warn', detail: `The token expires ${hours < 48 ? `in ${hours} hour${hours === 1 ? '' : 's'}` : `in ${Math.round(left / DAY_MS)} days`} (${when}). Replace FACTORCLOUD_BEARER_TOKEN before then and redeploy.` };
+    return { state: 'warn', detail: `The token expires ${hours < 48 ? `in ${hours} hour${hours === 1 ? '' : 's'}` : `in ${Math.round(left / DAY_MS)} days`} (${when}). Before then: ${renew}` };
   }
   return { state: 'ok', detail: `The token is good until ${when}.` };
 }
