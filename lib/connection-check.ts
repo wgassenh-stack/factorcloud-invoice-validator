@@ -11,6 +11,7 @@ import { databaseAuthEnabled } from './session';
 import { adminViewsEnabled } from './demo';
 import { fairCoverage, valueCounts, type FieldCoverage, type ValueCounts } from './field-coverage';
 import { collectRiskInvoiceRecords, type RiskInvoiceRecord } from './risk';
+import { tokenExpiryCheck } from './token-expiry';
 
 // A read-only tour of every FactorCloud call the portal depends on, plus how much of the invoice
 // data comes back filled in. Nothing is created, uploaded or changed in FactorCloud.
@@ -57,6 +58,7 @@ export async function runConnectionCheck(opts: { clientId: string | null; scope:
     !process.env.PORTAL_SIGNING_SECRET && 'PORTAL_SIGNING_SECRET',
   ].filter(Boolean) as string[];
   items.push({ id: 'settings', label: 'Portal settings', state: missing.length ? 'fail' : 'ok', detail: missing.length ? `Missing: ${missing.join(', ')}.` : 'FactorCloud and signing settings are all set.' });
+  if (process.env.FACTORCLOUD_BEARER_TOKEN) items.push({ id: 'token', label: 'FactorCloud access token', ...tokenExpiryCheck(process.env.FACTORCLOUD_BEARER_TOKEN) });
   const extraction = await timed(() => checkExtraction());
   items.push({ id: 'extraction', label: 'Document reading (Gemini)', state: extraction.value?.state ?? 'fail', detail: extraction.value?.detail ?? fail(extraction.error), ms: extraction.ms });
 
