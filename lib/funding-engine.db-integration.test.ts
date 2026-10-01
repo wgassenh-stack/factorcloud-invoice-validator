@@ -305,6 +305,18 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     expect(await removeRun('f1', funded.id, 's1', 'Admin')).toMatchObject({ ok: false, detail: 'Already funded, so it stays on record.' });
   });
 
+  it('remove from list works on a database that never had migration 008: the portal applies it', async () => {
+    const { removeRun } = await import('./funding-engine');
+    const { resetSchemaChecks } = await import('./schema');
+    const held = (await send('RM-OLD-DB', 6000)).run;
+    await query('alter table engine_runs drop constraint engine_runs_state_check');
+    await query(`alter table engine_runs add constraint engine_runs_state_check check (state in ('SUGGESTED', 'REVIEW', 'APPROVED', 'FUNDING', 'FUNDED', 'FAILED')) not valid`);
+    resetSchemaChecks();
+    expect(await removeRun('f1', held.id, 's1', 'Admin')).toMatchObject({ ok: true });
+    const [{ def }] = await query<{ def: string }>(`select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'engine_runs_state_check'`);
+    expect(def).toContain('CLOSED');
+  });
+
   it('counts only approved or funded invoices toward the credit limit, like FactorCloud OpenAR', async () => {
     await setRules((s) => { s.mode = 'fund'; });
     // A pending invoice FactorCloud hasn't approved yet: not part of OpenAR.

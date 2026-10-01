@@ -90,3 +90,13 @@ describe('self-provisioned schema', () => {
     for (const statement of CONNECTION_SCHEMA_STATEMENTS) expect(migration).toContain(`${squash(statement)};`);
   });
 });
+
+describe('self-provisioned CLOSED state', () => {
+  it('matches database/008_factorcloud_sync.sql', async () => {
+    const { readFileSync } = await import('fs');
+    const { CLOSED_STATE_STATEMENTS } = await import('./schema');
+    const squash = (sql: string) => sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+    const migration = squash(readFileSync(new URL('../database/008_factorcloud_sync.sql', import.meta.url), 'utf8'));
+    for (const statement of CLOSED_STATE_STATEMENTS) expect(migration).toContain(`${squash(statement)};`);
+  });
+});
