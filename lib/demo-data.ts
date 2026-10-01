@@ -29,6 +29,8 @@ export interface DemoInvoice {
   verificationStatus: 'NOT_VERIFIED' | 'VERIFIED';
   paymentStatus: 'OPEN' | 'PARTIAL' | 'PAID';
   disputed: boolean;
+  /** Planted as a funding engine example: kept out of the paperwork review queue. */
+  fundingExample?: boolean;
   /** Demo client only: the driver who sent it in. */
   submittedBy?: string;
   notes: string | null;
@@ -249,6 +251,15 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
   drafts.push(makeInvoice(0, 3, 5, 2875, { status: 'PENDING', submittedBy: DEMO_DRIVER }));
   drafts.push(makeInvoice(0, 0, 1, 3410, { status: 'APPROVED', submittedBy: DEMO_DRIVER }));
   drafts.push(makeInvoice(0, 2, 1, 1985.25, { status: 'PENDING', submittedBy: DEMO_DRIVER }));
+  // Planted: fresh invoices for the "suggest only" client (Midway Motor Lines), so the demo always has one
+  // held for a person, whatever day it is.
+  drafts.push({ ...makeInvoice(19, 0, 0, 2960, { status: 'PENDING' }), fundingExample: true });
+  drafts.push({ ...makeInvoice(19, 1, 0, 3385.4, { status: 'PENDING' }), fundingExample: true });
+  // Planted: a small invoice from Blue Ridge Freight to a debtor it has never billed, so the demo always
+  // has an invoice held by a debtor risk rule (first invoice with this debtor).
+  const billed = new Set(drafts.filter((d) => d.companyClientId === clients[2].id).map((d) => d.companyDebtorId));
+  const fresh = debtors.findIndex((d) => !billed.has(d.id));
+  if (fresh >= 0) drafts.push({ ...makeInvoice(2, fresh, 0, 1875.5, { status: 'PENDING' }), fundingExample: true });
   // Planted: one of the demo driver's invoices the factor rejected, so the Driver view has one to resend.
   drafts.push(makeInvoice(0, 4, 6, 2240, { status: 'REJECTED', submittedBy: DEMO_DRIVER, notes: 'The rate confirmation is for a different load (LD447902). Send it again with the rate con for this load.' }));
 
@@ -259,7 +270,7 @@ export function buildDemoPortfolio(today: string, anchorClientName: string): Dem
 
 /** Review items for the factor's queue, attached to recent unverified invoices. */
 export function buildDemoReviews(portfolio: DemoPortfolio, now: number): DemoReview[] {
-  const pending = portfolio.invoices.filter((inv) => inv.status === 'PENDING').reverse();
+  const pending = portfolio.invoices.filter((inv) => inv.status === 'PENDING' && !inv.fundingExample).reverse();
   // The first two land on the portal client so its dashboard shows reviews too.
   const own = pending.filter((inv) => inv.companyClientId === DEMO_CLIENT_ID);
   const others = pending.filter((inv) => inv.companyClientId !== DEMO_CLIENT_ID);
