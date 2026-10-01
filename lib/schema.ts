@@ -1,4 +1,4 @@
-import { query } from './db';
+import { pool, query } from './db';
 
 // Self-provisioning for the database objects added by database/003_security_hardening.sql,
 // database/004_client_tasks.sql and database/005_funding_engine.sql, so a deploy does not depend on someone remembering to run
@@ -84,6 +84,13 @@ export const CONNECTION_SCHEMA_STATEMENTS = [
 )`,
 ];
 
+/** database/008_factorcloud_sync.sql: lets a funding decision be CLOSED (removed, or rejected or deleted in FactorCloud). */
+export const CLOSED_STATE_STATEMENTS = [
+  `alter table engine_runs drop constraint if exists engine_runs_state_check`,
+  `alter table engine_runs add constraint engine_runs_state_check
+  check (state in ('SUGGESTED', 'REVIEW', 'APPROVED', 'FUNDING', 'FUNDED', 'FAILED', 'CLOSED'))`,
+];
+
 // Postgres errors raised when two processes create the same object at the same moment.
 const ALREADY_EXISTS = new Set(['42P07', '42701', '23505']);
 
@@ -133,8 +140,35 @@ async function provisionConnection(): Promise<void> {
 
 async function provisionEngine(): Promise<void> {
   const [state] = await query<{ ready: boolean }>(`select to_regclass('engine_runs') is not null and to_regclass('rule_settings') is not null as ready`);
-  if (state?.ready) return;
-  await runStatements(ENGINE_SCHEMA_STATEMENTS, 'funding engine');
+  if (!state?.ready) await runStatements(ENGINE_SCHEMA_STATEMENTS, 'funding engine');
+  await provisionClosedState();
+}
+
+/** Applies database/008 if it hasn't been: both statements in one transaction, so the check is never missing. */
+async function provisionClosedState(): Promise<void> {
+  const [row] = await query<{ def: string | null }>(`
+    select pg_get_constraintdef(c.oid) as def from pg_constraint c
+    where c.conrelid = 'engine_runs'::regclass and c.conname = 'engine_runs_state_check'`);
+  if (row?.def?.includes('CLOSED')) return;
+  const db = await pool().connect();
+  try {
+    await db.query('begin');
+    for (const statement of CLOSED_STATE_STATEMENTS) await db.query(statement);
+    await db.query('commit');
+  } catch (err) {
+    await db.query('rollback');
+    throw new Error(`Could not update the portal funding engine table automatically (the database user may lack ALTER rights). Run \`npm run db:migrate\` once. Cause: ${(err as Error).message}`);
+  } finally {
+    db.release();
+  }
+}
+
+/** For tests: check the schema again on the next request. */
+export function resetSchemaChecks(): void {
+  ensured = null;
+  workflowEnsured = null;
+  engineEnsured = null;
+  connectionEnsured = null;
 }
 
 async function provisionWorkflow(): Promise<void> {

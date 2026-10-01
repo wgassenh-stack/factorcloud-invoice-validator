@@ -441,6 +441,7 @@ export const REMOVABLE_STATES: RunState[] = ['SUGGESTED', 'APPROVED', 'FAILED', 
  * did it. Nothing is changed in FactorCloud.
  */
 export async function removeRun(factorId: string, runId: string, userId: string | null, reviewer: string): Promise<ActResult> {
+  await ensureEngineSchema();
   const db = await pool().connect();
   try {
     await db.query('begin');
