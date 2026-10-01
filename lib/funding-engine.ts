@@ -432,6 +432,47 @@ export async function actOnRun(factorId: string, runId: string, action: 'approve
   return funded;
 }
 
+/** States a person may take off the list. Funding in flight or uncertain belongs to Recovery instead. */
+export const REMOVABLE_STATES: RunState[] = ['SUGGESTED', 'APPROVED', 'FAILED', 'REVIEW'];
+
+/**
+ * Take an invoice off the Funding Center, for example a test invoice or one withdrawn outside the
+ * portal. Closes its funding decision and any open paperwork review or fix request, and records who
+ * did it. Nothing is changed in FactorCloud.
+ */
+export async function removeRun(factorId: string, runId: string, userId: string | null, reviewer: string): Promise<ActResult> {
+  const db = await pool().connect();
+  try {
+    await db.query('begin');
+    const { rows } = await db.query<{ id: string; client_id: string | null; submission_id: string | null; factorcloud_invoice_id: string; invoice_number: string | null; state: string }>(`
+      update engine_runs r set state = 'CLOSED', detail = $3, updated_at = now()
+      from engine_runs prev
+      where r.id = prev.id and r.id = $1 and r.factor_id = $2 and r.state = any($4) and r.approval_status in ('IDLE', 'COMPLETE')
+      returning r.id, r.client_id, r.submission_id, r.factorcloud_invoice_id, r.invoice_number, prev.state`,
+      [runId, factorId, `Removed from the list by ${reviewer}.`, REMOVABLE_STATES]);
+    const run = rows[0];
+    if (!run) {
+      await db.query('rollback');
+      const [current] = await listRuns(factorId, { id: runId });
+      return { ok: false, detail: !current ? 'Not found.' : current.state === 'CLOSED' ? 'Already removed.' : current.state === 'FUNDED' ? 'Already funded, so it stays on record.' : 'Funding is in progress or uncertain for this invoice. Resolve it in Recovery instead.' };
+    }
+    const reviews = await db.query<{ submission_id: string }>(`
+      update review_items ri set status = 'REJECTED', decision_note = $3, decided_at = now()
+      from submissions s
+      where ri.submission_id = s.id and s.factor_id = $1 and s.factorcloud_invoice_id = $2 and ri.status = 'OPEN'
+      returning ri.submission_id`, [factorId, run.factorcloud_invoice_id, `Removed from the list by ${reviewer}.`]);
+    await db.query(`
+      update client_tasks t set status = 'CANCELED', resolved_at = now()
+      from submissions s
+      where t.submission_id = s.id and s.factor_id = $1 and s.factorcloud_invoice_id = $2 and t.status = 'OPEN'`, [factorId, run.factorcloud_invoice_id]);
+    await db.query(`insert into audit_events (id, factor_id, client_id, submission_id, actor_user_id, event_type, event_data) values ($1,$2,$3,$4,$5,'FUNDING_RUN_REMOVED',$6::jsonb)`,
+      [`audit_${randomUUID()}`, factorId, run.client_id, run.submission_id, userId,
+        JSON.stringify({ runId: run.id, invoiceId: run.factorcloud_invoice_id, invoiceNumber: run.invoice_number, from: run.state, reviewsClosed: reviews.rows.length, by: reviewer })]);
+    await db.query('commit');
+    return { ok: true, detail: `${run.invoice_number || 'The invoice'} was removed from the list. Nothing changed in FactorCloud.` };
+  } catch (err) { await db.query('rollback'); throw err; } finally { db.release(); }
+}
+
 /** What FactorCloud says now, and the rules run again on it. */
 type Recheck = Decision & { facts: EngineFacts; amount: number; remote: RemoteState } | { error: string };
 

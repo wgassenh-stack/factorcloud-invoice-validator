@@ -282,6 +282,29 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     expect(writes).not.toContain('PATCH /invoices/approve-for-funding');
   });
 
+  it('remove from list: closes the decision and its open review, records who, and never touches FactorCloud', async () => {
+    const { removeRun, listRuns } = await import('./funding-engine');
+    const held = (await send('RM-HELD', 6000)).run;
+    const review = (await send('RM-REVIEW', 700, { documentAmount: 750, explanation: 'Test invoice.' })).run;
+    const before = calls.length;
+    expect(await removeRun('f2', held.id, 's1', 'Admin')).toMatchObject({ ok: false, detail: 'Not found.' });
+    expect(await removeRun('f1', held.id, 's1', 'Admin')).toMatchObject({ ok: true });
+    expect(await removeRun('f1', review.id, 's1', 'Admin')).toMatchObject({ ok: true });
+    expect(calls.length).toBe(before);
+    const [h] = await listRuns('f1', { id: held.id });
+    expect(h).toMatchObject({ state: 'CLOSED', detail: 'Removed from the list by Admin.' });
+    expect((await listRuns('f1', { lane: 'decision' })).some((r) => r.id === held.id)).toBe(false);
+    const open = await query(`select ri.id from review_items ri join submissions s on s.id = ri.submission_id where s.factorcloud_invoice_id = $1 and ri.status = 'OPEN'`, [review.factorCloudInvoiceId]);
+    expect(open).toHaveLength(0);
+    const audit = await query(`select actor_user_id, event_data from audit_events where event_type = 'FUNDING_RUN_REMOVED' and event_data->>'runId' = $1`, [held.id]);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ actor_user_id: 's1', event_data: { from: 'SUGGESTED', invoiceNumber: 'RM-HELD' } });
+    expect(await removeRun('f1', held.id, 's1', 'Admin')).toMatchObject({ ok: false, detail: 'Already removed.' });
+    const funded = (await send('RM-FUNDED', 300)).run;
+    expect(funded.state).toBe('FUNDED');
+    expect(await removeRun('f1', funded.id, 's1', 'Admin')).toMatchObject({ ok: false, detail: 'Already funded, so it stays on record.' });
+  });
+
   it('counts only approved or funded invoices toward the credit limit, like FactorCloud OpenAR', async () => {
     await setRules((s) => { s.mode = 'fund'; });
     // A pending invoice FactorCloud hasn't approved yet: not part of OpenAR.
