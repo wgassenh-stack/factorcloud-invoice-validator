@@ -9,6 +9,7 @@ import { normalizeIdentifier } from './normalize';
 import { scoreDebtor, type DebtorHints } from './matching';
 import { addDemoInvoice, demoClientDebtor, demoCompany, demoDebtors, demoInvoice, demoInvoices, nextDemoDocumentId } from './demo-store';
 import { demoRequest } from './demo-request';
+import { storedToken } from './factorcloud-connection';
 
 export const TOKEN_COOKIE = 'fc_token';
 export const INTERIM_COOKIE = 'fc_interim';
@@ -27,22 +28,32 @@ function config() {
 }
 
 export async function currentToken(): Promise<string | null> {
-  return (await currentCredential()).token;
+  return (await credentials())[0]?.token ?? null;
 }
 
-/** The token a request will use, and where it came from: a staff member's sign-in or the deployment's service token. */
-async function currentCredential(): Promise<{ token: string | null; source: 'session' | 'env' | null }> {
+type Source = 'session' | 'stored' | 'env';
+
+/**
+ * The tokens a request may use, in order: a staff member's own sign-in, then the token an admin
+ * connected in the portal, then the one in the deployment settings. When FactorCloud rejects one,
+ * the request moves on to the next.
+ */
+async function credentials(): Promise<{ token: string; source: Source }[]> {
   const jar = await cookies();
-  const session = jar.get(TOKEN_COOKIE)?.value;
-  if (session) return { token: session, source: 'session' };
-  const env = process.env.FACTORCLOUD_BEARER_TOKEN || null;
-  return { token: env, source: env ? 'env' : null };
+  const list: { token: string; source: Source }[] = [];
+  const add = (token: string | null | undefined, source: Source) => { if (token && !list.some((c) => c.token === token)) list.push({ token, source }); };
+  add(jar.get(TOKEN_COOKIE)?.value, 'session');
+  add((await storedToken())?.token, 'stored');
+  add(process.env.FACTORCLOUD_BEARER_TOKEN, 'env');
+  return list;
 }
 
 /** Forgets an expired staff sign-in so later requests use the service token. Only possible in a route handler. */
 async function dropSession(): Promise<void> {
   try { (await cookies()).delete(TOKEN_COOKIE); } catch { /* rendering a page: cookies are read-only there */ }
 }
+
+const SOURCE_NAME: Record<Source, string> = { session: 'staff sign-in', stored: 'connected token', env: 'FACTORCLOUD_BEARER_TOKEN setting' };
 
 export const SESSION_EXPIRED = 'Your FactorCloud sign-in has expired. Sign in to FactorCloud again.';
 export const SERVICE_TOKEN_REJECTED = 'The portal\'s connection to FactorCloud has expired, so FactorCloud data can\'t load and invoices can\'t be sent right now. Your factor needs to reconnect it. Please try again later.';
@@ -68,13 +79,13 @@ export async function fcRequest<T = unknown>(path: string, opts: RequestOptions 
   for (const [k, v] of Object.entries(opts.query ?? {})) url.searchParams.set(k, v);
   const method = opts.method ?? 'GET';
   const headers: Record<string, string> = { ...opts.headers, factorId, Accept: 'application/json' };
-  let source: 'session' | 'env' | 'given' | null = null;
+  let candidates: { token: string; source: Source | 'given' }[] = [];
   if (opts.auth !== false) {
-    const credential = opts.token !== undefined ? { token: opts.token, source: 'given' as const } : await currentCredential();
-    if (!credential.token) throw new FactorCloudError('Not signed in to FactorCloud.', 401, null);
-    headers.Authorization = `Bearer ${credential.token}`;
-    source = credential.source;
+    candidates = opts.token !== undefined ? (opts.token ? [{ token: opts.token, source: 'given' }] : []) : await credentials();
+    if (!candidates.length) throw new FactorCloudError('Not signed in to FactorCloud.', 401, null);
+    headers.Authorization = `Bearer ${candidates[0].token}`;
   }
+  let using = 0;
   let body: BodyInit | undefined;
   if (opts.form) body = opts.form;
   else if (opts.json !== undefined) {
@@ -98,21 +109,20 @@ export async function fcRequest<T = unknown>(path: string, opts: RequestOptions 
     try { parsed = text ? JSON.parse(text) : null; } catch { /* keep text */ }
     if (res.ok) return parsed as T;
 
-    if (res.status === 401 && source && source !== 'given') {
-      // FactorCloud refused the credential itself, so nothing was done and asking again is safe, even for a write.
-      const env = process.env.FACTORCLOUD_BEARER_TOKEN;
-      if (source === 'session') {
-        await dropSession();
-        if (env && attempt === 0 && headers.Authorization !== `Bearer ${env}`) {
-          console.warn(`[factorcloud] ${method} ${path}: staff sign-in expired; using the service token instead`);
-          headers.Authorization = `Bearer ${env}`;
-          source = 'env';
-          attempt = -1;
-          continue;
-        }
-        throw new FactorCloudError(SESSION_EXPIRED, 401, parsed);
+    const current = candidates[using];
+    if (res.status === 401 && current && current.source !== 'given') {
+      // FactorCloud refused the credential itself, so nothing was done and asking again with the
+      // next one is safe, even for a write.
+      if (current.source === 'session') await dropSession();
+      console.warn(`[factorcloud] ${method} ${path}: FactorCloud rejected the ${SOURCE_NAME[current.source]} (expired or revoked).`);
+      const next = candidates[++using];
+      if (next) {
+        headers.Authorization = `Bearer ${next.token}`;
+        attempt = -1;
+        continue;
       }
-      console.error(`[factorcloud] ${method} ${path} failed (401): FACTORCLOUD_BEARER_TOKEN was rejected (expired or revoked). Replace it and redeploy.`);
+      if (current.source === 'session') throw new FactorCloudError(SESSION_EXPIRED, 401, parsed);
+      console.error(`[factorcloud] ${method} ${path} failed (401): no FactorCloud token works. A factor admin can reconnect FactorCloud on the Diagnostics page.`);
       throw new FactorCloudError(SERVICE_TOKEN_REJECTED, 401, parsed);
     }
     lastError = new FactorCloudError(`FactorCloud ${method} ${path} failed (${res.status}): ${describe(parsed)}`, res.status, parsed);
@@ -136,20 +146,29 @@ function describe(body: unknown): string {
   return typeof body === 'string' ? body.slice(0, 300) : JSON.stringify(body)?.slice(0, 300) ?? '';
 }
 
-export async function startLogin(): Promise<string> {
-  const username = process.env.FACTORCLOUD_USERNAME;
-  const password = process.env.FACTORCLOUD_PASSWORD;
-  if (!username || !password) throw new FactorCloudError('FACTORCLOUD_USERNAME / FACTORCLOUD_PASSWORD are not configured.', 500, null);
-  const body = await fcRequest('/authentications/generate-token', { method: 'POST', json: { username, password }, auth: false });
+export interface LoginDetails { username: string; password: string }
+
+/** FactorCloud sign-in details: those typed in by the person, else the deployment's own. */
+function loginDetails(given?: Partial<LoginDetails>): LoginDetails {
+  const username = given?.username?.trim() || process.env.FACTORCLOUD_USERNAME;
+  const password = given?.password || process.env.FACTORCLOUD_PASSWORD;
+  if (!username || !password) throw new FactorCloudError('Enter the FactorCloud username and password.', 400, null);
+  return { username, password };
+}
+
+/** Step 1 of signing in to FactorCloud: checks the username and password, and FactorCloud emails a code. */
+export async function startLogin(given?: Partial<LoginDetails>): Promise<string> {
+  const body = await fcRequest('/authentications/generate-token', { method: 'POST', json: loginDetails(given), auth: false });
   const interim = findToken(body);
   if (!interim) throw new FactorCloudError('generate-token response did not include a token.', 502, body);
   return interim;
 }
 
-export async function completeLogin(interimToken: string, otpCode: string): Promise<string> {
+/** Step 2: the emailed code. Returns the access token. */
+export async function completeLogin(interimToken: string, otpCode: string, given?: Partial<LoginDetails>): Promise<string> {
   const body = await fcRequest('/authentications/login', {
     method: 'POST',
-    json: { username: process.env.FACTORCLOUD_USERNAME, password: process.env.FACTORCLOUD_PASSWORD, otpCode },
+    json: { ...loginDetails(given), otpCode },
     token: interimToken,
   });
   const token = findToken(body);

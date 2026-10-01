@@ -73,6 +73,17 @@ export const ENGINE_SCHEMA_STATEMENTS = [
   `create index if not exists engine_runs_funded_idx on engine_runs (factor_id, auto_funded, funded_at)`,
 ];
 
+export const CONNECTION_SCHEMA_STATEMENTS = [
+  `create table if not exists factorcloud_connection (
+  factorcloud_factor_id text primary key,
+  token_ciphertext text not null,
+  expires_at timestamptz,
+  connected_by_user_id text references portal_users(id),
+  connected_by_name text,
+  connected_at timestamptz not null default now()
+)`,
+];
+
 // Postgres errors raised when two processes create the same object at the same moment.
 const ALREADY_EXISTS = new Set(['42P07', '42701', '23505']);
 
@@ -102,6 +113,22 @@ export function ensureEngineSchema(): Promise<void> {
     throw err;
   });
   return engineEnsured;
+}
+
+let connectionEnsured: Promise<void> | null = null;
+
+export function ensureConnectionSchema(): Promise<void> {
+  connectionEnsured ??= provisionConnection().catch((err) => {
+    connectionEnsured = null;
+    throw err;
+  });
+  return connectionEnsured;
+}
+
+async function provisionConnection(): Promise<void> {
+  const [state] = await query<{ ready: boolean }>(`select to_regclass('factorcloud_connection') is not null as ready`);
+  if (state?.ready) return;
+  await runStatements(CONNECTION_SCHEMA_STATEMENTS, 'FactorCloud connection');
 }
 
 async function provisionEngine(): Promise<void> {

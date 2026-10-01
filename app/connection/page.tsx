@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { DemoBadge } from '@/app/components/DemoBadge';
 import { Skeleton } from '@/app/components/CommandCharts';
 import type { ConnectionReport } from '@/lib/connection-check';
+import { FactorCloudConnection } from '@/app/components/FactorCloudConnection';
 
 type Response = ConnectionReport & { demo?: boolean; error?: string };
 
@@ -64,6 +65,8 @@ export default function ConnectionCheckPage() {
         <button className="primaryLink" onClick={() => void run()} disabled={loading}>{loading ? 'Checking…' : 'Run again'}</button>
       </div>
     </header>
+
+    <FactorCloudConnection onConnected={() => void run()} />
 
     {error && <div className="attentionSummary fail"><strong>The check could not run</strong><span>{error}</span></div>}
     {loading && !data && <Skeleton height={220} lines={4} />}

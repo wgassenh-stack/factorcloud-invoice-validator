@@ -86,6 +86,8 @@ Required for live FactorCloud comparisons/create:
 - `FACTORCLOUD_DEBTOR_IDS`
 - `FACTORCLOUD_BEARER_TOKEN` for the server-side integration
 
+FactorCloud access tokens expire. Instead of replacing `FACTORCLOUD_BEARER_TOKEN` and redeploying, a factor admin can renew access in the portal: **Diagnostics → Reconnect FactorCloud**, sign in, enter the emailed code. The new token is stored encrypted in the portal database (key from `FACTORCLOUD_TOKEN_KEY`, or derived from `AUTH_SESSION_SECRET`) and used ahead of `FACTORCLOUD_BEARER_TOKEN`, which stays as the fallback. Needs database sign-in. The username and password are used for that sign-in only and never stored; set `FACTORCLOUD_USERNAME`/`FACTORCLOUD_PASSWORD` to skip typing them. Diagnostics and the factor Overview warn in the last 3 days before the token expires.
+
 Interactive FactorCloud staff OTP login should remain disabled for client deployments.
 
 ## Demo mode
