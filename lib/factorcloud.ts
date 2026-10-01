@@ -27,9 +27,25 @@ function config() {
 }
 
 export async function currentToken(): Promise<string | null> {
-  const jar = await cookies();
-  return jar.get(TOKEN_COOKIE)?.value || process.env.FACTORCLOUD_BEARER_TOKEN || null;
+  return (await currentCredential()).token;
 }
+
+/** The token a request will use, and where it came from: a staff member's sign-in or the deployment's service token. */
+async function currentCredential(): Promise<{ token: string | null; source: 'session' | 'env' | null }> {
+  const jar = await cookies();
+  const session = jar.get(TOKEN_COOKIE)?.value;
+  if (session) return { token: session, source: 'session' };
+  const env = process.env.FACTORCLOUD_BEARER_TOKEN || null;
+  return { token: env, source: env ? 'env' : null };
+}
+
+/** Forgets an expired staff sign-in so later requests use the service token. Only possible in a route handler. */
+async function dropSession(): Promise<void> {
+  try { (await cookies()).delete(TOKEN_COOKIE); } catch { /* rendering a page: cookies are read-only there */ }
+}
+
+export const SESSION_EXPIRED = 'Your FactorCloud sign-in has expired. Sign in to FactorCloud again.';
+export const SERVICE_TOKEN_REJECTED = 'The portal\'s connection to FactorCloud has expired, so FactorCloud data can\'t load and invoices can\'t be sent right now. Your factor needs to reconnect it. Please try again later.';
 
 interface RequestOptions {
   method?: string;
@@ -52,10 +68,12 @@ export async function fcRequest<T = unknown>(path: string, opts: RequestOptions 
   for (const [k, v] of Object.entries(opts.query ?? {})) url.searchParams.set(k, v);
   const method = opts.method ?? 'GET';
   const headers: Record<string, string> = { ...opts.headers, factorId, Accept: 'application/json' };
+  let source: 'session' | 'env' | 'given' | null = null;
   if (opts.auth !== false) {
-    const token = opts.token !== undefined ? opts.token : await currentToken();
-    if (!token) throw new FactorCloudError('Not signed in to FactorCloud.', 401, null);
-    headers.Authorization = `Bearer ${token}`;
+    const credential = opts.token !== undefined ? { token: opts.token, source: 'given' as const } : await currentCredential();
+    if (!credential.token) throw new FactorCloudError('Not signed in to FactorCloud.', 401, null);
+    headers.Authorization = `Bearer ${credential.token}`;
+    source = credential.source;
   }
   let body: BodyInit | undefined;
   if (opts.form) body = opts.form;
@@ -80,6 +98,23 @@ export async function fcRequest<T = unknown>(path: string, opts: RequestOptions 
     try { parsed = text ? JSON.parse(text) : null; } catch { /* keep text */ }
     if (res.ok) return parsed as T;
 
+    if (res.status === 401 && source && source !== 'given') {
+      // FactorCloud refused the credential itself, so nothing was done and asking again is safe, even for a write.
+      const env = process.env.FACTORCLOUD_BEARER_TOKEN;
+      if (source === 'session') {
+        await dropSession();
+        if (env && attempt === 0 && headers.Authorization !== `Bearer ${env}`) {
+          console.warn(`[factorcloud] ${method} ${path}: staff sign-in expired; using the service token instead`);
+          headers.Authorization = `Bearer ${env}`;
+          source = 'env';
+          attempt = -1;
+          continue;
+        }
+        throw new FactorCloudError(SESSION_EXPIRED, 401, parsed);
+      }
+      console.error(`[factorcloud] ${method} ${path} failed (401): FACTORCLOUD_BEARER_TOKEN was rejected (expired or revoked). Replace it and redeploy.`);
+      throw new FactorCloudError(SERVICE_TOKEN_REJECTED, 401, parsed);
+    }
     lastError = new FactorCloudError(`FactorCloud ${method} ${path} failed (${res.status}): ${describe(parsed)}`, res.status, parsed);
     const shouldRetry = method === 'GET' && TRANSIENT_STATUSES.has(res.status) && attempt < attempts - 1;
     if (!shouldRetry) throw lastError;
