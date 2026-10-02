@@ -5,6 +5,7 @@
 
 import { isClosedOut, isPaid, openBalance, reserveOn } from './analytics';
 import type { RiskInvoiceRecord } from './risk';
+import { csvCell } from './csv';
 
 export interface StatementLine {
   date: string;
@@ -87,12 +88,8 @@ export function buildStatement(records: RiskInvoiceRecord[], month: string): Sta
   return statement;
 }
 
-/** CSV of the statement lines, with a totals row. */
+/** CSV of the statement lines, with a totals row. Cells go through the shared CSV rule (no formulas). */
 export function statementCsv(statement: Statement, debtorNames: Record<string, string>): string {
-  const cell = (value: string | number) => {
-    const text = String(value);
-    return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-  };
   const money = (value: number) => value.toFixed(2);
   const rows: (string | number)[][] = [
     ['Date', 'Event', 'Invoice', 'Debtor', 'Invoice amount', 'To you', 'Fee'],
@@ -107,5 +104,5 @@ export function statementCsv(statement: Statement, debtorNames: Record<string, s
     ]),
     ['', 'Total', '', '', '', money(statement.totalToClient), money(statement.paid.fees)],
   ];
-  return rows.map((row) => row.map(cell).join(',')).join('\n');
+  return rows.map((row) => row.map(csvCell).join(',')).join('\n');
 }

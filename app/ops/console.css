@@ -36,3 +36,4 @@
 .oc-figure-row.wide{grid-template-columns:minmax(0,200px) 1fr 60px}.oc-figure-row.wide>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:700px){.oc-figure-row.wide{grid-template-columns:minmax(0,120px) 1fr 44px}}
 .oc-activity.plain{grid-template-columns:minmax(0,1fr) auto;align-items:center}
 .oc-row-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.oc-button.quiet{border-color:transparent;background:transparent;color:var(--oc-muted)}.oc-button.quiet:not(:disabled):hover{color:#a73544;background:#fbeef0;border-color:#e1b3ba}
+.oc-changed{display:block;font-size:11px;color:#9a6a00;font-weight:600}.oc-bad{color:#a73544;font-weight:600}

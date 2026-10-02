@@ -118,8 +118,9 @@ function seedRuns(s: DemoFundingState): void {
       if (!scenario(invoice, at)) continue;
       used.add(invoice.id);
       minutesAgo += 5 + (used.size * 7) % 9;
-      return;
+      return true;
     }
+    return false;
   };
   const input = (i: DemoInvoice) => ({ id: i.id, amount: i.invoiceAmount, clientId: i.companyClientId, debtorId: i.companyDebtorId });
   const run = (i: DemoInvoice, at: Date, opts: { paperwork?: 'PASS' | 'REVIEW'; tweak?: Partial<EngineFacts>; expect: Decision['outcome'] | ((d: Decision) => boolean); failed?: string }) => {
@@ -133,9 +134,47 @@ function seedRuns(s: DemoFundingState): void {
   const small = (i: DemoInvoice) => i.invoiceAmount <= 4_800;
   const reviewed = (i: DemoInvoice) => inReview.has(i.id);
   const plain = (i: DemoInvoice) => small(i) && !s.settings.clientOverrides[i.companyClientId];
+  // When no invoice in the portfolio suits an example (which ones do changes with the date), send in
+  // a fresh one: the first client and debtor pair the real rules decide the way the example needs.
+  let planted = 0;
+  const plant = (amount: number, tweak: Partial<EngineFacts>, accept: (d: Decision) => boolean): DemoInvoice | null => {
+    const all = demoInvoices();
+    const clients = [...new Set(all.map((i) => i.companyClientId))].filter((c) => c !== DEMO_CLIENT_ID && !s.settings.clientOverrides[c]);
+    const debtors = [...new Set(all.map((i) => i.companyDebtorId))];
+    const at = new Date(now - minutesAgo * MINUTE);
+    for (let n = 0; n < clients.length; n++) {
+      const clientId = clients[(n + planted * 3) % clients.length];
+      for (const debtorId of debtors) {
+        const decision = decide(factsFor(s, { id: 'demo-planned', amount, clientId, debtorId }, 'PASS', at, tweak), settingsForClient(s.settings, clientId));
+        if (!accept(decision)) continue;
+        const theirs = all.filter((i) => i.companyClientId === clientId).map((i) => i.invoiceNumber);
+        const code = theirs[0]?.split('-')[0] ?? 'DEMO';
+        const next = Math.max(10000, ...theirs.map((x) => Number(x.split('-').pop()) || 0)) + 1;
+        planted++;
+        const invoice = addDemoInvoice({ invoiceNumber: `${code}-${next}`, referenceNumber: `LD${448500 + planted}`, companyClientId: clientId, companyDebtorId: debtorId, invoiceAmount: amount, invoiceDate: dayOf(now), notes: null });
+        pending.unshift(invoice);
+        return invoice;
+      }
+    }
+    return null;
+  };
+  /** An example built on an invoice that passes every rule, from the portfolio or sent in fresh. */
+  const clean = (amount: number, scenario: (i: DemoInvoice, at: Date) => boolean) => {
+    if (take(plain, scenario)) return;
+    const invoice = plant(amount, noDailyUse, (d) => d.outcome === 'FUND');
+    if (invoice) take((i) => i.id === invoice.id, scenario);
+  };
+
+  // The examples after the automatic fundings tell other stories than the daily limit, so they don't
+  // count what was funded today: otherwise which ones appear would depend on the date and time.
+  const noDailyUse = { fundedToday: { client: 0, factor: 0 } };
 
   // Held: over the per-invoice cap (a staffing invoice), but the client's special caps let one through.
-  take((i) => i.invoiceAmount > 5_000 && !s.settings.clientOverrides[i.companyClientId], (i, at) => run(i, at, { expect: (d) => d.outcome === 'HOLD' && d.rules.some((r) => r.id === 'cap-invoice' && r.status === 'HOLD') }));
+  const overCap = (d: Decision) => d.outcome === 'HOLD' && d.rules.some((r) => r.id === 'cap-invoice' && r.status === 'HOLD');
+  if (!take((i) => i.invoiceAmount > 5_000 && !s.settings.clientOverrides[i.companyClientId], (i, at) => run(i, at, { expect: overCap }))) {
+    const invoice = plant(6_845.3, {}, (d) => overCap(d) && d.reasons.length === 1);
+    if (invoice) take((i) => i.id === invoice.id, (i, at) => run(i, at, { expect: overCap }));
+  }
   // The biggest client has its own higher caps: a large invoice from its main debtor is funded anyway.
   const lsh = demoInvoices().filter((i) => i.companyClientId === 'demo-client-02');
   const mainDebtor = [...lsh.reduce((m, i) => m.set(i.companyDebtorId, (m.get(i.companyDebtorId) ?? 0) + 1), new Map<string, number>())].sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -145,23 +184,31 @@ function seedRuns(s: DemoFundingState): void {
     take((i) => i.id === big.id, (i, at) => run(i, at, { expect: 'FUND' }));
   }
   // Funded with no one touching them.
-  for (let n = 0; n < 6; n++) take(plain, (i, at) => run(i, at, { expect: 'FUND' }));
+  for (let n = 0; n < 6; n++) {
+    if (take(plain, (i, at) => run(i, at, { expect: 'FUND' }))) continue;
+    const invoice = plant([1_412.5, 2_268.75, 3_096.4, 1_877.2, 2_640.15, 3_355.9][n], {}, (d) => d.outcome === 'FUND');
+    if (invoice) take((i) => i.id === invoice.id, (i, at) => run(i, at, { expect: 'FUND' }));
+  }
   // Held: negative cash reserve.
-  take(plain, (i, at) => run(i, at, { tweak: { cashReserve: -1_840 }, expect: (d) => d.outcome === 'HOLD' && d.reasons.length === 1 }));
+  clean(2_315.6, (i, at) => run(i, at, { tweak: { ...noDailyUse, cashReserve: -1_840 }, expect: (d) => d.outcome === 'HOLD' && d.reasons.length === 1 }));
   // Held: over the debtor credit limit.
-  take(plain, (i, at) => {
+  clean(3_140.25, (i, at) => {
     const facts = factsFor(s, input(i), 'PASS', at);
     const tight = facts.debtorCredit ? { ...facts.debtorCredit, limit: Math.max(5_000, Math.round((facts.debtorCredit.openBalance + i.invoiceAmount - 1_200) / 1_000) * 1_000), approved: true } : null;
-    return run(i, at, { tweak: { debtorCredit: tight }, expect: (d) => d.outcome === 'HOLD' && d.reasons.length === 1 && d.rules.some((r) => r.id === 'credit-limit' && r.status === 'HOLD') });
+    return run(i, at, { tweak: { ...noDailyUse, debtorCredit: tight }, expect: (d) => d.outcome === 'HOLD' && d.reasons.length === 1 && d.rules.some((r) => r.id === 'credit-limit' && r.status === 'HOLD') });
   });
   // Held by a debtor risk rule the portfolio really trips (slow payer, concentration or first invoice).
-  take(plain, (i, at) => run(i, at, { expect: (d) => d.outcome === 'HOLD' && d.rules.some((r) => ['slow-debtor', 'concentration', 'new-debtor'].includes(r.id) && r.status === 'HOLD') }));
+  const riskHold = (d: Decision) => d.outcome === 'HOLD' && d.rules.some((r) => ['slow-debtor', 'concentration', 'new-debtor'].includes(r.id) && r.status === 'HOLD');
+  if (!take(plain, (i, at) => run(i, at, { tweak: noDailyUse, expect: riskHold }))) {
+    const invoice = plant(1_960.4, noDailyUse, riskHold);
+    if (invoice) take((i) => i.id === invoice.id, (i, at) => run(i, at, { tweak: noDailyUse, expect: riskHold }));
+  }
   // Paperwork sent anyway: never approved automatically.
-  take(reviewed, (i, at) => run(i, at, { paperwork: 'REVIEW', expect: 'REVIEW' }));
+  take(reviewed, (i, at) => run(i, at, { tweak: noDailyUse, paperwork: 'REVIEW', expect: 'REVIEW' }));
   // A client on "suggest only".
-  take((i) => i.companyClientId === 'demo-client-20', (i, at) => run(i, at, { expect: (d) => d.outcome !== 'REVIEW' }));
+  take((i) => i.companyClientId === 'demo-client-20', (i, at) => run(i, at, { tweak: noDailyUse, expect: (d) => d.outcome !== 'REVIEW' }));
   // FactorCloud refused the approval.
-  take(plain, (i, at) => run(i, at, { expect: 'FUND', failed: 'FactorCloud refused: the client has no funding instruction set up, so it cannot be approved for funding.' }));
+  clean(2_480.9, (i, at) => run(i, at, { tweak: noDailyUse, expect: 'FUND', failed: 'FactorCloud refused: the client has no funding instruction set up, so it cannot be approved for funding.' }));
   s.runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 

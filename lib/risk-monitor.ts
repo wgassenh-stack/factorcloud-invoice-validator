@@ -3,6 +3,7 @@ import {buildDebtorSummaries} from './debtors';
 import {settingsForClient, type RuleSettings} from './rules/settings';
 import type {EngineRun} from './funding-engine';
 import type {RiskInvoiceRecord} from './risk';
+import {csvRows} from './csv';
 
 export type RiskKind = 'volume' | 'concentration' | 'credit' | 'payment';
 export type RiskLevel = 'High' | 'Medium' | 'Unknown';
@@ -90,7 +91,6 @@ export function buildRiskMonitor(records:RiskInvoiceRecord[], today:string, name
 }
 
 export function riskCsv(signals:RiskSignal[]):string {
-  const cell=(value:unknown)=>{let s=String(value??'');if(/^[\s]*[=+@-]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
   const rows=[['Severity','Type','Relationship','Scope','Trigger','Current','Threshold','Exposure','Exposure basis','Comparison','Recorded at'],...signals.map(s=>[s.level,s.kind,s.name,s.scope,s.trigger,s.current,s.threshold,s.exposure,s.exposureLabel,s.comparison,s.observedAt])];
-  return rows.map(row=>row.map(cell).join(',')).join('\r\n');
+  return csvRows(rows);
 }

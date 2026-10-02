@@ -15,7 +15,7 @@ describe('funding only the batch that was reviewed', () => {
     expect(sameBatch([{ invoiceId: 'a', amount: 400 }, { invoiceId: 'b', amount: 460 }], reviewed)).toBe(false);
     expect(sameBatch([{ invoiceId: 'a', amount: 400 }, { invoiceId: 'z', amount: 450 }], reviewed)).toBe(false);
   });
-  it('an amount FactorCloud did not report is not a mismatch on its own', () => {
-    expect(sameBatch([{ invoiceId: 'a', amount: 400 }, { invoiceId: 'b', amount: null }], reviewed)).toBe(true);
+  it('an amount FactorCloud did not report never counts as a match: funding needs every amount known', () => {
+    expect(sameBatch([{ invoiceId: 'a', amount: 400 }, { invoiceId: 'b', amount: null }], reviewed)).toBe(false);
   });
 });

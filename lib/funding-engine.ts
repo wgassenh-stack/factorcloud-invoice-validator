@@ -150,7 +150,14 @@ async function approve(run: { id: string; invoiceId: string; clientId: string },
   }
 }
 
-export interface BatchInvoice { runId: string | null; invoiceId: string; invoiceNumber: string | null; clientName: string | null; amount: number | null; state: RunState | null; outcome: Decision['outcome'] | null; mode: string | null }
+export interface BatchInvoice {
+  runId: string | null; invoiceId: string; invoiceNumber: string | null; clientName: string | null;
+  /** The amount in FactorCloud now (null when it couldn't be read). */
+  amount: number | null;
+  /** For portal invoices: the amount the rules decided on. */
+  decidedAmount?: number | null;
+  state: RunState | null; outcome: Decision['outcome'] | null; mode: string | null;
+}
 export interface Batch { groupId: string; code: string | null; status: string | null; invoices: BatchInvoice[] }
 
 /**
@@ -170,28 +177,33 @@ export async function batchFor(factorId: string, invoiceId: string, knownGroupId
     order by r.created_at desc`, [factorId, members]);
   const byInvoice = new Map<string, (typeof rows)[number]>();
   for (const row of rows) if (!byInvoice.has(row.factorcloud_invoice_id)) byInvoice.set(row.factorcloud_invoice_id, row);
+  // Every amount is read from FactorCloud now, not taken from what the portal saved: someone may have
+  // edited an invoice in FactorCloud after the rules ran, and funding pays what FactorCloud holds.
   const invoices = await Promise.all(members.map(async (id): Promise<BatchInvoice> => {
     const r = byInvoice.get(id);
-    if (r) return { runId: r.id, invoiceId: id, invoiceNumber: r.invoice_number, clientName: r.client_name, amount: Number(r.amount), state: r.state, outcome: r.outcome, mode: r.mode };
-    // Approved outside the portal: look it up so a person can see what the click would fund.
     const record = await settle(async () => collectRiskInvoiceRecords(await getInvoice(id)).find((x) => x.id === id) ?? null, 'batch invoice');
-    return { runId: null, invoiceId: id, invoiceNumber: record?.invoiceNumber ?? null, clientName: record?.companyClientName ?? null, amount: record?.invoiceAmount ?? null, state: null, outcome: null, mode: null };
+    const amount = typeof record?.invoiceAmount === 'number' && Number.isFinite(record.invoiceAmount) ? record.invoiceAmount : null;
+    if (r) return { runId: r.id, invoiceId: id, invoiceNumber: r.invoice_number, clientName: r.client_name, amount, decidedAmount: Number(r.amount), state: r.state, outcome: r.outcome, mode: r.mode };
+    // Approved outside the portal.
+    return { runId: null, invoiceId: id, invoiceNumber: record?.invoiceNumber ?? null, clientName: record?.companyClientName ?? null, amount, state: null, outcome: null, mode: null };
   }));
   return { groupId, code: group.code, status: group.status, invoices };
 }
 
 const label = (i: BatchInvoice) => i.invoiceNumber ?? 'an invoice approved outside the portal';
 
-/** The batch holds exactly the invoices (and amounts) the person reviewed. */
+/** The batch holds exactly the invoices, at exactly the amounts, the person reviewed. An unknown amount never matches. */
 export function sameBatch(now: { invoiceId: string; amount: number | null }[], reviewed: { invoiceId: string; amount: number | null }[]): boolean {
   if (now.length !== reviewed.length) return false;
   const seen = new Map(reviewed.map((i) => [i.invoiceId, i.amount]));
   return now.every((i) => {
     if (!seen.has(i.invoiceId)) return false;
     const before = seen.get(i.invoiceId);
-    return before == null || i.amount == null || Math.abs(before - i.amount) < 0.005;
+    return before != null && i.amount != null && Math.abs(before - i.amount) < 0.005;
   });
 }
+
+const changedAmount = (i: BatchInvoice) => i.runId != null && i.decidedAmount != null && i.amount != null && Math.abs(i.decidedAmount - i.amount) >= 0.005;
 
 /**
  * Funds the FactorCloud batch an approved invoice is in. FactorCloud pays the whole batch, so this
@@ -223,6 +235,23 @@ async function fund(runId: string, paymentType: string | null, auto: boolean, us
       : `Not funded: FactorCloud didn't say whether ${name} is still unfunded. Check it in FactorCloud.`;
     await update(runId, { detail, invoice_group_id: batch.groupId });
     return { ok: false, detail };
+  }
+  const unread = batch.invoices.filter((i) => i.amount == null);
+  if (unread.length) {
+    const detail = `Not funded: the current amount of ${unread.map(label).join(', ')} couldn't be read from FactorCloud. Try again in a moment.`;
+    await update(runId, { detail, invoice_group_id: batch.groupId });
+    return { ok: false, detail };
+  }
+  // An amount edited in FactorCloud after the rules ran: record it, and leave the new figure for a person to confirm.
+  // Caps and records then use the amount FactorCloud holds.
+  const changed = batch.invoices.filter(changedAmount);
+  for (const i of changed) await query('update engine_runs set amount=$2, updated_at=now() where id=$1', [i.runId, i.amount]);
+  const confirmed = (i: BatchInvoice) => Boolean(opts.expected?.some((e) => e.invoiceId === i.invoiceId && e.amount != null && Math.abs(e.amount - i.amount!) < 0.005));
+  if (changed.length && (auto || !changed.every(confirmed))) {
+    const what = changed.map((i) => `${label(i)} from ${money(i.decidedAmount!)} to ${money(i.amount!)}`).join(', ');
+    const detail = `Not funded: the amount changed in FactorCloud after the rules ran (${what}). Review the new amount before funding.`;
+    await update(runId, { detail, invoice_group_id: batch.groupId });
+    return { ok: false, detail, batchChanged: true };
   }
   if (opts.expected && !sameBatch(batch.invoices, opts.expected)) {
     const detail = `Not funded: ${name} changed after you reviewed it. It now holds ${batch.invoices.map(label).join(', ')}. Review it again before funding.`;

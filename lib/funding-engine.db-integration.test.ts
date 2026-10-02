@@ -247,6 +247,40 @@ describe.skipIf(!enabled)('funding engine (real SQL, stand-in FactorCloud)', () 
     fc.invoices = fc.invoices.filter((r) => !['PAIR-A', 'PAIR-B'].includes(String(r.invoiceNumber)));
   });
 
+  it('funding reads every amount fresh from FactorCloud: an amount edited after approval stops it until a person confirms the new figure', async () => {
+    await setRules((s) => { s.mode = 'approve'; });
+    const a = await send('EDIT-A', 1000);
+    expect(a.run.state).toBe('APPROVED');
+    const { actOnRun, listRuns, batchFor } = await import('./funding-engine');
+    const reviewedOld = (await batchFor('f1', a.run.factorCloudInvoiceId, a.run.invoiceGroupId)).invoices.map((i) => ({ invoiceId: i.invoiceId, amount: i.amount }));
+    expect(reviewedOld).toEqual([{ invoiceId: a.run.factorCloudInvoiceId, amount: 1000 }]);
+    // Someone edits the invoice in FactorCloud after it was approved.
+    const remote = fc.invoices.find((r) => r.id === a.run.factorCloudInvoiceId)!;
+    remote.invoiceAmount = 2000;
+    const batch = await batchFor('f1', a.run.factorCloudInvoiceId, a.run.invoiceGroupId);
+    expect(batch.invoices[0]).toMatchObject({ amount: 2000, decidedAmount: 1000 });
+    const funds = () => calls.filter((c) => c.path === '/invoice-groups/fund' && c.body.invoiceGroups[0] === a.run.invoiceGroupId).length;
+    // The person's old review no longer matches: not funded, and the new amount is recorded.
+    let out = await actOnRun('f1', a.run.id, 'fund', 's1', 'Admin', { expected: reviewedOld });
+    expect(out).toMatchObject({ ok: false, batchChanged: true });
+    expect(out.detail).toMatch(/from \$1,000\.00 to \$2,000\.00/);
+    expect(funds()).toBe(0);
+    expect((await listRuns('f1', { id: a.run.id }))[0].amount).toBe(2000);
+    // Reviewing again shows $2,000; confirming that figure funds it.
+    out = await actOnRun('f1', a.run.id, 'fund', 's1', 'Admin', { expected: [{ invoiceId: a.run.factorCloudInvoiceId, amount: 2000 }] });
+    expect(out.ok, out.detail).toBe(true);
+    expect(funds()).toBe(1);
+    await setRules((s) => { s.mode = 'fund'; });
+    fc.invoices = fc.invoices.filter((r) => r.invoiceNumber !== 'EDIT-A');
+  });
+
+  it('an amount that can\'t be read is never treated as matching', async () => {
+    const { sameBatch } = await import('./funding-engine');
+    expect(sameBatch([{ invoiceId: 'x', amount: null }], [{ invoiceId: 'x', amount: 1000 }])).toBe(false);
+    expect(sameBatch([{ invoiceId: 'x', amount: 1000 }], [{ invoiceId: 'x', amount: null }])).toBe(false);
+    expect(sameBatch([{ invoiceId: 'x', amount: 1000 }], [{ invoiceId: 'x', amount: 1000 }])).toBe(true);
+  });
+
   it('over the per-invoice cap: held for one click, not approved or funded', async () => {
     const { run } = await send('BIG-1', 6000);
     expect(run).toMatchObject({ outcome: 'HOLD', state: 'SUGGESTED' });

@@ -81,6 +81,7 @@ describe.skipIf(!enabled)('pilot workflows against PostgreSQL',()=>{
       if(init?.method==='PATCH'){fundCalls.push(path);throw Error('connection closed');}
       if(path.endsWith('/invoice-funding'))return new Response(JSON.stringify({invoiceFundings:[{invoiceId:'one',invoiceGroupId:'batch-one'}]}));
       if(path.startsWith('/invoice-groups/'))return new Response(JSON.stringify({invoiceGroup:{id:'batch-one',code:'B1',status:'NOT_FUNDED'}}));
+      if(path==='/invoices/one')return new Response(JSON.stringify({invoice:{id:'one',invoiceNumber:'ONE',invoiceAmount:600,status:'APPROVED'}}));
       return new Response(JSON.stringify({}));});
     vi.stubGlobal('fetch',fetcher);
     expect((await actOnRun('factor','one','fund','admin','Admin',{expected:[{invoiceId:'one',amount:600}]})).ok).toBe(false);
