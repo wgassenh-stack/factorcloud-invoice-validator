@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { actOnDemoRun, demoFundingData, demoFundingSettings, runDemoFundingEngine } from './demo-funding';
 import { addDemoInvoice } from './demo-store';
 
@@ -37,4 +37,29 @@ describe('demo funding engine', () => {
     const failed = demoFundingData('exceptions').runs[0];
     expect(actOnDemoRun(failed.id, 'approve', 'Demo Admin').ok).toBe(true);
   });
+
+  it('has every example whatever the date and time of day, weekends included', async () => {
+    const missing: string[] = [];
+    for (let day = 0; day < 14; day++) for (const hour of [2, 14, 22]) {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(Date.UTC(2026, 9, 1 + day, hour, 37)));
+      vi.resetModules();
+      const g = globalThis as Record<string, unknown>;
+      delete g.__fcDemoState; delete g.__fcDemoFunding;
+      const fresh = await import('./demo-funding');
+      const { runs, summary } = fresh.demoFundingData(null);
+      const held = fresh.demoFundingData('decision').runs;
+      const states = new Set(runs.map((r) => r.state));
+      const reasons = held.flatMap((r) => r.reasons).join(' | ');
+      const gaps = [
+        ...['FUNDED', 'REVIEW', 'SUGGESTED', 'FAILED'].filter((x) => !states.has(x as never)),
+        held.length < 4 && 'four held', !/auto-funding cap/.test(reasons) && 'cap hold', !/Cash reserve is negative/.test(reasons) && 'reserve hold',
+        !/Over the credit limit/.test(reasons) && 'credit hold', (summary?.today?.autoFunded ?? 0) < 5 && 'five auto-funded',
+        runs.find((r) => r.factorCloudClientId === 'demo-client-20')?.state !== 'SUGGESTED' && 'suggest-only',
+      ].filter(Boolean);
+      if (gaps.length) missing.push(`Oct ${1 + day} ${hour}:37 UTC: ${gaps.join(', ')}`);
+      vi.useRealTimers();
+    }
+    expect(missing).toEqual([]);
+  }, 120_000);
 });

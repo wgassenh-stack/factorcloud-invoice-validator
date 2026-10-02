@@ -19,7 +19,7 @@ type ClientDetail = {
     concentrations: { debtorId: string; debtorName: string; amount: number; invoiceCount: number; share: number; level: 'NORMAL' | 'REVIEW' | 'HIGH' }[];
     alerts: { id: string; level: 'INFO' | 'REVIEW' | 'HIGH'; title: string; detail: string }[];
   };
-  position: { openAr: number; openArCount: number; reserveHeld: number; pendingAmount: number; pendingCount: number; aging: number[] };
+  position: { openAr: number; openArCount: number; reserveHeld: number; pendingAmount: number; pendingCount: number; approvedAmount: number; approvedCount: number; creditExposure: number; aging: number[] };
   creditLimit: number | null; creditLimitReadable: boolean; cashReserve: number | null;
   automation: Policy;
   work: { waiting: EngineRun[]; recent: EngineRun[] } | null;
@@ -69,9 +69,9 @@ export default function FactorClientDetailPage() {
       <div className="oc-metrics five">
         <OpsMetric label="Funded, not yet paid" value={opsMoney(p!.openAr)} detail={`${p!.openArCount} invoice${p!.openArCount === 1 ? '' : 's'} out with debtors`} />
         <OpsMetric label="Reserve held" value={opsMoney(p!.reserveHeld)} detail="Returned to the client as debtors pay" />
-        <OpsMetric label="Sent, not yet funded" value={opsMoney(p!.pendingAmount)} detail={`${p!.pendingCount} invoice${p!.pendingCount === 1 ? '' : 's'} in FactorCloud`} />
+        <OpsMetric label="Sent, not yet funded" value={opsMoney(p!.pendingAmount)} detail={`${p!.pendingCount} invoice${p!.pendingCount === 1 ? '' : 's'} in FactorCloud${p!.approvedCount ? `, ${p!.approvedCount} approved (${opsMoney(p!.approvedAmount)})` : ''}`} />
         <OpsMetric label="Needs a person" value={waiting.length} detail={waiting.length ? opsMoney(waitingAmount) + ' waiting' : 'Nothing waiting'} critical={waiting.length > 0} href={waiting.length ? '#waiting' : undefined} />
-        <OpsMetric label="Client credit limit" value={data.creditLimit ? `${Math.round((p!.openAr / data.creditLimit) * 100)}% used` : data.creditLimitReadable ? 'None set' : '—'} detail={data.creditLimit ? `${opsMoney(p!.openAr)} of ${opsMoney(data.creditLimit)}` : data.creditLimitReadable ? 'No client-level limit in FactorCloud' : 'Not available here'} />
+        <OpsMetric label="Client credit limit" value={data.creditLimit ? `${Math.round((p!.creditExposure / data.creditLimit) * 100)}% used` : data.creditLimitReadable ? 'None set' : '—'} detail={data.creditLimit ? `${opsMoney(p!.creditExposure)} funded or approved, of ${opsMoney(data.creditLimit)}` : data.creditLimitReadable ? 'No client-level limit in FactorCloud' : 'Not available here'} />
       </div>
 
       <div className="oc-grid"><div className="oc-stack">
