@@ -244,4 +244,73 @@ describe.skipIf(!enabled)('pilot workflows against PostgreSQL',()=>{
   it('preview uses recorded facts without making FactorCloud calls',async()=>{
     await run('one');await query(`update engine_runs set facts_snapshot=$1::jsonb where id='one'`,[JSON.stringify({invoice:{id:'one',amount:600,clientId:'fc-client',debtorId:'debtor'},paperwork:'REVIEW',debtorCredit:null,clientRecords:[],debtorRecords:[],cashReserve:0,fundedToday:{client:0,factor:0},now:new Date().toISOString()})]);const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);const {POST}=await import('../app/api/ops/rules/preview/route');const r=await POST(new Request('https://portal.test',{method:'POST',body:JSON.stringify({settings:await settings()})}));expect(r.status).toBe(200);expect((await r.json()).results[0].after).toBe('REVIEW');expect(fetcher).not.toHaveBeenCalled();
   });
+  it('reconciling a batch-funding failure settles every invoice in the batch together',async()=>{
+    await run('a1');await run('a2');
+    await query("update engine_runs set invoice_group_id='g1',state='FUNDING',updated_at=now()-interval '10 minutes' where id in ('a1','a2')");
+    await query("insert into funding_reservations(run_id,factor_id,client_id,business_day,amount,status) values('a1','factor','fc-client',current_date,600,'UNKNOWN'),('a2','factor','fc-client',current_date,600,'UNKNOWN')");
+    const {openRecovery,recoveryQueue}=await import('./recovery');
+    await openRecovery({factorId:'factor',runId:'a1',kind:'FUNDING_UNKNOWN',detail:'Timeout funding batch g1'});
+    const queue=await recoveryQueue('factor') as {id:string;kind:string}[];
+    expect(queue.filter((i)=>i.kind==='FUNDING_UNKNOWN')).toHaveLength(1); // one item for the batch, not one per invoice
+    const {POST}=await import('../app/api/ops/recovery/route');
+    const res=await POST(new Request('https://portal.test',{method:'POST',body:JSON.stringify({id:queue[0].id,outcome:'not-funded',evidence:'Checked batch g1 in FactorCloud: status NOT_FUNDED.'})}));
+    expect(res.status).toBe(200);
+    expect((await query<{state:string}>("select id,state from engine_runs where id in ('a1','a2') order by id")).map((r)=>r.state)).toEqual(['APPROVED','APPROVED']);
+    expect((await query<{status:string}>("select status from funding_reservations order by run_id")).map((r)=>r.status)).toEqual(['RELEASED','RELEASED']);
+    expect(await recoveryQueue('factor')).toHaveLength(0);
+  });
+  it('a send that stopped part-way surfaces in Recovery and can be settled',async()=>{
+    const {recoveryQueue}=await import('./recovery');await recoveryQueue('factor'); // provisions send_stage
+    await query(`insert into submissions(id,factor_id,client_id,submitted_by_user_id,invoice_number_submitted,validation_status,idempotency_key,send_stage,updated_at)
+      values('s-unknown','factor','client','driver','INV-9','PASS','k-unknown','SENDING',now()-interval '20 minutes'),
+            ('s-docs','factor','client','driver','INV-10','PASS','k-docs','CREATED',now()-interval '20 minutes'),
+            ('s-recent','factor','client','driver','INV-11','PASS','k-recent','SENDING',now()),
+            ('s-done','factor','client','driver','INV-12','PASS','k-done','COMPLETE',now()-interval '20 minutes'),
+            ('s-legacy','factor','client','driver','INV-13','PASS','k-legacy',null,now()-interval '20 minutes')`);
+    await query("update submissions set factorcloud_invoice_id='fc-10' where id='s-docs'");
+    const queue=await recoveryQueue('factor') as {id:string;kind:string}[];
+    expect(queue.map((i)=>[i.id,i.kind]).sort()).toEqual([['send:s-docs','DOCUMENT_ATTACH'],['send:s-unknown','CREATE_UNKNOWN']]);
+    const {POST}=await import('../app/api/ops/recovery/route');
+    const post=(body:object)=>POST(new Request('https://portal.test',{method:'POST',body:JSON.stringify(body)}));
+    expect((await post({id:'send:s-unknown',outcome:'not-created',evidence:'Searched FactorCloud for INV-9 for this client: no invoice.'})).status).toBe(200);
+    expect((await post({id:'send:s-docs',outcome:'repaired',evidence:'Attached the POD to fc-10 in FactorCloud and checked it.'})).status).toBe(200);
+    expect(await recoveryQueue('factor')).toHaveLength(0);
+    expect((await query("select send_stage from submissions where id='s-docs'"))[0].send_stage).toBe('COMPLETE');
+  });
+  it('a client fix is claimed before uploading: an unconfirmed attach blocks a second upload and goes to Recovery',async()=>{
+    await submission('mine','driver');await query("insert into client_tasks(id,factor_id,client_id,submission_id,message) values('tm','factor','client','mine','Fix')");await login('DRIVER','driver');
+    let attach:'fail'|'ok'='fail';const sentPaths:string[]=[];
+    vi.stubGlobal('fetch',vi.fn(async(input:URL|string)=>{const path=new URL(String(input)).pathname;sentPaths.push(path);
+      if(path==='/documents')return new Response(JSON.stringify({document:{id:'doc-'+sentPaths.length}}));
+      if(path==='/invoices/mine/documents'){if(attach==='fail')throw Error('connection reset');return new Response(JSON.stringify({status:'SUCCESS'}));}
+      return new Response('{}');}));
+    const {POST}=await import('../app/api/tasks/[taskId]/route');
+    const send=()=>{const form=new FormData();form.append('files',new File(['pod'],'pod.pdf',{type:'application/pdf'}));form.append('documentType','pod');return POST(new Request('https://portal.test',{method:'POST',body:form}),{params:Promise.resolve({taskId:'tm'})});};
+    const first=await send();
+    expect(first.status).toBe(502);expect((await first.json()).error).toMatch(/don't need to send them again/);
+    expect((await query<{kind:string}>("select kind from recovery_items where submission_id='mine' and status='OPEN'")).map((r)=>r.kind)).toEqual(['FIX_ATTACH_UNKNOWN']);
+    expect((await query("select status from client_tasks where id='tm'"))[0].status).toBe('OPEN');
+    const uploadsBefore=sentPaths.filter(p=>p==='/documents').length;
+    const second=await send();
+    expect(second.status).toBe(409);expect(sentPaths.filter(p=>p==='/documents').length).toBe(uploadsBefore); // nothing sent again
+    // The factor checks FactorCloud and resolves it; the client can answer again, and it completes.
+    await query("update recovery_items set status='RESOLVED' where submission_id='mine'");attach='ok';
+    const third=await send();
+    expect(third.status).toBe(200);
+    expect((await query("select status from client_tasks where id='tm'"))[0].status).toBe('DONE');
+    expect(await query("select id from recovery_items where submission_id='mine' and status='OPEN'")).toHaveLength(0);
+  });
+  it('a claim left by an interrupted fix upload blocks another upload and appears in Recovery after five minutes',async()=>{
+    await submission('mine','driver');await query("insert into client_tasks(id,factor_id,client_id,submission_id,message) values('tm','factor','client','mine','Fix')");
+    await query("insert into recovery_items(id,factor_id,submission_id,kind,detail,created_at) values('claim','factor','mine','FIX_SENDING','in progress',now())");
+    const {recoveryQueue}=await import('./recovery');
+    expect(await recoveryQueue('factor')).toHaveLength(0); // still in progress, not a problem yet
+    await login('DRIVER','driver');const sent=vi.fn(async()=>new Response('{}'));vi.stubGlobal('fetch',sent);
+    const {POST}=await import('../app/api/tasks/[taskId]/route');
+    const form=new FormData();form.append('files',new File(['pod'],'pod.pdf',{type:'application/pdf'}));
+    expect((await POST(new Request('https://portal.test',{method:'POST',body:form}),{params:Promise.resolve({taskId:'tm'})})).status).toBe(409);
+    expect(sent).not.toHaveBeenCalled();
+    await query("update recovery_items set created_at=now()-interval '6 minutes' where id='claim'");await login();
+    expect((await recoveryQueue('factor') as {kind:string}[]).map((i)=>i.kind)).toEqual(['FIX_SENDING']);
+  });
 });

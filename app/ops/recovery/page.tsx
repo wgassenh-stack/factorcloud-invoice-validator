@@ -171,7 +171,7 @@ function outcomeOptions(item: Item): Array<{ value: string; label: string }> {
 
 function checklist(kind: string): string[] {
   if (kind === 'FUNDING_UNKNOWN') return [
-    'Open the matching funding batch in FactorCloud.',
+    'Open the matching funding batch in FactorCloud. The answer applies to every portal invoice in that batch.',
     'Confirm whether the funding transaction actually completed.',
     'Record a concrete batch, transaction, or ledger reference for the audit trail.',
   ];
@@ -184,6 +184,11 @@ function checklist(kind: string): string[] {
     'Search FactorCloud using the client and invoice number shown on this submission.',
     'If the invoice exists, verify the exact FactorCloud invoice ID before linking it.',
     'If it does not exist, confirm that carefully before releasing the submission for retry.',
+  ];
+  if (kind.startsWith('FIX_')) return [
+    'Open the invoice in FactorCloud and check which of the client\'s new documents are attached.',
+    'Attach anything missing, and remove a duplicate if the files went in twice.',
+    'Once resolved, the client can send files for this request again if they still need to.',
   ];
   return [
     'Open the matching invoice in FactorCloud.',
@@ -202,6 +207,7 @@ function evidencePlaceholder(kind: string): string {
 function kindLabel(kind: string): string {
   if (kind === 'FUNDING_UNKNOWN') return 'Funding uncertain';
   if (kind === 'APPROVAL_UNKNOWN') return 'Approval uncertain';
+  if (kind.startsWith('FIX_')) return 'Client fix upload';
   if (kind.includes('DOCUMENT')) return 'Document repair';
   if (kind.includes('CREATE')) return 'Invoice create uncertain';
   return kind.replaceAll('_', ' ').toLowerCase();

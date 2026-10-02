@@ -18,7 +18,7 @@ import { applyCreditCheck, CREDIT_CHECK_ID, withoutCreditCheck } from '@/lib/cre
 import { loadDebtorCredit } from '@/lib/debtor-credit';
 import { demoInvoice, recordDemoSubmission } from '@/lib/demo-store';
 import { runDemoFundingEngine } from '@/lib/demo-funding';
-import { persistSubmissionStart, markSubmissionFactorCloudResult, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
+import { persistSubmissionStart, markSubmissionFactorCloudResult, markSubmissionSent, recordSubmissionAudit, type StoredSubmission } from '@/lib/submission-store';
 import { hashFile, verifyAnalysisReceipt } from '@/lib/submission-integrity';
 import type { CheckResult, CreateResponse, CreateStep, ValidationReport } from '@/lib/types';
 import { demoClientView, demoRequest } from '@/lib/demo-request';
@@ -227,6 +227,9 @@ export async function POST(req: Request) {
       return respond(false, `Invoice ${invoiceId} was created and documents uploaded, but attaching them failed. Do not recreate it. Attach the uploaded documents in FactorCloud.`);
     }
   }
+
+  // Sending is complete: from here on a crash leaves nothing for Recovery to chase.
+  try { await markSubmissionSent(storedSubmission, session); } catch (err) { console.error('[create] could not record that sending finished', err); }
 
   // Flagged invoices get the factor's review label so they stand out in FactorCloud's list. Best
   // effort and not shown to the sender: the invoice is created either way.
