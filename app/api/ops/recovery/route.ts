@@ -32,10 +32,14 @@ export async function POST(req:Request) {
     try {
       await db.query('begin');
       let row;
+      let batchRuns:string[]=[];
       if(body.id.startsWith('approval:')) {
         row=(await db.query(`select id as run_id,submission_id,'APPROVAL_UNKNOWN' as kind from engine_runs where id=$1 and factor_id=$2 and approval_status in ('CHECKING','SENDING','UNKNOWN') and approval_started_at<now()-interval '5 minutes' for update`,[body.id.slice(9),session.factorId])).rows[0];
       } else if(body.id.startsWith('stale:')) {
         row=(await db.query(`select id as run_id,submission_id,'FUNDING_UNKNOWN' as kind from engine_runs where id=$1 and factor_id=$2 and state='FUNDING' and updated_at<now()-interval '5 minutes' for update`,[body.id.slice(6),session.factorId])).rows[0];
+      } else if(body.id.startsWith('send:')) {
+        row=(await db.query(`select id as submission_id,null as run_id,case when factorcloud_invoice_id is null then 'CREATE_UNKNOWN' else 'DOCUMENT_ATTACH' end as kind from submissions
+          where id=$1 and factor_id=$2 and send_stage in ('SENDING','CREATED') and idempotency_released_at is null and updated_at<now()-interval '10 minutes' for update`,[body.id.slice(5),session.factorId])).rows[0];
       } else row=(await db.query("select * from recovery_items where id=$1 and factor_id=$2 and status='OPEN' for update",[body.id,session.factorId])).rows[0];
       if(!row) {await db.query('rollback');return NextResponse.json({error:'Open item not found.'},{status:404});}
       if(row.kind==='CREATE_UNKNOWN') {
@@ -64,14 +68,23 @@ export async function POST(req:Request) {
         if(!changed.rowCount) throw new Error('Approval state changed. Refresh and inspect it again.');
       } else if(row.kind==='FUNDING_UNKNOWN') {
         if(!['funded','not-funded'].includes(body.outcome)) {await db.query('rollback');return NextResponse.json({error:'Confirm whether the funding batch was funded or not funded.'},{status:400});}
-        const changed=await db.query(`update engine_runs set state=$3,detail=$4,updated_at=now(),funded_at=case when $3='FUNDED' then now() else funded_at end,
-          auto_funded=case when $3='FUNDED' then exists(select 1 from funding_reservations where run_id=$1) else auto_funded end
-          where id=$1 and factor_id=$2 and state='FUNDING' returning id`,[row.run_id,session.factorId,body.outcome==='funded'?'FUNDED':'APPROVED',body.evidence]);
+        // FactorCloud funds whole batches, so the answer holds for every portal invoice in this one.
+        const changed=await db.query(`update engine_runs e set state=$3,detail=$4,updated_at=now(),funded_at=case when $3='FUNDED' then now() else e.funded_at end,
+          auto_funded=case when $3='FUNDED' then exists(select 1 from funding_reservations f where f.run_id=e.id) else e.auto_funded end
+          from engine_runs owner
+          where owner.id=$1 and owner.factor_id=$2 and e.factor_id=$2 and e.state='FUNDING'
+            and (e.id=owner.id or (owner.invoice_group_id is not null and e.invoice_group_id=owner.invoice_group_id))
+          returning e.id`,[row.run_id,session.factorId,body.outcome==='funded'?'FUNDED':'APPROVED',body.evidence]);
         if(!changed.rowCount) throw new Error('Funding state changed. Refresh and inspect it again.');
-        await db.query('update funding_reservations set status=$2 where run_id=$1',[row.run_id,body.outcome==='funded'?'CONFIRMED':'RELEASED']);
+        batchRuns=changed.rows.map((r:{id:string})=>r.id);
+        await db.query('update funding_reservations set status=$2 where run_id = any($1::text[])',[batchRuns,body.outcome==='funded'?'CONFIRMED':'RELEASED']);
       } else if(body.outcome!=='repaired') {await db.query('rollback');return NextResponse.json({error:'This item requires a repair confirmation.'},{status:400});}
-      await db.query("update recovery_items set status='RESOLVED',resolution=$3,resolved_by=$4,resolved_at=now() where factor_id=$1 and kind=$6 and status='OPEN' and (id=$2 or run_id=$5 or (submission_id=$7 and $6='CREATE_UNKNOWN'))",[session.factorId,body.id,body.evidence,session.userId,row.run_id??null,row.kind,row.submission_id??null]);
-      await db.query(`insert into audit_events(id,factor_id,submission_id,actor_user_id,event_type,event_data) values($1,$2,$3,$4,'RECOVERY_RECONCILED',$5::jsonb)`,[`audit_${randomUUID()}`,session.factorId,row.submission_id,session.userId,JSON.stringify({item:body.id,outcome:body.outcome,evidence:body.evidence,invoiceId:linkedInvoice?.id,invoiceGroupId:body.invoiceGroupId,paymentType:body.paymentType})]);
+      else if(row.submission_id && ['DOCUMENT_ATTACH','DOCUMENT_UPLOAD'].includes(row.kind)) {
+        // The documents were checked and repaired in FactorCloud: sending this submission is finished.
+        await db.query("update submissions set send_stage='COMPLETE',updated_at=now() where id=$1 and factor_id=$2 and send_stage is not null",[row.submission_id,session.factorId]);
+      }
+      await db.query("update recovery_items set status='RESOLVED',resolution=$3,resolved_by=$4,resolved_at=now() where factor_id=$1 and kind=$6 and status='OPEN' and (id=$2 or run_id = any($5::text[]) or (submission_id=$7 and $6='CREATE_UNKNOWN'))",[session.factorId,body.id,body.evidence,session.userId,batchRuns.length?batchRuns:[row.run_id??''],row.kind,row.submission_id??null]);
+      await db.query(`insert into audit_events(id,factor_id,submission_id,actor_user_id,event_type,event_data) values($1,$2,$3,$4,'RECOVERY_RECONCILED',$5::jsonb)`,[`audit_${randomUUID()}`,session.factorId,row.submission_id,session.userId,JSON.stringify({item:body.id,outcome:body.outcome,evidence:body.evidence,runs:batchRuns.length?batchRuns:undefined,invoiceId:linkedInvoice?.id,invoiceGroupId:body.invoiceGroupId,paymentType:body.paymentType})]);
       await db.query('commit'); return NextResponse.json({ok:true});
     } catch(err) {await db.query('rollback');throw err;} finally {db.release();}
   } catch(err) {return apiErrorResponse(err,'recovery');}

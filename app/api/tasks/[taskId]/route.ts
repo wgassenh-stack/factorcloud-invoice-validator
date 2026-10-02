@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { apiErrorResponse, publicErrorMessage } from '@/lib/api-errors';
+import { isDefinitiveCreateFailure } from '@/lib/errors';
 import { clientTask } from '@/lib/client-tasks';
 import { pool } from '@/lib/db';
 import { demoRequest } from '@/lib/demo-request';
@@ -44,13 +45,53 @@ export async function POST(req: Request, context: { params: Promise<{ taskId: st
   if (!task || task.status !== 'OPEN') return NextResponse.json({ error: 'This request is no longer open.' }, { status: 404 });
   if (!task.invoiceId) return NextResponse.json({ error: 'This submission has no FactorCloud invoice to attach files to. Contact your factor.' }, { status: 409 });
 
-  // Upload and attach first: if FactorCloud refuses, nothing is marked done and the client can retry.
+  // Claim the request before anything reaches FactorCloud, so two answers sent at once can't both
+  // upload. The claim is a recovery item: if this process dies mid-way, it stays behind and the factor
+  // sees it in Recovery after a few minutes instead of the client uploading the same files again.
+  const claimId = `rec_${randomUUID()}`;
+  {
+    const db = await pool().connect();
+    try {
+      await db.query('begin');
+      const { rows: [open] } = await db.query(`select id from client_tasks where id=$1 and status='OPEN' for update`, [taskId]);
+      if (!open) { await db.query('rollback'); return NextResponse.json({ error: 'This request was already answered.' }, { status: 409 }); }
+      const { rows: [busy] } = await db.query(`select kind from recovery_items where submission_id=$1 and status='OPEN' and kind in ('FIX_SENDING','FIX_ATTACH_UNKNOWN')`, [task.submissionId]);
+      if (busy) {
+        await db.query('rollback');
+        return NextResponse.json({ error: busy.kind === 'FIX_SENDING' ? 'Your files for this request are already being sent. Wait a moment and refresh.' : 'Your factor is checking whether your earlier files reached FactorCloud. You don\'t need to send them again.' }, { status: 409 });
+      }
+      await db.query(`insert into recovery_items(id,factor_id,submission_id,kind,detail) values($1,$2,$3,'FIX_SENDING',$4)`,
+        [claimId, session.factorId, task.submissionId, `A client's fix for invoice ${task.invoiceId} was being sent (${files.map((f) => f.name).join(', ')}) and did not finish. Check the invoice's documents in FactorCloud.`]);
+      await db.query('commit');
+    } catch (err) {
+      await db.query('rollback');
+      return apiErrorResponse(err, 'client-task-fix');
+    } finally {
+      db.release();
+    }
+  }
+  const settle = (kind: 'FIX_ATTACH_UNKNOWN' | null, detail?: string) => (kind
+    ? pool().query(`update recovery_items set kind=$2, detail=$3 where id=$1`, [claimId, kind, detail])
+    : pool().query(`delete from recovery_items where id=$1 and kind='FIX_SENDING'`, [claimId])).catch((err) => console.error('[client-task-fix] could not update the claim', err));
+
   const documentIds: string[] = [];
   try {
     for (const file of files) documentIds.push((await uploadDocument(clientId, file, documentType)).id);
+  } catch (err) {
+    // Nothing was attached to the invoice, so the client can safely try again.
+    await settle(null);
+    return NextResponse.json({ error: `FactorCloud did not accept the files: ${publicErrorMessage(err, 'client-task-fix')} Nothing was marked as fixed; you can try again.` }, { status: 502 });
+  }
+  try {
     await addDocumentsToInvoice(task.invoiceId, documentIds);
   } catch (err) {
-    return NextResponse.json({ error: `FactorCloud did not accept the files: ${publicErrorMessage(err, 'client-task-fix')} Nothing was marked as fixed; you can try again.` }, { status: 502 });
+    if (isDefinitiveCreateFailure(err)) {
+      await settle(null);
+      return NextResponse.json({ error: `FactorCloud did not accept the files: ${publicErrorMessage(err, 'client-task-fix')} Nothing was marked as fixed; you can try again.` }, { status: 502 });
+    }
+    // No clear answer: the files may be attached. Sending them again could duplicate them.
+    await settle('FIX_ATTACH_UNKNOWN', `A client's fix for invoice ${task.invoiceId}: FactorCloud didn't confirm attaching documents ${documentIds.join(', ')}. Check the invoice's documents in FactorCloud.`);
+    return NextResponse.json({ error: 'FactorCloud didn\'t confirm it received your files. Your factor will check, so you don\'t need to send them again.' }, { status: 502 });
   }
 
   const hashes = await Promise.all(files.map((file) => hashFile(file)));
@@ -73,6 +114,7 @@ export async function POST(req: Request, context: { params: Promise<{ taskId: st
       `, [`file_${randomUUID()}`, task.submissionId, file.name, Number(next) + i, hashes[i], documentType.toLowerCase(), file.size]);
     }
     await db.query(`update submissions set updated_at=now() where id=$1`, [task.submissionId]);
+    await db.query(`delete from recovery_items where id=$1`, [claimId]);
     await db.query(`
       insert into audit_events (id, factor_id, client_id, submission_id, actor_user_id, event_type, event_data)
       values ($1,$2,$3,$4,$5,'FIX_SUBMITTED',$6::jsonb)
@@ -80,7 +122,10 @@ export async function POST(req: Request, context: { params: Promise<{ taskId: st
     await db.query('commit');
   } catch (err) {
     await db.query('rollback');
-    return apiErrorResponse(err, 'client-task-fix', 500, { documentIds });
+    // The files are attached in FactorCloud; only the portal's record failed. Leave it for the factor.
+    await settle('FIX_ATTACH_UNKNOWN', `A client's fix for invoice ${task.invoiceId}: documents ${documentIds.join(', ')} were attached in FactorCloud, but the portal could not record it. Mark the request answered.`);
+    console.error('[client-task-fix] recording failed after attaching', err);
+    return NextResponse.json({ error: 'Your files reached FactorCloud. Your factor will confirm, so you don\'t need to send them again.', documentIds }, { status: 500 });
   } finally {
     db.release();
   }
