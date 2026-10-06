@@ -2,7 +2,7 @@ import 'server-only';
 
 import { createHash, randomUUID } from 'crypto';
 import { pool } from './db';
-import { ensureSecuritySchema } from './schema';
+import { ensureSecuritySchema, ensureSendStageSchema } from './schema';
 import { PublicError } from './errors';
 import { normalizeIdentifier } from './normalize';
 import { portalClientRecord } from './portal-auth';
@@ -52,6 +52,7 @@ export async function persistSubmissionStart(args: {
     .digest('hex');
   const original = args.receipt.documents[args.receipt.primaryIndex].fields;
   const workflowStatus = args.validation.status === 'REVIEW' ? 'REVIEW_REQUIRED' : 'SUBMITTED';
+  await ensureSendStageSchema();
   const client = await pool().connect();
 
   try {
@@ -61,8 +62,8 @@ export async function persistSubmissionStart(args: {
         id, factor_id, client_id, submitted_by_user_id, invoice_number_original, invoice_number_submitted,
         reference_number_original, reference_number_submitted, debtor_factorcloud_id,
         invoice_amount_original, invoice_amount_submitted, invoice_date_original, invoice_date_submitted,
-        validation_status, workflow_status, analysis_receipt, idempotency_key
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        validation_status, workflow_status, analysis_receipt, idempotency_key, send_stage
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'SENDING')
     `, [
       submissionId,
       args.session.factorId,
@@ -181,6 +182,7 @@ export async function markSubmissionFactorCloudResult(args: {
     const { rows: [updated] } = await db.query(`
       update submissions
       set factorcloud_invoice_id=coalesce(factorcloud_invoice_id,$1), workflow_status=$2, updated_at=now(),
+        send_stage = case when $1::text is not null then 'CREATED' when $4 then 'FAILED' else send_stage end,
         idempotency_key = case when $4 and factorcloud_invoice_id is null and idempotency_released_at is null then idempotency_key || $5 || id else idempotency_key end,
         idempotency_released_at = case when $4 and factorcloud_invoice_id is null then coalesce(idempotency_released_at,now()) else idempotency_released_at end
       where id=$3 and factor_id=$6
@@ -197,6 +199,12 @@ export async function markSubmissionFactorCloudResult(args: {
     });
     await db.query('commit');
   } catch (err) { await db.query('rollback'); throw err; } finally { db.release(); }
+}
+
+/** Sending finished: the invoice exists and its documents are attached (or there were none). */
+export async function markSubmissionSent(submission: StoredSubmission | null, session: PortalSession | null): Promise<void> {
+  if (!submission || !session || !databaseAuthEnabled()) return;
+  await pool().query(`update submissions set send_stage='COMPLETE', updated_at=now() where id=$1 and factor_id=$2`, [submission.id, session.factorId]);
 }
 
 export async function recordSubmissionAudit(args: {

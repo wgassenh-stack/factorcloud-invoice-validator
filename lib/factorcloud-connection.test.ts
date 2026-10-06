@@ -100,3 +100,13 @@ describe('self-provisioned CLOSED state', () => {
     for (const statement of CLOSED_STATE_STATEMENTS) expect(migration).toContain(`${squash(statement)};`);
   });
 });
+
+describe('self-provisioned submission send stage', () => {
+  it('matches database/010_submission_send_stage.sql', async () => {
+    const { readFileSync } = await import('fs');
+    const { SEND_STAGE_STATEMENTS } = await import('./schema');
+    const squash = (sql: string) => sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+    const migration = squash(readFileSync(new URL('../database/010_submission_send_stage.sql', import.meta.url), 'utf8'));
+    for (const statement of SEND_STAGE_STATEMENTS) expect(migration).toContain(`${squash(statement)};`);
+  });
+});

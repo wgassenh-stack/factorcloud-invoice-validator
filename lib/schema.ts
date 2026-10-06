@@ -91,6 +91,11 @@ export const CLOSED_STATE_STATEMENTS = [
   check (state in ('SUGGESTED', 'REVIEW', 'APPROVED', 'FUNDING', 'FUNDED', 'FAILED', 'CLOSED'))`,
 ];
 
+/** database/010_submission_send_stage.sql: how far sending a submission to FactorCloud got. */
+export const SEND_STAGE_STATEMENTS = [
+  `alter table submissions add column if not exists send_stage text`,
+];
+
 // Postgres errors raised when two processes create the same object at the same moment.
 const ALREADY_EXISTS = new Set(['42P07', '42701', '23505']);
 
@@ -120,6 +125,22 @@ export function ensureEngineSchema(): Promise<void> {
     throw err;
   });
   return engineEnsured;
+}
+
+let sendStageEnsured: Promise<void> | null = null;
+
+export function ensureSendStageSchema(): Promise<void> {
+  sendStageEnsured ??= provisionSendStage().catch((err) => {
+    sendStageEnsured = null;
+    throw err;
+  });
+  return sendStageEnsured;
+}
+
+async function provisionSendStage(): Promise<void> {
+  const [state] = await query<{ ready: boolean }>(`select exists (select 1 from information_schema.columns where table_schema = current_schema() and table_name = 'submissions' and column_name = 'send_stage') as ready`);
+  if (state?.ready) return;
+  await runStatements(SEND_STAGE_STATEMENTS, 'submission stage');
 }
 
 let connectionEnsured: Promise<void> | null = null;
@@ -169,6 +190,7 @@ export function resetSchemaChecks(): void {
   workflowEnsured = null;
   engineEnsured = null;
   connectionEnsured = null;
+  sendStageEnsured = null;
 }
 
 async function provisionWorkflow(): Promise<void> {
